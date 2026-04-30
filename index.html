@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vigil — Global Camera Intelligence</title>
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link href="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
@@ -434,7 +436,8 @@ body {
 #frustumInfo {
   position: fixed;
   bottom: calc(var(--bar-h) + 8px);
-  right: 12px;
+  left: 12px;
+  transition: left 0.25s cubic-bezier(0.4,0,0.2,1);
   z-index: 50;
   background: var(--c-surface);
   border: 1px solid var(--c-border);
@@ -695,6 +698,69 @@ body {
 
 @keyframes imgFade { from { opacity: 0.6; } to { opacity: 1; } }
 #camImage { animation: imgFade 0.25s ease; }
+
+  /* Image action buttons (expand / fullscreen) */
+  #imgActions {
+    position: absolute; bottom: 8px; right: 8px; z-index: 6;
+    display: none;
+    gap: 5px;
+    flex-direction: row;
+  }
+  #camImageWrap:hover #imgActions { display: flex; }
+  #imgActions button {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px;
+    background: rgba(0,0,0,0.55); backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 4px; color: #fff; cursor: pointer;
+    transition: background 0.12s;
+  }
+  #imgActions button:hover { background: rgba(0,0,0,0.8); }
+
+  /* Lightbox overlay */
+  #imgLightbox {
+    display: none;
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,0.82); backdrop-filter: blur(6px);
+    align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  #imgLightbox.open { display: flex; }
+  #imgLightboxInner {
+    position: relative;
+    max-width: 90vw; max-height: 88vh;
+    border-radius: 8px; overflow: hidden;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+    cursor: default;
+    background: #000;
+  }
+  #imgLightboxImg {
+    display: block;
+    max-width: 90vw; max-height: 82vh;
+    object-fit: contain;
+  }
+  #imgLightboxTitle {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    padding: 10px 14px;
+    background: linear-gradient(transparent, rgba(0,0,0,0.7));
+    color: #fff; font-size: 13px; font-weight: 500;
+  }
+  #imgLightboxClose {
+    position: absolute; top: 10px; right: 10px;
+    width: 30px; height: 30px;
+    background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 4px; color: #fff; font-size: 18px; line-height: 30px;
+    text-align: center; cursor: pointer;
+  }
+  #imgLightboxClose:hover { background: rgba(0,0,0,0.85); }
+  #imgLightboxFullscreen {
+    position: absolute; top: 10px; right: 48px;
+    width: 30px; height: 30px;
+    background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 4px; color: #fff; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #imgLightboxFullscreen:hover { background: rgba(0,0,0,0.85); }
   #searchResults {
     position: fixed; top: calc(var(--top-h) + 8px); left: 50%;
     transform: translateX(-50%); z-index: 200; width: 340px;
@@ -716,6 +782,51 @@ body {
   .sr-name { font-size: 13px; font-weight: 500; color: var(--c-text); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sr-meta { font-size: 11px; font-family: var(--mono); color: var(--c-text3); display: flex; align-items: center; gap: 6px; }
   .sr-dir { background: var(--c-accent-bg); color: var(--c-accent); border-radius: 3px; padding: 1px 5px; font-size: 10px; font-weight: 600; }
+
+  /* ─── MINIMAP ─── */
+  #minimap-wrap {
+    position: fixed;
+    bottom: calc(var(--bar-h) + 10px);
+    right: 12px;
+    z-index: 50;
+    width: 220px;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius);
+    box-shadow: var(--c-shadow-md);
+    overflow: hidden;
+    display: none;
+    transition: width 0.2s ease, height 0.2s ease;
+  }
+  #minimap-wrap.expanded { width: 380px; }
+  #minimap-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--c-border);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--c-text3);
+    background: var(--c-surface);
+    user-select: none;
+  }
+  #minimap-header-left { display: flex; align-items: center; gap: 6px; cursor: pointer; flex: 1; }
+  #minimap-toggle-icon { font-size: 11px; color: var(--c-text3); }
+  #minimap-btn-expand {
+    background: none; border: none; cursor: pointer;
+    color: var(--c-text3); padding: 2px 4px; border-radius: 3px;
+    font-size: 13px; line-height: 1; display: flex; align-items: center;
+    transition: color 0.12s, background 0.12s;
+  }
+  #minimap-btn-expand:hover { color: var(--c-text); background: var(--c-surface2); }
+  #minimap { height: 160px; width: 100%; transition: height 0.2s ease; }
+  #minimap-wrap.expanded #minimap { height: 280px; }
+  /* Hide Leaflet controls */
+  #minimap .leaflet-control-attribution { display: none; }
+  #minimap .leaflet-control-zoom { display: none; }
 </style>
 </head>
 <body>
@@ -874,8 +985,35 @@ body {
         </svg>
         No feed available
       </div>
+      <!-- Image action buttons -->
+      <div id="imgActions">
+        <button id="btnExpand" title="Open in large window" onclick="openImageExpanded()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+          </svg>
+        </button>
+        <button id="btnFullscreen" title="Fullscreen" onclick="openImageFullscreen()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
+          </svg>
+        </button>
+      </div>
     </div>
     <button id="closeSide">×</button>
+
+    <!-- Large image lightbox -->
+    <div id="imgLightbox" onclick="closeLightbox()">
+      <div id="imgLightboxInner" onclick="event.stopPropagation()">
+        <img id="imgLightboxImg" src="" alt="">
+        <div id="imgLightboxTitle"></div>
+        <button id="imgLightboxClose" onclick="closeLightbox()">×</button>
+        <button id="imgLightboxFullscreen" title="Fullscreen" onclick="openImageFullscreen()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
+          </svg>
+        </button>
+      </div>
+    </div>
 
     <div id="camMeta">
       <div id="camTitle">—</div>
@@ -889,6 +1027,22 @@ body {
 
     <div id="camDataRows"></div>
   </div>
+</div>
+
+<!-- ─── MINIMAP ─── -->
+<div id="minimap-wrap">
+  <div id="minimap-header">
+    <div id="minimap-header-left" onclick="toggleMinimapCollapse()">
+      <span id="minimap-toggle-icon">▾</span>
+      <span>Map position</span>
+    </div>
+    <button id="minimap-btn-expand" onclick="toggleMinimapExpand()" title="Expand/shrink map">
+      <svg id="minimap-expand-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+      </svg>
+    </button>
+  </div>
+  <div id="minimap"></div>
 </div>
 
 <!-- ─── STATUS BAR ─── -->
@@ -1396,9 +1550,10 @@ async function selectCamera(cam) {
       easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
     });
   } else {
+    // No direction known — fly straight overhead so the dot is centred on screen
     viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, groundH + 280),
-      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-55), roll: 0 },
+      destination: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, groundH + 180),
+      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
       duration: 1.2,
       easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
     });
@@ -1416,6 +1571,7 @@ async function selectCamera(cam) {
 
   populateSidePanel(cam);
   document.getElementById('sidePanel').classList.add('open');
+  document.getElementById('frustumInfo').style.left = '312px';
 }
 
 function deselect() {
@@ -1430,13 +1586,22 @@ function deselect() {
   selectedCamera = null;
   removeFrustum();
   document.getElementById('sidePanel').classList.remove('open');
+  document.getElementById('frustumInfo').style.left = '12px';
 }
 
 // ==========================================================
 //  SIDE PANEL
 // ==========================================================
 function populateSidePanel(cam) {
-  document.getElementById('camTitle').textContent = cam.location || cam.id;
+  // Strip leading duplicate: "Suburb - Suburb - Rest" → "Suburb - Rest"
+  let title = cam.location || cam.id;
+  if (title.includes(' - ')) {
+    const parts = title.split(' - ');
+    if (parts.length >= 2 && parts[0].trim() === parts[1].trim()) {
+      title = parts.slice(1).join(' - ');
+    }
+  }
+  document.getElementById('camTitle').textContent = title;
   document.getElementById('camDesc').textContent  = cam.description || '';
 
   const badgesEl = document.getElementById('camBadges');
@@ -1444,7 +1609,7 @@ function populateSidePanel(cam) {
 
   const heading = inferHeading(cam);
   if (heading !== null) {
-    badgesEl.innerHTML += `<span class="badge badge-dir">${DIR_NAMES[heading]} · ${heading}°</span>`;
+    badgesEl.innerHTML += `<span class="badge badge-dir" title="Camera facing direction">Facing ${DIR_NAMES[heading]} · ${heading}°</span>`;
   }
   if (cam._source) {
     badgesEl.innerHTML += `<span class="badge badge-src">${cam._source.replace('-cameras.json','').replace('.json','')}</span>`;
@@ -1478,6 +1643,8 @@ function populateSidePanel(cam) {
   const rows = document.getElementById('camDataRows');
   rows.innerHTML = '';
 
+  const feedUrl = cam.imageUrl || cam.videoUrl || null;
+
   const fields = [
     ['Coords',   `${cam.lat.toFixed(5)}, ${cam.lng.toFixed(5)}`, 'accent'],
     cam.country  && ['Country',  cam.country],
@@ -1485,8 +1652,8 @@ function populateSidePanel(cam) {
     cam.city     && ['City',     cam.city],
     cam.county   && ['County',   cam.county],
     cam.road     && ['Road',     cam.road],
-    cam.roadway  && cam.roadway !== cam.road && ['Highway', cam.roadway],
-    cam.postcode && ['Post',     cam.postcode],
+    cam.roadway  && cam.roadway !== cam.road && ['Area',     cam.roadway],
+    cam.postcode && ['Postcode', cam.postcode],
     cam.id       && ['ID',       cam.id],
   ].filter(Boolean);
 
@@ -1497,19 +1664,82 @@ function populateSidePanel(cam) {
     rows.appendChild(div);
   });
 
+  // URL row — clickable link
+  if (feedUrl) {
+    const div = document.createElement('div');
+    div.className = 'dataRow';
+    div.innerHTML = `<span class="dataKey">URL</span><span class="dataVal"><a href="${feedUrl}" target="_blank" rel="noopener" style="color:var(--c-accent);text-decoration:none;word-break:break-all;font-size:11px;" title="${feedUrl}">${feedUrl.length > 42 ? feedUrl.slice(0,42)+'…' : feedUrl}</a></span>`;
+    rows.appendChild(div);
+  }
+
   setImage(cam.imageUrl);
 }
+
+let currentImageUrl = null;
 
 function setImage(url) {
   const img   = document.getElementById('camImage');
   const noImg = document.getElementById('noImage');
+  currentImageUrl = url || null;
+
   if (!url) { img.style.display = 'none'; noImg.style.display = 'flex'; return; }
   img.style.display   = 'block';
   noImg.style.display = 'none';
   const tmp   = new Image();
   tmp.onload  = () => { img.src = url; };
-  tmp.onerror = () => { img.style.display = 'none'; noImg.style.display = 'flex'; };
+  tmp.onerror = () => { img.style.display = 'none'; noImg.style.display = 'flex'; currentImageUrl = null; };
   tmp.src = url;
+}
+
+function openImageExpanded() {
+  if (!currentImageUrl) return;
+  const lb    = document.getElementById('imgLightbox');
+  const lbImg = document.getElementById('imgLightboxImg');
+  const lbTit = document.getElementById('imgLightboxTitle');
+  lbImg.src   = currentImageUrl;
+  lbTit.textContent = selectedCamera ? (selectedCamera.location || selectedCamera.id) : '';
+  lb.classList.add('open');
+}
+
+function closeLightbox() {
+  document.getElementById('imgLightbox').classList.remove('open');
+}
+
+function openImageFullscreen() {
+  if (!currentImageUrl) return;
+  const title = selectedCamera ? (selectedCamera.location || selectedCamera.id) : 'Camera';
+  const win = window.open('', '_blank');
+  win.document.write(
+    `<!DOCTYPE html><html><head><title>${title}</title>` +
+    `<style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      html, body { width:100%; height:100%; background:#000; overflow:hidden; }
+      img {
+        position: absolute; inset: 0;
+        width: 100%; height: 100%;
+        object-fit: contain;
+      }
+      #lbl {
+        position: fixed; bottom: 0; left: 0; right: 0;
+        padding: 10px 16px;
+        background: linear-gradient(transparent, rgba(0,0,0,0.7));
+        color: #fff; font: 500 14px/1.4 system-ui, sans-serif;
+        pointer-events: none;
+      }
+      #fs {
+        position: fixed; top: 12px; right: 12px;
+        background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2);
+        color: #fff; border-radius: 5px; padding: 6px 12px;
+        font: 13px system-ui; cursor: pointer;
+      }
+    </style></head>` +
+    `<body>
+      <img src="${currentImageUrl}" alt="Camera feed">
+      <div id="lbl">${title}</div>
+      <button id="fs" onclick="document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen()">⛶ Fullscreen</button>
+    </body></html>`
+  );
+  win.document.close();
 }
 
 // ==========================================================
@@ -1527,6 +1757,11 @@ function haversineKm(lat1, lng1, lat2, lng2) {
 
 let searchResultCameras = []; // currently highlighted search results
 let searchMarker = null;      // yellow pin at geocoded location
+let minimapLeaflet  = null;   // Leaflet map instance
+let minimapMarker   = null;   // current position dot
+let minimapCone     = null;   // view direction cone
+let minimapVisible  = true;
+let minimapThrottle = 0;
 
 function clearSearchResults() {
   // Restore all entity visibility
@@ -1731,7 +1966,128 @@ async function initializeMap() {
   if (!viewer) initCesium();
   await createCameraEntities(cameras);
   document.getElementById('progressFill').style.width = '100%';
+
+  // Show and init minimap
+  document.getElementById('minimap-wrap').style.display = 'block';
+  initMinimap();
+  viewer.scene.postRender.addEventListener(updateMinimap);
+
   setTimeout(fitToData, 600);
+}
+
+// ==========================================================
+//  MINIMAP
+// ==========================================================
+function initMinimap() {
+  minimapLeaflet = L.map('minimap', {
+    zoomControl: false,
+    attributionControl: false,
+    dragging: false,
+    touchZoom: false,
+    doubleClickZoom: false,
+    scrollWheelZoom: false,
+    boxZoom: false,
+    keyboard: false,
+  }).setView([20, 0], 2);
+
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+  }).addTo(minimapLeaflet);
+
+  // Current position marker — small blue dot
+  minimapMarker = L.circleMarker([20, 0], {
+    radius: 5,
+    color: '#2563eb',
+    fillColor: '#2563eb',
+    fillOpacity: 1,
+    weight: 2,
+    opacity: 1,
+  }).addTo(minimapLeaflet);
+
+  // View cone polygon (heading + fov wedge projected on 2D map)
+  minimapCone = L.polygon([], {
+    color: '#2563eb',
+    fillColor: '#2563eb',
+    fillOpacity: 0.15,
+    weight: 1.5,
+    opacity: 0.7,
+  }).addTo(minimapLeaflet);
+}
+
+function updateMinimap() {
+  if (!minimapLeaflet || !viewer || !minimapVisible) return;
+
+  const now = Date.now();
+  if (now - minimapThrottle < 250) return;
+  minimapThrottle = now;
+
+  // Get the ground point under the camera centre
+  const centre = new Cesium.Cartesian2(
+    viewer.canvas.clientWidth  / 2,
+    viewer.canvas.clientHeight / 2
+  );
+  const cartesian = viewer.scene.pickPosition(centre)
+    || viewer.camera.pickEllipsoid(centre, viewer.scene.globe.ellipsoid);
+
+  if (!cartesian) return;
+
+  const carto = Cesium.Cartographic.fromCartesian(cartesian);
+  const lat   = Cesium.Math.toDegrees(carto.latitude);
+  const lng   = Cesium.Math.toDegrees(carto.longitude);
+
+  // Auto zoom: map altitude to Leaflet zoom
+  const alt      = viewer.camera.positionCartographic.height;
+  const lzoom    = alt > 5000000 ? 2
+                 : alt > 1000000 ? 4
+                 : alt > 200000  ? 7
+                 : alt > 50000   ? 10
+                 : alt > 10000   ? 12
+                 : 14;
+
+  minimapMarker.setLatLng([lat, lng]);
+  minimapLeaflet.setView([lat, lng], lzoom, { animate: false });
+
+  // Build a view-direction cone from camera heading + altitude
+  const heading = viewer.camera.heading; // radians, CW from North
+  const FOV     = Cesium.Math.toRadians(45); // half-angle of cone display
+  const reach   = Math.max(0.003, Math.min(8, alt / 100000)); // degrees
+
+  const tip = [lat, lng];
+
+  // Left and right edges of cone
+  const leftAngle  = heading - FOV;
+  const rightAngle = heading + FOV;
+
+  const leftLat  = lat + reach * Math.cos(leftAngle);
+  const leftLng  = lng + reach * Math.sin(leftAngle);
+  const rightLat = lat + reach * Math.cos(rightAngle);
+  const rightLng = lng + reach * Math.sin(rightAngle);
+
+  minimapCone.setLatLngs([tip, [leftLat, leftLng], [rightLat, rightLng]]);
+}
+
+let minimapExpanded = false;
+
+function toggleMinimapCollapse() {
+  minimapVisible = !minimapVisible;
+  document.getElementById('minimap').style.display = minimapVisible ? 'block' : 'none';
+  document.getElementById('minimap-toggle-icon').textContent = minimapVisible ? '▾' : '▸';
+  if (minimapVisible && minimapLeaflet) {
+    setTimeout(() => minimapLeaflet.invalidateSize(), 220);
+  }
+}
+
+function toggleMinimapExpand() {
+  minimapExpanded = !minimapExpanded;
+  const wrap = document.getElementById('minimap-wrap');
+  wrap.classList.toggle('expanded', minimapExpanded);
+  // Update icon: shrink arrows when expanded, expand arrows when small
+  document.getElementById('minimap-expand-icon').innerHTML = minimapExpanded
+    ? '<path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/>'
+    : '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>';
+  if (minimapLeaflet) {
+    setTimeout(() => minimapLeaflet.invalidateSize(), 220);
+  }
 }
 
 // ==========================================================
