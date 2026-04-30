@@ -487,35 +487,7 @@ body {
   overflow: hidden;
 }
 
-#camImageWrap {
-  position: relative;
-  flex-shrink: 0;
-  height: 185px;
-  background: var(--c-surface2);
-  overflow: hidden;
-}
-
-#camImage {
-  width: 100%; height: 100%;
-  object-fit: cover;
-}
-
-#camImageOverlay {
-  position: absolute; inset: 0;
-  background: linear-gradient(to bottom, transparent 55%, rgba(0,0,0,0.35) 100%);
-  pointer-events: none;
-}
-
-#noImage {
-  width: 100%; height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: var(--c-text3);
-  font-size: 11px;
-}
+/* camImageWrap removed — feed is now a floating PiP window */
 
 #closeSide {
   position: absolute;
@@ -697,25 +669,113 @@ body {
 #statusRight { margin-left: auto; }
 
 @keyframes imgFade { from { opacity: 0.6; } to { opacity: 1; } }
-#camImage { animation: imgFade 0.25s ease; }
+/* PiP window CSS kept for @keyframes reference */
+@keyframes pipFadeIn { from { opacity:0; transform: scale(0.95); } to { opacity:1; transform: scale(1); } }
 
-  /* Image action buttons (expand / fullscreen) */
-  #imgActions {
-    position: absolute; bottom: 8px; right: 8px; z-index: 6;
+  /* ─── PIP FEED WINDOW ─── */
+  #pip {
+    position: fixed;
+    top: calc(var(--top-h) + 12px);
+    right: 12px;
+    width: 380px;
+    z-index: 300;
+    background: #000;
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.2);
+    overflow: visible; /* must be visible so resize handles aren't clipped */
     display: none;
-    gap: 5px;
-    flex-direction: row;
+    flex-direction: column;
+    animation: pipFadeIn 0.2s ease;
+    border: 1px solid var(--c-border);
+    min-width: 240px;
+    min-height: 160px;
   }
-  #camImageWrap:hover #imgActions { display: flex; }
-  #imgActions button {
+  #pip.pip-visible { display: flex; }
+  /* Inner wrapper clips the visual content so it looks right */
+  #pip-img-wrap, #pip-titlebar, #pip-refresh-bar {
+    border-radius: inherit;
+  }
+  #pip-titlebar { border-radius: 8px 8px 0 0; overflow: hidden; }
+  #pip-refresh-bar { border-radius: 0 0 8px 8px; overflow: hidden; }
+
+  #pip-titlebar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--c-surface);
+    border-bottom: 1px solid var(--c-border);
+    cursor: move;
+    user-select: none;
+    flex-shrink: 0;
+  }
+
+  #pip-title {
+    flex: 1;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--c-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .pip-btn {
     display: flex; align-items: center; justify-content: center;
-    width: 28px; height: 28px;
-    background: rgba(0,0,0,0.55); backdrop-filter: blur(4px);
-    border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 4px; color: #fff; cursor: pointer;
+    width: 24px; height: 24px; border-radius: 4px; border: none;
+    background: none; cursor: pointer; color: var(--c-text3);
+    transition: background 0.12s, color 0.12s; flex-shrink: 0;
+  }
+  .pip-btn:hover { background: var(--c-surface2); color: var(--c-text); }
+
+  #pip-img-wrap {
+    position: relative;
+    background: #111;
+    flex: 1;
+  }
+
+  #pip-img {
+    display: block;
+    width: 100%;
+    height: 100%;   /* fill the wrap — aspect ratio enforced by the container size */
+    object-fit: fill; /* stretch to fill, no letterboxing — we lock AR ourselves */
+  }
+
+  #pip-no-feed {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 8px; color: #555; font-size: 12px;
+    padding: 32px; text-align: center;
+  }
+
+  /* Resize edge handles — sit on #pip which is overflow:visible */
+  .pip-edge {
+    position: absolute;
+    z-index: 310;
+  }
+  .pip-edge-r  { top: 8px; right: -5px; width: 10px; height: calc(100% - 16px); cursor: ew-resize; }
+  .pip-edge-b  { bottom: -5px; left: 8px; width: calc(100% - 16px); height: 10px; cursor: ns-resize; }
+  .pip-edge-rb { bottom: -5px; right: -5px; width: 18px; height: 18px; cursor: se-resize;
+                 background: var(--c-border); border-radius: 0 0 8px 0; opacity: 0.6; }
+  .pip-edge-rb:hover { opacity: 1; background: var(--c-accent); }
+
+  #pip-refresh-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 5px 10px;
+    background: var(--c-surface);
+    border-top: 1px solid var(--c-border);
+    font-size: 11px; font-family: var(--mono); color: var(--c-text3);
+    flex-shrink: 0;
+  }
+
+  #pip-refresh-btn {
+    background: none; border: 1px solid var(--c-border);
+    border-radius: 4px; padding: 2px 8px; font-size: 11px;
+    cursor: pointer; color: var(--c-text2); font-family: var(--mono);
     transition: background 0.12s;
   }
-  #imgActions button:hover { background: rgba(0,0,0,0.8); }
+  #pip-refresh-btn:hover { background: var(--c-surface2); }
+
+
 
   /* Lightbox overlay */
   #imgLightbox {
@@ -975,45 +1035,7 @@ body {
 <!-- ─── SIDE PANEL ─── -->
 <div id="sidePanel">
   <div id="sidePanelInner">
-    <div id="camImageWrap">
-      <img id="camImage" src="" alt="">
-      <div id="camImageOverlay"></div>
-      <div id="noImage" style="display:none">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <rect x="2" y="6" width="20" height="12" rx="2"/>
-          <circle cx="9" cy="12" r="3"/><path d="M21 12h-2"/>
-        </svg>
-        No feed available
-      </div>
-      <!-- Image action buttons -->
-      <div id="imgActions">
-        <button id="btnExpand" title="Open in large window" onclick="openImageExpanded()">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
-          </svg>
-        </button>
-        <button id="btnFullscreen" title="Fullscreen" onclick="openImageFullscreen()">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
-          </svg>
-        </button>
-      </div>
-    </div>
     <button id="closeSide">×</button>
-
-    <!-- Large image lightbox -->
-    <div id="imgLightbox" onclick="closeLightbox()">
-      <div id="imgLightboxInner" onclick="event.stopPropagation()">
-        <img id="imgLightboxImg" src="" alt="">
-        <div id="imgLightboxTitle"></div>
-        <button id="imgLightboxClose" onclick="closeLightbox()">×</button>
-        <button id="imgLightboxFullscreen" title="Fullscreen" onclick="openImageFullscreen()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
-          </svg>
-        </button>
-      </div>
-    </div>
 
     <div id="camMeta">
       <div id="camTitle">—</div>
@@ -1027,6 +1049,41 @@ body {
 
     <div id="camDataRows"></div>
   </div>
+</div>
+
+<!-- ─── PIP FEED WINDOW ─── -->
+<div id="pip">
+  <div id="pip-titlebar">
+    <div id="pip-title">Camera feed</div>
+    <button class="pip-btn" onclick="openImageFullscreen()" title="Open fullscreen">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
+      </svg>
+    </button>
+    <button class="pip-btn" onclick="closePip()" title="Close">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+  </div>
+  <div id="pip-img-wrap">
+    <img id="pip-img" src="" alt="Camera feed">
+    <div id="pip-no-feed" style="display:none">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="2" y="6" width="20" height="12" rx="2"/>
+        <circle cx="9" cy="12" r="3"/><path d="M21 12h-2"/>
+      </svg>
+      No feed available
+    </div>
+  </div>
+  <div id="pip-refresh-bar">
+    <span id="pip-refresh-status">Live feed</span>
+    <button id="pip-refresh-btn" onclick="refreshPipImage()">↻ Refresh</button>
+  </div>
+  <!-- Resize handles on the pip element itself — outside overflow:hidden children -->
+  <div class="pip-edge pip-edge-r"  data-dir="e"></div>
+  <div class="pip-edge pip-edge-b"  data-dir="s"></div>
+  <div class="pip-edge pip-edge-rb" data-dir="se"></div>
 </div>
 
 <!-- ─── MINIMAP ─── -->
@@ -1587,6 +1644,7 @@ function deselect() {
   removeFrustum();
   document.getElementById('sidePanel').classList.remove('open');
   document.getElementById('frustumInfo').style.left = '12px';
+  closePip();
 }
 
 // ==========================================================
@@ -1673,36 +1731,59 @@ function populateSidePanel(cam) {
   }
 
   setImage(cam.imageUrl);
+
+  // Open PiP with this camera's title
+  let pipTitle = cam.location || cam.id;
+  if (pipTitle.includes(' - ')) {
+    const parts = pipTitle.split(' - ');
+    if (parts.length >= 2 && parts[0].trim() === parts[1].trim()) {
+      pipTitle = parts.slice(1).join(' - ');
+    }
+  }
+  openPip(pipTitle);
 }
 
 let currentImageUrl = null;
+let pipRefreshTimer  = null;
 
+// ─── PiP WINDOW ───
 function setImage(url) {
-  const img   = document.getElementById('camImage');
-  const noImg = document.getElementById('noImage');
   currentImageUrl = url || null;
-
-  if (!url) { img.style.display = 'none'; noImg.style.display = 'flex'; return; }
-  img.style.display   = 'block';
-  noImg.style.display = 'none';
-  const tmp   = new Image();
-  tmp.onload  = () => { img.src = url; };
-  tmp.onerror = () => { img.style.display = 'none'; noImg.style.display = 'flex'; currentImageUrl = null; };
-  tmp.src = url;
+  updatePipImage();
 }
 
-function openImageExpanded() {
-  if (!currentImageUrl) return;
-  const lb    = document.getElementById('imgLightbox');
-  const lbImg = document.getElementById('imgLightboxImg');
-  const lbTit = document.getElementById('imgLightboxTitle');
-  lbImg.src   = currentImageUrl;
-  lbTit.textContent = selectedCamera ? (selectedCamera.location || selectedCamera.id) : '';
-  lb.classList.add('open');
+function updatePipImage() {
+  const img    = document.getElementById('pip-img');
+  const noFeed = document.getElementById('pip-no-feed');
+
+  if (!currentImageUrl) {
+    img.style.display    = 'none';
+    noFeed.style.display = 'flex';
+    document.getElementById('pip-refresh-status').textContent = 'No feed';
+    return;
+  }
+  noFeed.style.display = 'none';
+  img.style.display    = 'block';
+  const ts = currentImageUrl.includes('?') ? '&' : '?';
+  img.onload = () => window.onPipImageLoad && window.onPipImageLoad(img);
+  img.src = currentImageUrl + ts + '_t=' + Date.now();
+  document.getElementById('pip-refresh-status').textContent = 'Updated ' + new Date().toLocaleTimeString();
 }
 
-function closeLightbox() {
-  document.getElementById('imgLightbox').classList.remove('open');
+function refreshPipImage() {
+  updatePipImage();
+}
+
+function openPip(title) {
+  const pip = document.getElementById('pip');
+  document.getElementById('pip-title').textContent = title || 'Camera feed';
+  pip.classList.add('pip-visible');
+  updatePipImage();
+}
+
+function closePip() {
+  document.getElementById('pip').classList.remove('pip-visible');
+  clearInterval(pipRefreshTimer);
 }
 
 function openImageFullscreen() {
@@ -1714,33 +1795,115 @@ function openImageFullscreen() {
     `<style>
       * { margin:0; padding:0; box-sizing:border-box; }
       html, body { width:100%; height:100%; background:#000; overflow:hidden; }
-      img {
-        position: absolute; inset: 0;
-        width: 100%; height: 100%;
-        object-fit: contain;
-      }
-      #lbl {
-        position: fixed; bottom: 0; left: 0; right: 0;
-        padding: 10px 16px;
-        background: linear-gradient(transparent, rgba(0,0,0,0.7));
-        color: #fff; font: 500 14px/1.4 system-ui, sans-serif;
-        pointer-events: none;
-      }
-      #fs {
-        position: fixed; top: 12px; right: 12px;
-        background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2);
-        color: #fff; border-radius: 5px; padding: 6px 12px;
-        font: 13px system-ui; cursor: pointer;
-      }
+      img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+      #lbl { position:fixed; bottom:0; left:0; right:0; padding:10px 16px;
+             background:linear-gradient(transparent,rgba(0,0,0,0.7));
+             color:#fff; font:500 14px/1.4 system-ui,sans-serif; pointer-events:none; }
+      #fs  { position:fixed; top:12px; right:12px; background:rgba(0,0,0,0.5);
+             border:1px solid rgba(255,255,255,0.2); color:#fff; border-radius:5px;
+             padding:6px 12px; font:13px system-ui; cursor:pointer; }
     </style></head>` +
-    `<body>
-      <img src="${currentImageUrl}" alt="Camera feed">
+    `<body><img src="${currentImageUrl}" alt="Camera feed">
       <div id="lbl">${title}</div>
       <button id="fs" onclick="document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen()">⛶ Fullscreen</button>
     </body></html>`
   );
   win.document.close();
 }
+
+// ─── PiP DRAG + RESIZE (aspect-ratio locked) ───
+(function () {
+  // Chrome heights: titlebar ~37px + refresh bar ~29px = 66px
+  const CHROME_H = 66;
+  const ABS_MIN_W = 200; // absolute floor in case image is tiny
+
+  let mode = null;
+  let startX, startY, startW, startH, startL, startT;
+  let imgAspect = null; // width / height of the image, set on load
+  let minW = ABS_MIN_W;
+
+  // Called from updatePipImage() after each image load
+  window.onPipImageLoad = function(img) {
+    if (img.naturalWidth && img.naturalHeight) {
+      imgAspect = img.naturalWidth / img.naturalHeight;
+      // Min width = image natural width, capped between 200 and 600
+      minW = Math.min(600, Math.max(ABS_MIN_W, img.naturalWidth));
+      applyAspect(minW);
+    }
+  };
+
+  function applyAspect(w) {
+    if (!imgAspect) return;
+    const pip = document.getElementById('pip');
+    const iw  = document.getElementById('pip-img-wrap');
+    const newW = Math.max(minW, w);
+    const imgH = Math.round(newW / imgAspect);
+    pip.style.width = newW + 'px';
+    // Only clear `right` if the user has already dragged the window
+    // (i.e. an explicit left has been set). Otherwise keep right:12px
+    // so it doesn't snap to left:0 on initial image load.
+    if (pip.style.left && pip.style.left !== '') {
+      pip.style.right = 'auto';
+    }
+    iw.style.height = imgH + 'px';
+    iw.style.flex   = 'none';
+  }
+
+  function onDown(m, e) {
+    if (e.button !== 0) return;
+    mode = m;
+    const r = document.getElementById('pip').getBoundingClientRect();
+    startX = e.clientX; startY = e.clientY;
+    startW = r.width;   startH = r.height;
+    startL = r.left;    startT = r.top;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = m === 'drag' ? 'grabbing' : 'se-resize';
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const pip = document.getElementById('pip');
+
+    // Drag via titlebar
+    document.getElementById('pip-titlebar').addEventListener('mousedown', e => {
+      if (!e.target.closest('button')) onDown('drag', e);
+    });
+
+    // All resize handles do the same thing: scale by width, derive height
+    pip.querySelectorAll('.pip-edge').forEach(el =>
+      el.addEventListener('mousedown', e => onDown('se', e))
+    );
+
+    document.addEventListener('mousemove', e => {
+      if (!mode) return;
+      const dX = e.clientX - startX;
+      const dY = e.clientY - startY;
+
+      if (mode === 'drag') {
+        const p = pip;
+        p.style.left   = (startL + dX) + 'px';
+        p.style.top    = (startT + dY) + 'px';
+        p.style.right  = 'auto';
+        p.style.bottom = 'auto';
+      } else {
+        // Use whichever axis moved more to drive the resize,
+        // then derive the other from the aspect ratio
+        const newW = imgAspect
+          ? Math.max(minW, startW + dX)
+          : Math.max(ABS_MIN_W, startW + dX);
+        applyAspect(newW);
+      }
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!mode) return;
+      mode = null;
+      document.body.style.userSelect = '';
+      document.body.style.cursor     = '';
+    });
+  });
+})();
 
 // ==========================================================
 //  SEARCH
