@@ -1,0 +1,2444 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vigil — Global Camera Intelligence</title>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ─── TOKENS ─── */
+:root {
+  --c-bg:         #f8fafc;
+  --c-surface:    #ffffff;
+  --c-surface2:   #f1f5f9;
+  --c-border:     #e2e8f0;
+  --c-border2:    #cbd5e1;
+  --c-text:       #0f172a;
+  --c-text2:      #475569;
+  --c-text3:      #94a3b8;
+  --c-accent:     #2563eb;
+  --c-accent-bg:  #eff6ff;
+  --c-success:    #16a34a;
+  --c-warn:       #d97706;
+  --c-danger:     #dc2626;
+  --c-shadow:     0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.05);
+  --c-shadow-md:  0 4px 12px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.06);
+  --font:         'Inter', system-ui, sans-serif;
+  --mono:         'IBM Plex Mono', 'Menlo', monospace;
+  --radius:       6px;
+  --top-h:        52px;
+  --bar-h:        28px;
+}
+
+[data-theme="dark"] {
+  --c-bg:         #0f1623;
+  --c-surface:    #1a2133;
+  --c-surface2:   #212d42;
+  --c-border:     #2d3c54;
+  --c-border2:    #3d506e;
+  --c-text:       #e8edf5;
+  --c-text2:      #94a3b8;
+  --c-text3:      #4f6180;
+  --c-accent:     #3b82f6;
+  --c-accent-bg:  rgba(59,130,246,0.12);
+  --c-success:    #22c55e;
+  --c-warn:       #f59e0b;
+  --c-danger:     #f87171;
+  --c-shadow:     0 1px 3px rgba(0,0,0,0.3);
+  --c-shadow-md:  0 4px 12px rgba(0,0,0,0.4);
+}
+
+/* ─── RESET ─── */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.5;
+  background: var(--c-bg);
+  color: var(--c-text);
+  height: 100vh;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── CESIUM ─── */
+#cesiumContainer { width: 100%; height: 100vh; }
+.cesium-widget-credits { display: none !important; }
+.cesium-viewer-toolbar { display: none !important; }
+
+/* ─── UPLOAD SCREEN ─── */
+#uploadOverlay {
+  position: fixed; inset: 0; z-index: 500;
+  background: var(--c-bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+}
+
+.upload-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.upload-wordmark {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+  color: var(--c-text);
+}
+
+.upload-wordmark span {
+  color: var(--c-accent);
+}
+
+.upload-tagline {
+  font-size: 13px;
+  color: var(--c-text2);
+  font-weight: 400;
+}
+
+#dropZone {
+  width: 420px;
+  border: 1.5px dashed var(--c-border2);
+  border-radius: var(--radius);
+  padding: 40px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  cursor: pointer;
+  background: var(--c-surface);
+  transition: border-color 0.15s, background 0.15s;
+  box-shadow: var(--c-shadow);
+}
+
+#dropZone:hover, #dropZone.dragover {
+  border-color: var(--c-accent);
+  background: var(--c-accent-bg);
+}
+
+#dropZone svg { color: var(--c-text3); }
+#dropZone:hover svg, #dropZone.dragover svg { color: var(--c-accent); }
+
+.drop-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--c-text);
+}
+
+.drop-sub {
+  font-size: 12px;
+  color: var(--c-text3);
+}
+
+#fileInput { display: none; }
+
+#progressWrap { width: 420px; display: none; }
+
+#progressBar {
+  height: 3px;
+  background: var(--c-border);
+  border-radius: 99px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+#progressFill {
+  height: 100%;
+  background: var(--c-accent);
+  border-radius: 99px;
+  transition: width 0.2s;
+  width: 0%;
+}
+
+#progressText {
+  font-size: 12px;
+  color: var(--c-text2);
+  font-family: var(--mono);
+  text-align: center;
+}
+
+/* ─── TOP BAR ─── */
+#topBar {
+  position: fixed; top: 0; left: 0; right: 0;
+  height: var(--top-h);
+  z-index: 100;
+  background: var(--c-surface);
+  border-bottom: 1px solid var(--c-border);
+  display: none;
+  align-items: center;
+  padding: 0 16px;
+  gap: 8px;
+  box-shadow: var(--c-shadow);
+}
+
+#logo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--c-text);
+  letter-spacing: -0.2px;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+#logo .logo-dot { color: var(--c-accent); }
+
+#cameraCount {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--c-text2);
+  background: var(--c-surface2);
+  border: 1px solid var(--c-border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.divider {
+  width: 1px;
+  height: 20px;
+  background: var(--c-border);
+  flex-shrink: 0;
+  margin: 0 4px;
+}
+
+#searchWrap {
+  flex: 1;
+  max-width: 280px;
+  position: relative;
+}
+
+#searchWrap svg {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--c-text3);
+}
+
+#searchBox {
+  width: 100%;
+  height: 32px;
+  background: var(--c-surface2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 0 10px 0 30px;
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--c-text);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+#searchBox:focus {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
+  background: var(--c-surface);
+}
+#searchBox::placeholder { color: var(--c-text3); }
+
+.tbtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--c-text2);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  flex-shrink: 0;
+}
+
+.tbtn:hover {
+  background: var(--c-surface2);
+  color: var(--c-text);
+  border-color: var(--c-border);
+}
+
+.tbtn.active {
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
+  border-color: rgba(37,99,235,0.25);
+}
+
+.tbtn-icon {
+  height: 32px;
+  width: 32px;
+  padding: 0;
+  justify-content: center;
+}
+
+/* push fit + settings to right */
+#barRight { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+
+/* ─── SETTINGS PANEL ─── */
+#settingsPanel {
+  position: fixed;
+  top: calc(var(--top-h) + 8px);
+  right: 12px;
+  z-index: 200;
+  width: 300px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  box-shadow: var(--c-shadow-md);
+  padding: 0;
+  display: none;
+  overflow: hidden;
+}
+
+.panel-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--c-border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--c-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-body { padding: 16px; }
+
+.field-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--c-text2);
+  margin-bottom: 5px;
+  letter-spacing: 0.02em;
+}
+
+.field-input {
+  width: 100%;
+  height: 34px;
+  background: var(--c-surface2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 0 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--c-text);
+  outline: none;
+  margin-bottom: 10px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.field-input:focus {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
+}
+
+.field-btn {
+  width: 100%;
+  height: 34px;
+  background: var(--c-accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  margin-bottom: 12px;
+}
+.field-btn:hover { opacity: 0.88; }
+
+#googleStatus {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--c-text2);
+  line-height: 1.6;
+  display: none;
+  margin-bottom: 10px;
+}
+
+.panel-note {
+  font-size: 11px;
+  color: var(--c-text3);
+  line-height: 1.6;
+  border-top: 1px solid var(--c-border);
+  padding-top: 12px;
+}
+
+.panel-note strong { color: var(--c-text2); font-weight: 500; }
+
+/* ─── LEGEND ─── */
+#legend {
+  position: fixed;
+  top: calc(var(--top-h) + 8px);
+  right: 12px;
+  z-index: 150;
+  width: 200px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  box-shadow: var(--c-shadow-md);
+  padding: 0;
+  display: none;
+  overflow: hidden;
+}
+
+.legend-section {
+  padding: 10px 14px;
+}
+
+.legend-section + .legend-section {
+  border-top: 1px solid var(--c-border);
+}
+
+.legend-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-text3);
+  margin-bottom: 8px;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--c-text2);
+  margin-bottom: 5px;
+}
+
+.legend-swatch {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ─── FRUSTUM BADGE ─── */
+#frustumInfo {
+  position: fixed;
+  bottom: calc(var(--bar-h) + 8px);
+  left: 12px;
+  transition: left 0.25s cubic-bezier(0.4,0,0.2,1);
+  z-index: 50;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  display: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--c-text2);
+  line-height: 1.7;
+  box-shadow: var(--c-shadow);
+}
+
+#frustumInfo .frust-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-accent);
+  margin-bottom: 3px;
+}
+
+/* ─── SIDE PANEL ─── */
+#sidePanel {
+  position: fixed;
+  top: var(--top-h);
+  left: 0;
+  bottom: var(--bar-h);
+  z-index: 50;
+  width: 0;
+  overflow: hidden;
+  transition: width 0.25s cubic-bezier(0.4,0,0.2,1);
+  background: var(--c-surface);
+  border-right: 1px solid var(--c-border);
+  box-shadow: var(--c-shadow-md);
+  display: flex;
+  flex-direction: column;
+}
+
+#sidePanel.open { width: 300px; }
+
+#sidePanelInner {
+  width: 300px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* camImageWrap removed — feed is now a floating PiP window */
+
+#closeSide {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  width: 26px; height: 26px;
+  border-radius: 4px;
+  background: rgba(0,0,0,0.4);
+  border: none;
+  color: #fff;
+  font-size: 16px;
+  line-height: 26px;
+  text-align: center;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: background 0.12s;
+}
+#closeSide:hover { background: rgba(0,0,0,0.6); }
+
+#camMeta {
+  padding: 14px 16px 10px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--c-border);
+}
+
+#camTitle {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--c-text);
+  margin-bottom: 4px;
+}
+
+#camDesc {
+  font-size: 11px;
+  color: var(--c-text3);
+  margin-bottom: 8px;
+  font-family: var(--mono);
+}
+
+#camBadges { display: flex; flex-wrap: wrap; gap: 4px; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--mono);
+}
+
+.badge-dir {
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
+}
+
+.badge-src {
+  background: var(--c-surface2);
+  color: var(--c-text2);
+  border: 1px solid var(--c-border);
+}
+
+.badge-type {
+  background: #fff7ed;
+  color: var(--c-warn);
+}
+
+[data-theme="dark"] .badge-type { background: rgba(217,119,6,0.12); }
+
+#viewAngleList {
+  padding: 10px 16px 0;
+  flex-shrink: 0;
+}
+
+#viewAngleList label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--c-text3);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.viewBtn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--c-surface2);
+  border: 1px solid var(--c-border);
+  color: var(--c-text2);
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  margin-bottom: 4px;
+  transition: all 0.12s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.viewBtn:hover { border-color: var(--c-accent); color: var(--c-text); }
+.viewBtn.active { border-color: var(--c-accent); background: var(--c-accent-bg); color: var(--c-accent); }
+
+#camDataRows {
+  padding: 8px 16px 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.dataRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--c-border);
+  font-size: 12px;
+}
+
+.dataRow:last-child { border-bottom: none; }
+
+.dataKey {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--c-text3);
+  width: 56px;
+  flex-shrink: 0;
+  padding-top: 1px;
+  font-family: var(--mono);
+}
+
+.dataVal {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--c-text2);
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.dataVal.accent { color: var(--c-accent); font-weight: 500; }
+
+/* ─── STATUS BAR ─── */
+#statusBar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: var(--bar-h);
+  z-index: 100;
+  background: var(--c-surface);
+  border-top: 1px solid var(--c-border);
+  display: none;
+  align-items: center;
+  padding: 0 14px;
+  gap: 16px;
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--c-text3);
+}
+
+.status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--c-success);
+  flex-shrink: 0;
+}
+
+.status-dot.warn { background: var(--c-warn); }
+
+#statusRight { margin-left: auto; }
+
+@keyframes imgFade { from { opacity: 0.6; } to { opacity: 1; } }
+/* PiP window CSS kept for @keyframes reference */
+@keyframes pipFadeIn { from { opacity:0; transform: scale(0.95); } to { opacity:1; transform: scale(1); } }
+
+  /* ─── PIP FEED WINDOW ─── */
+  #pip {
+    position: fixed;
+    top: calc(var(--top-h) + 12px);
+    right: 12px;
+    width: 380px;
+    z-index: 300;
+    background: #000;
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.2);
+    overflow: visible; /* must be visible so resize handles aren't clipped */
+    display: none;
+    flex-direction: column;
+    animation: pipFadeIn 0.2s ease;
+    border: 1px solid var(--c-border);
+    min-width: 240px;
+    min-height: 160px;
+  }
+  #pip.pip-visible { display: flex; }
+  /* Inner wrapper clips the visual content so it looks right */
+  #pip-img-wrap, #pip-titlebar, #pip-refresh-bar {
+    border-radius: inherit;
+  }
+  #pip-titlebar { border-radius: 8px 8px 0 0; overflow: hidden; }
+  #pip-refresh-bar { border-radius: 0 0 8px 8px; overflow: hidden; }
+
+  #pip-titlebar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--c-surface);
+    border-bottom: 1px solid var(--c-border);
+    cursor: move;
+    user-select: none;
+    flex-shrink: 0;
+  }
+
+  #pip-title {
+    flex: 1;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--c-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .pip-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 4px; border: none;
+    background: none; cursor: pointer; color: var(--c-text3);
+    transition: background 0.12s, color 0.12s; flex-shrink: 0;
+  }
+  .pip-btn:hover { background: var(--c-surface2); color: var(--c-text); }
+
+  #pip-img-wrap {
+    position: relative;
+    background: #111;
+    flex: 1;
+  }
+
+  #pip-img {
+    display: block;
+    width: 100%;
+    height: 100%;   /* fill the wrap — aspect ratio enforced by the container size */
+    object-fit: fill; /* stretch to fill, no letterboxing — we lock AR ourselves */
+  }
+
+  #pip-no-feed {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 8px; color: #555; font-size: 12px;
+    padding: 32px; text-align: center;
+  }
+
+  /* Resize edge handles — sit on #pip which is overflow:visible */
+  .pip-edge {
+    position: absolute;
+    z-index: 310;
+  }
+  .pip-edge-r  { top: 8px; right: -5px; width: 10px; height: calc(100% - 16px); cursor: ew-resize; }
+  .pip-edge-b  { bottom: -5px; left: 8px; width: calc(100% - 16px); height: 10px; cursor: ns-resize; }
+  .pip-edge-rb { bottom: -5px; right: -5px; width: 18px; height: 18px; cursor: se-resize;
+                 background: var(--c-border); border-radius: 0 0 8px 0; opacity: 0.6; }
+  .pip-edge-rb:hover { opacity: 1; background: var(--c-accent); }
+
+  #pip-refresh-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 5px 10px;
+    background: var(--c-surface);
+    border-top: 1px solid var(--c-border);
+    font-size: 11px; font-family: var(--mono); color: var(--c-text3);
+    flex-shrink: 0;
+  }
+
+  #pip-refresh-btn {
+    background: none; border: 1px solid var(--c-border);
+    border-radius: 4px; padding: 2px 8px; font-size: 11px;
+    cursor: pointer; color: var(--c-text2); font-family: var(--mono);
+    transition: background 0.12s;
+  }
+  #pip-refresh-btn:hover { background: var(--c-surface2); }
+
+
+
+  /* Lightbox overlay */
+  #imgLightbox {
+    display: none;
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(0,0,0,0.82); backdrop-filter: blur(6px);
+    align-items: center; justify-content: center;
+    cursor: pointer;
+  }
+  #imgLightbox.open { display: flex; }
+  #imgLightboxInner {
+    position: relative;
+    max-width: 90vw; max-height: 88vh;
+    border-radius: 8px; overflow: hidden;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+    cursor: default;
+    background: #000;
+  }
+  #imgLightboxImg {
+    display: block;
+    max-width: 90vw; max-height: 82vh;
+    object-fit: contain;
+  }
+  #imgLightboxTitle {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    padding: 10px 14px;
+    background: linear-gradient(transparent, rgba(0,0,0,0.7));
+    color: #fff; font-size: 13px; font-weight: 500;
+  }
+  #imgLightboxClose {
+    position: absolute; top: 10px; right: 10px;
+    width: 30px; height: 30px;
+    background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 4px; color: #fff; font-size: 18px; line-height: 30px;
+    text-align: center; cursor: pointer;
+  }
+  #imgLightboxClose:hover { background: rgba(0,0,0,0.85); }
+  #imgLightboxFullscreen {
+    position: absolute; top: 10px; right: 48px;
+    width: 30px; height: 30px;
+    background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 4px; color: #fff; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #imgLightboxFullscreen:hover { background: rgba(0,0,0,0.85); }
+  #searchResults {
+    position: fixed; top: calc(var(--top-h) + 8px); left: 50%;
+    transform: translateX(-50%); z-index: 200; width: 340px;
+    background: var(--c-surface); border: 1px solid var(--c-border);
+    border-radius: var(--radius); box-shadow: var(--c-shadow-md);
+    display: none; overflow: hidden;
+  }
+  .sr-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid var(--c-border);
+    font-size: 12px; font-weight: 600; color: var(--c-text2);
+  }
+  .sr-close { background: none; border: none; cursor: pointer; color: var(--c-text3); font-size: 18px; line-height: 1; }
+  .sr-close:hover { color: var(--c-text); }
+  #searchResultsList { max-height: 360px; overflow-y: auto; }
+  .sr-item { padding: 10px 14px; border-bottom: 1px solid var(--c-border); cursor: pointer; transition: background 0.1s; }
+  .sr-item:last-child { border-bottom: none; }
+  .sr-item:hover { background: var(--c-surface2); }
+  .sr-name { font-size: 13px; font-weight: 500; color: var(--c-text); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sr-meta { font-size: 11px; font-family: var(--mono); color: var(--c-text3); display: flex; align-items: center; gap: 6px; }
+  .sr-dir { background: var(--c-accent-bg); color: var(--c-accent); border-radius: 3px; padding: 1px 5px; font-size: 10px; font-weight: 600; }
+
+  /* ─── MINIMAP ─── */
+  #minimap-wrap {
+    position: fixed;
+    bottom: calc(var(--bar-h) + 10px);
+    right: 12px;
+    z-index: 50;
+    width: 220px;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    border-radius: var(--radius);
+    box-shadow: var(--c-shadow-md);
+    overflow: hidden;
+    display: none;
+    transition: width 0.2s ease, height 0.2s ease;
+  }
+  #minimap-wrap.expanded { width: 380px; }
+  #minimap-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--c-border);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--c-text3);
+    background: var(--c-surface);
+    user-select: none;
+  }
+  #minimap-header-left { display: flex; align-items: center; gap: 6px; cursor: pointer; flex: 1; }
+  #minimap-toggle-icon { font-size: 11px; color: var(--c-text3); }
+  #minimap-btn-expand {
+    background: none; border: none; cursor: pointer;
+    color: var(--c-text3); padding: 2px 4px; border-radius: 3px;
+    font-size: 13px; line-height: 1; display: flex; align-items: center;
+    transition: color 0.12s, background 0.12s;
+  }
+  #minimap-btn-expand:hover { color: var(--c-text); background: var(--c-surface2); }
+  #minimap { height: 160px; width: 100%; transition: height 0.2s ease; }
+  #minimap-wrap.expanded #minimap { height: 280px; }
+  /* Hide Leaflet controls */
+  #minimap .leaflet-control-attribution { display: none; }
+  #minimap .leaflet-control-zoom { display: none; }
+</style>
+</head>
+<body>
+
+<!-- ─── UPLOAD OVERLAY ─── -->
+<div id="uploadOverlay">
+  <div class="upload-brand">
+    <div class="upload-wordmark">Vigil<span class="logo-dot">.</span></div>
+    <div class="upload-tagline">Global camera intelligence platform</div>
+  </div>
+
+  <div id="dropZone">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <div class="drop-title">Drop your camera dataset here</div>
+    <div class="drop-sub">all_cameras.json · or click to browse</div>
+  </div>
+  <input type="file" id="fileInput" accept=".json">
+
+  <div id="progressWrap">
+    <div id="progressBar"><div id="progressFill"></div></div>
+    <div id="progressText">Ready</div>
+  </div>
+</div>
+
+<!-- ─── TOP BAR ─── -->
+<div id="topBar">
+  <div id="logo">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M12 2v2m0 16v2M2 12h2m16 0h2"/>
+      <path d="M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41"/>
+    </svg>
+    Vigil<span class="logo-dot">.</span>
+  </div>
+
+  <div id="cameraCount">0 cameras</div>
+
+  <div class="divider"></div>
+
+  <div id="searchWrap">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.4-4.4"/>
+    </svg>
+    <input type="text" id="searchBox" placeholder="Search location, city, address…">
+  </div>
+
+  <div class="divider"></div>
+
+  <button class="tbtn active" id="btnFrustums">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <path d="M1 3l10 6 10-6M1 3v12l10 6 10-6V3"/>
+    </svg>
+    Field of view
+  </button>
+
+  <button class="tbtn" id="btnLegend">Legend</button>
+
+  <div id="barRight">
+    <button class="tbtn" id="btnFit">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
+      </svg>
+      Fit
+    </button>
+
+
+    <!-- Dark mode toggle -->
+    <button class="tbtn tbtn-icon" id="btnTheme" title="Toggle dark mode">
+      <svg id="iconLight" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="5"/>
+        <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+      </svg>
+      <svg id="iconDark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
+        <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+      </svg>
+    </button>
+
+    <button class="tbtn" id="btnSettings">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+      </svg>
+      3D config
+    </button>
+  </div>
+</div>
+
+<!-- ─── SETTINGS PANEL ─── -->
+<div id="settingsPanel">
+  <div class="panel-header">
+    3D Tiles configuration
+    <button onclick="document.getElementById('settingsPanel').style.display='none';document.getElementById('btnSettings').classList.remove('active');settingsPanelOpen=false;" style="background:none;border:none;cursor:pointer;color:var(--c-text3);font-size:18px;line-height:1;">×</button>
+  </div>
+  <div class="panel-body">
+    <label class="field-label">Cesium ion access token</label>
+    <input class="field-input" id="googleKeyInput" type="password" placeholder="eyJ…">
+    <button class="field-btn" id="applyGoogleKey">Load photorealistic 3D tiles</button>
+    <div id="googleStatus"></div>
+    <div class="panel-note">
+      Loads Google Photorealistic 3D Tiles via Cesium ion Asset 2275207.<br><br>
+      First, add the asset at <strong>ion.cesium.com → Asset Depot</strong> → search <strong>"Google Photorealistic 3D Tiles"</strong> → Add to My Assets.
+    </div>
+  </div>
+</div>
+
+<!-- ─── LEGEND ─── -->
+<div id="legend">
+  <div class="legend-section">
+    <div class="legend-title">Camera direction</div>
+    <div class="legend-row"><div class="legend-swatch" style="background:#4fc3f7"></div>Northbound</div>
+    <div class="legend-row"><div class="legend-swatch" style="background:#f9a825"></div>Eastbound</div>
+    <div class="legend-row"><div class="legend-swatch" style="background:#ef5350"></div>Southbound</div>
+    <div class="legend-row"><div class="legend-swatch" style="background:#66bb6a"></div>Westbound</div>
+    <div class="legend-row"><div class="legend-swatch" style="background:#9e9e9e"></div>Unknown</div>
+  </div>
+  <div class="legend-section">
+    <div class="legend-title">Clusters</div>
+    <div class="legend-row"><div class="legend-swatch" style="background:#1976d2"></div>&lt; 20 cameras</div>
+    <div class="legend-row"><div class="legend-swatch" style="background:#f57c00"></div>&lt; 100 cameras</div>
+    <div class="legend-row"><div class="legend-swatch" style="background:#e53935"></div>100+ cameras</div>
+  </div>
+</div>
+
+<!-- ─── FRUSTUM INFO ─── -->
+<div id="frustumInfo">
+  <div class="frust-label">Field of view</div>
+  <span id="frustumInfoText"></span>
+</div>
+
+<!-- ─── SEARCH RESULTS PANEL ─── -->
+<div id="searchResults">
+  <div class="sr-header">
+    <span>Nearest cameras</span>
+    <button class="sr-close" onclick="document.getElementById('searchBox').value='';clearSearchResults();">×</button>
+  </div>
+  <div id="searchResultsList"></div>
+</div>
+
+<!-- ─── CESIUM MAP ─── -->
+<div id="cesiumContainer"></div>
+
+<!-- ─── SIDE PANEL ─── -->
+<div id="sidePanel">
+  <div id="sidePanelInner">
+    <button id="closeSide">×</button>
+
+    <div id="camMeta">
+      <div id="camTitle">—</div>
+      <div id="camDesc">—</div>
+      <div id="camBadges"></div>
+    </div>
+
+    <div id="viewAngleList" style="display:none">
+      <label>View angles</label>
+    </div>
+
+    <div id="camDataRows"></div>
+  </div>
+</div>
+
+<!-- ─── PIP FEED WINDOW ─── -->
+<div id="pip">
+  <div id="pip-titlebar">
+    <div id="pip-title">Camera feed</div>
+    <button id="pip-toggle-feed" class="pip-btn" onclick="toggleFeedType()" title="Switch between video and image" style="display:none;font-size:11px;font-family:var(--mono);padding:0 6px;width:auto;gap:4px;">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 014-4h14"/>
+        <path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 01-4 4H3"/>
+      </svg>
+      <span id="pip-toggle-label">Image</span>
+    </button>
+    <button class="pip-btn" onclick="openImageFullscreen()" title="Open fullscreen">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
+      </svg>
+    </button>
+    <button class="pip-btn" onclick="closePip()" title="Close">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+    </button>
+  </div>
+  <div id="pip-img-wrap">
+    <img id="pip-img" src="" alt="Camera feed" style="display:none">
+    <video id="pip-video" autoplay muted playsinline controls
+      style="display:none;width:100%;height:100%;object-fit:fill;background:#000"></video>
+    <div id="pip-no-feed" style="display:none">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="2" y="6" width="20" height="12" rx="2"/>
+        <circle cx="9" cy="12" r="3"/><path d="M21 12h-2"/>
+      </svg>
+      No feed available
+    </div>
+  </div>
+  <div id="pip-refresh-bar">
+    <span id="pip-refresh-status">Live feed</span>
+    <button id="pip-refresh-btn" onclick="refreshPipImage()">↻ Refresh</button>
+  </div>
+  <!-- Resize handles on the pip element itself — outside overflow:hidden children -->
+  <div class="pip-edge pip-edge-r"  data-dir="e"></div>
+  <div class="pip-edge pip-edge-b"  data-dir="s"></div>
+  <div class="pip-edge pip-edge-rb" data-dir="se"></div>
+</div>
+
+<!-- ─── MINIMAP ─── -->
+<div id="minimap-wrap">
+  <div id="minimap-header">
+    <div id="minimap-header-left" onclick="toggleMinimapCollapse()">
+      <span id="minimap-toggle-icon">▾</span>
+      <span>Map position</span>
+    </div>
+    <button id="minimap-btn-expand" onclick="toggleMinimapExpand()" title="Expand/shrink map">
+      <svg id="minimap-expand-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+      </svg>
+    </button>
+  </div>
+  <div id="minimap"></div>
+</div>
+
+<!-- ─── STATUS BAR ─── -->
+<div id="statusBar">
+  <div class="status-item">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusCameras">Ready</span>
+  </div>
+  <div class="status-item" id="statusFrustum" style="display:none">
+    <div class="status-dot warn"></div>
+    <span id="statusFrustumText">Field of view active</span>
+  </div>
+  <div class="status-item" id="statusRight">
+    <span id="statusPosition">—</span>
+  </div>
+</div>
+
+<script>
+// ==========================================================
+//  STATE
+// ==========================================================
+let cameras = [];
+let cameraMap = new Map(); // id → camera object, for O(1) search lookups
+let viewer = null;
+let dataSource = null;
+let selectedCamera = null;
+let currentFrustumPrimitive = null;
+let frustumsEnabled = true;
+let searchTimer = null;
+let settingsPanelOpen = false;
+let legendOpen = false;
+let google3DEnabled = false;
+let lastOcclusionCheck = 0;
+
+// Frustum parameters
+let frustumFovH = 58;
+let frustumRange = 85;
+let frustumTilt  = 15;
+
+// ==========================================================
+//  DIRECTION INFERENCE
+// ==========================================================
+const DIR_NAMES = {
+  0:'N', 45:'NE', 90:'E', 135:'SE',
+  180:'S', 225:'SW', 270:'W', 315:'NW'
+};
+
+const DIR_COLORS = {
+  0:   '#4fc3f7',
+  45:  '#81d4fa',
+  90:  '#f9a825',
+  135: '#ffd54f',
+  180: '#ef5350',
+  225: '#ff7043',
+  270: '#66bb6a',
+  315: '#a5d6a7',
+};
+
+function inferHeading(cam) {
+  if (typeof cam.heading === 'number' && isFinite(cam.heading)) {
+    return Math.round(cam.heading / 45) * 45 % 360;
+  }
+  if (cam.direction) {
+    const d = cam.direction.toUpperCase().replace(/[^A-Z]/g, '');
+    if (d === 'NORTH'     || d === 'NORTHBOUND')     return 0;
+    if (d === 'NORTHEAST' || d === 'NORTHEASTBOUND') return 45;
+    if (d === 'EAST'      || d === 'EASTBOUND')      return 90;
+    if (d === 'SOUTHEAST' || d === 'SOUTHEASTBOUND') return 135;
+    if (d === 'SOUTH'     || d === 'SOUTHBOUND')     return 180;
+    if (d === 'SOUTHWEST' || d === 'SOUTHWESTBOUND') return 225;
+    if (d === 'WEST'      || d === 'WESTBOUND')      return 270;
+    if (d === 'NORTHWEST' || d === 'NORTHWESTBOUND') return 315;
+  }
+  const t = [
+    cam.description || '',
+    cam.location    || '',
+    cam.angleName   || '',
+    cam.roadway     || '',
+  ].join(' ').toUpperCase();
+
+  if (/\bEB\b/.test(t) || /EASTBOUND/.test(t))  return 90;
+  if (/\bWB\b/.test(t) || /WESTBOUND/.test(t))  return 270;
+  if (/\bNB\b/.test(t) || /NORTHBOUND/.test(t)) return 0;
+  if (/\bSB\b/.test(t) || /SOUTHBOUND/.test(t)) return 180;
+  if (/\bNE\b/.test(t) || /NORTHEAST/.test(t))  return 45;
+  if (/\bNW\b/.test(t) || /NORTHWEST/.test(t))  return 315;
+  if (/\bSE\b/.test(t) || /SOUTHEAST/.test(t))  return 135;
+  if (/\bSW\b/.test(t) || /SOUTHWEST/.test(t))  return 225;
+
+  return null;
+}
+
+function getDirColor(heading) {
+  if (heading === null) return Cesium.Color.fromCssColorString('#9e9e9e');
+  return Cesium.Color.fromCssColorString(DIR_COLORS[heading] || '#90caf9');
+}
+
+// ==========================================================
+//  FRUSTUM WIREFRAME
+// ==========================================================
+async function sampleGroundHeight(lng, lat) {
+  try {
+    const result = await viewer.scene.sampleHeightMostDetailed(
+      [Cesium.Cartographic.fromDegrees(lng, lat)]
+    );
+    if (result && result[0] && isFinite(result[0].height)) return result[0].height;
+  } catch (_) {}
+  try {
+    const pt = Cesium.Cartesian3.fromDegrees(lng, lat, 2000);
+    const result = await viewer.scene.clampToHeightMostDetailed([pt]);
+    if (result && result[0]) return Cesium.Cartographic.fromCartesian(result[0]).height;
+  } catch (_) {}
+  return 0;
+}
+
+function buildFrustumPolylines(lng, lat, groundHeight, heading) {
+  const POLE   = 5.5;
+  const FAR    = frustumRange;
+  const NEAR   = 2;
+  const TILT   = -frustumTilt;
+  const HFOV_H = frustumFovH / 2;
+  const HFOV_V = (frustumFovH / 2) * (9 / 16);
+
+  const origin     = Cesium.Cartesian3.fromDegrees(lng, lat, groundHeight + POLE);
+  const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
+
+  const h = Cesium.Math.toRadians(heading);
+  const p = Cesium.Math.toRadians(TILT);
+
+  const fE = Math.sin(h) * Math.cos(p);
+  const fN = Math.cos(h) * Math.cos(p);
+  const fU = Math.sin(p);
+
+  const rE =  Math.cos(h);
+  const rN = -Math.sin(h);
+
+  const uE = rN * fU;
+  const uN = -rE * fU;
+  const uU = rE * fN - rN * fE;
+  const uLen = Math.sqrt(uE*uE + uN*uN + uU*uU);
+
+  const toWorld = (e, n, u) => {
+    const v = new Cesium.Cartesian3();
+    Cesium.Matrix4.multiplyByPointAsVector(enuToWorld, new Cesium.Cartesian3(e, n, u), v);
+    return Cesium.Cartesian3.normalize(v, v);
+  };
+
+  const fwdW   = toWorld(fE, fN, fU);
+  const rightW = toWorld(rE, rN, 0);
+  const upW    = toWorld(uE/uLen, uN/uLen, uU/uLen);
+
+  const add   = (a, b) => Cesium.Cartesian3.add(a, b, new Cesium.Cartesian3());
+  const scale = (v, s) => Cesium.Cartesian3.multiplyByScalar(v, s, new Cesium.Cartesian3());
+
+  const farHW  = FAR  * Math.tan(Cesium.Math.toRadians(HFOV_H));
+  const farVH  = FAR  * Math.tan(Cesium.Math.toRadians(HFOV_V));
+  const nearHW = NEAR * Math.tan(Cesium.Math.toRadians(HFOV_H));
+  const nearVH = NEAR * Math.tan(Cesium.Math.toRadians(HFOV_V));
+
+  const farC  = add(origin, scale(fwdW, FAR));
+  const nearC = add(origin, scale(fwdW, NEAR));
+
+  const fc = [
+    add(add(farC, scale(rightW, -farHW)), scale(upW,  farVH)),
+    add(add(farC, scale(rightW,  farHW)), scale(upW,  farVH)),
+    add(add(farC, scale(rightW,  farHW)), scale(upW, -farVH)),
+    add(add(farC, scale(rightW, -farHW)), scale(upW, -farVH)),
+  ];
+
+  const nc = [
+    add(add(nearC, scale(rightW, -nearHW)), scale(upW,  nearVH)),
+    add(add(nearC, scale(rightW,  nearHW)), scale(upW,  nearVH)),
+    add(add(nearC, scale(rightW,  nearHW)), scale(upW, -nearVH)),
+    add(add(nearC, scale(rightW, -nearHW)), scale(upW, -nearVH)),
+  ];
+
+  const segs = [
+    [origin, fc[0]], [origin, fc[1]], [origin, fc[2]], [origin, fc[3]],
+    [fc[0], fc[1]], [fc[1], fc[2]], [fc[2], fc[3]], [fc[3], fc[0]],
+    [nc[0], nc[1]], [nc[1], nc[2]], [nc[2], nc[3]], [nc[3], nc[0]],
+  ];
+
+  const col      = Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.92);
+  const fadedCol = Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.06);
+  const coll     = new Cesium.PolylineCollection();
+  segs.forEach(([s, e]) => {
+    coll.add({
+      positions: [s, e],
+      width: 1.5,
+      material: Cesium.Material.fromType('Color', { color: col }),
+      depthFailMaterial: Cesium.Material.fromType('Color', { color: fadedCol }),
+    });
+  });
+  return coll;
+}
+
+async function showFrustum(cam) {
+  removeFrustum();
+  if (!frustumsEnabled) return;
+
+  const heading = inferHeading(cam);
+  if (heading === null) return;
+
+  const groundHeight = await sampleGroundHeight(cam.lng, cam.lat);
+  const coll = buildFrustumPolylines(cam.lng, cam.lat, groundHeight, heading);
+  viewer.scene.primitives.add(coll);
+  currentFrustumPrimitive = coll;
+
+  const fi = document.getElementById('frustumInfo');
+  const ft = document.getElementById('frustumInfoText');
+  fi.style.display = 'block';
+  ft.textContent   = `${DIR_NAMES[heading]} (${heading}°)  ·  58° H × 33° V  ·  85 m range`;
+
+  document.getElementById('statusFrustum').style.display = 'flex';
+  document.getElementById('statusFrustumText').textContent =
+    `FOV: ${DIR_NAMES[heading]} ${heading}°`;
+}
+
+function removeFrustum() {
+  if (currentFrustumPrimitive) {
+    viewer.scene.primitives.remove(currentFrustumPrimitive);
+    currentFrustumPrimitive = null;
+  }
+  document.getElementById('frustumInfo').style.display = 'none';
+  document.getElementById('statusFrustum').style.display = 'none';
+}
+
+
+// ==========================================================
+//  CESIUM INIT
+// ==========================================================
+function initCesium() {
+  Cesium.Ion.defaultAccessToken =
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.' +
+    'eyJqdGkiOiJlYWE1OWUxNy1mMWZiLTQzYjYtYTQ0OS1kMWFjYmFkNjc4OTkiLCJpZCI6NTc3MzMsImlhdCI6MTYyNzg0NTE4Mn0.' +
+    'XcKpgANiY19MC4bdFUXMVEBToBmqS8kuYpUlxJHYZxk';
+
+  viewer = new Cesium.Viewer('cesiumContainer', {
+    imageryProvider: new Cesium.UrlTemplateImageryProvider({
+      url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+      credit: '© OpenStreetMap contributors',
+      maximumLevel: 19,
+    }),
+    terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+    baseLayerPicker: false,
+    navigationHelpButton: false,
+    homeButton: false,
+    geocoder: false,
+    sceneModePicker: false,
+    animation: false,
+    timeline: false,
+    fullscreenButton: false,
+    infoBox: false,
+    selectionIndicator: false,
+    skyAtmosphere: new Cesium.SkyAtmosphere(),
+  });
+
+  viewer.scene.globe.depthTestAgainstTerrain = false;
+
+  const applyImageryStyle = () => {
+    const layer = viewer.imageryLayers.get(0);
+    if (layer) { layer.brightness = 1.0; layer.saturation = 0.85; }
+  };
+  applyImageryStyle();
+  viewer.imageryLayers.layerAdded.addEventListener(applyImageryStyle);
+
+  const handler = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
+  handler.setInputAction(movement => {
+    const cartesian = viewer.camera.pickEllipsoid(movement.endPosition, viewer.scene.globe.ellipsoid);
+    if (cartesian) {
+      const carto = Cesium.Cartographic.fromCartesian(cartesian);
+      const lat = Cesium.Math.toDegrees(carto.latitude).toFixed(4);
+      const lng = Cesium.Math.toDegrees(carto.longitude).toFixed(4);
+      document.getElementById('statusPosition').textContent = `${lat}°, ${lng}°`;
+    }
+  }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+  setupClickHandler();
+
+  viewer.scene.preRender.addEventListener(function () {
+    if (!dataSource) return;
+    const altitude = viewer.camera.positionCartographic.height;
+    if (altitude < 300000) return;
+
+    const now = Date.now();
+    if (now - lastOcclusionCheck < 400) return;
+    lastOcclusionCheck = now;
+
+    const c = viewer.camera.positionWC;
+    const cx = c.x, cy = c.y, cz = c.z;
+
+    const entities = dataSource.entities.values;
+    for (let i = 0; i < entities.length; i++) {
+      const e = entities[i];
+      if (e._searchOff) { e.show = false; continue; }
+      if (!e._bfp)      { e.show = true;  continue; }
+      e.show = (cx * e._bfp.x + cy * e._bfp.y + cz * e._bfp.z) > 0;
+    }
+  });
+
+  return viewer;
+}
+
+// ==========================================================
+//  GOOGLE 3D TILES
+// ==========================================================
+async function enableGoogle3DTiles(ionToken) {
+  const status = document.getElementById('googleStatus');
+  const btn    = document.getElementById('applyGoogleKey');
+
+  const setStatus = (msg, color) => {
+    status.style.display = 'block';
+    status.style.color   = color || 'var(--c-text2)';
+    status.textContent   = msg;
+  };
+
+  setStatus('Authenticating…');
+  Cesium.Ion.defaultAccessToken = ionToken;
+  setStatus('Loading Google Photorealistic 3D Tiles…');
+
+  let tileset;
+  try {
+    if (typeof Cesium.Cesium3DTileset.fromIonAssetId === 'function') {
+      tileset = await Cesium.Cesium3DTileset.fromIonAssetId(2275207, { showCreditsOnScreen: true });
+    } else {
+      tileset = new Cesium.Cesium3DTileset({ url: Cesium.IonResource.fromAssetId(2275207), showCreditsOnScreen: true });
+    }
+  } catch (e) {
+    const msg = e.message || '';
+    const hint = msg.includes('404') || msg.includes('Asset')
+      ? 'Asset 2275207 not found — add it to your account via ion.cesium.com'
+      : msg.includes('401') || msg.includes('403')
+      ? 'Token invalid or expired'
+      : msg;
+    setStatus('Error: ' + hint, 'var(--c-danger)');
+    btn.textContent = 'Retry';
+    return false;
+  }
+
+  viewer.scene.primitives.add(tileset);
+
+  const onReady = () => {
+    viewer.scene.globe.show = false;
+    viewer.imageryLayers.removeAll();
+    google3DEnabled = true;
+    setStatus('Google Photorealistic 3D Tiles active', 'var(--c-success)');
+    btn.textContent = '✓ Active';
+    btn.style.background = 'var(--c-success)';
+  };
+
+  if (tileset.readyPromise) {
+    tileset.readyPromise.then(onReady).catch(e => {
+      viewer.scene.primitives.remove(tileset);
+      setStatus('Tileset failed to load: ' + (e.message || 'unknown error'), 'var(--c-danger)');
+    });
+  } else {
+    onReady();
+  }
+
+  return true;
+}
+
+// ==========================================================
+//  ENTITY CREATION
+// ==========================================================
+async function createCameraEntities(cams) {
+  dataSource = new Cesium.CustomDataSource('cameras');
+
+  dataSource.clustering.enabled          = true;
+  dataSource.clustering.pixelRange       = 28;
+  dataSource.clustering.minimumClusterSize = 4;
+
+  dataSource.clustering.clusterEvent.addEventListener((clustered, cluster) => {
+    const n    = clustered.length;
+    const size = Math.max(14, Math.min(36, 14 + Math.log10(n) * 14));
+
+    cluster.billboard.show = false;
+    cluster.point.show     = true;
+    cluster.point.pixelSize = size;
+    cluster.point.color    = Cesium.Color.fromCssColorString(
+      n > 100 ? '#e53935' : n > 20 ? '#f57c00' : '#1976d2'
+    ).withAlpha(0.9);
+    cluster.point.outlineColor = Cesium.Color.WHITE.withAlpha(0.7);
+    cluster.point.outlineWidth = 1.5;
+    cluster.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+
+    cluster.label.show              = true;
+    cluster.label.text              = n > 9999 ? '9K+' : n.toString();
+    cluster.label.font              = '600 11px Inter, system-ui, sans-serif';
+    cluster.label.fillColor         = Cesium.Color.WHITE;
+    cluster.label.outlineColor      = Cesium.Color.BLACK;
+    cluster.label.outlineWidth      = 2;
+    cluster.label.style             = Cesium.LabelStyle.FILL_AND_OUTLINE;
+    cluster.label.verticalOrigin    = Cesium.VerticalOrigin.CENTER;
+    cluster.label.horizontalOrigin  = Cesium.HorizontalOrigin.CENTER;
+    cluster.label.pixelOffset       = new Cesium.Cartesian2(0, 0);
+    cluster.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+  });
+
+  const CHUNK = 2000;
+  let done    = 0;
+  const total = cams.length;
+
+  for (let i = 0; i < total; i += CHUNK) {
+    const chunk = cams.slice(i, i + CHUNK);
+    chunk.forEach(cam => {
+      if (!cam.lat || !cam.lng) return;
+      const color  = getDirColor(inferHeading(cam));
+      const entity = dataSource.entities.add({
+        id: cam.id,
+        position: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, 0),
+        point: {
+          pixelSize: 7,
+          color,
+          outlineColor: Cesium.Color.WHITE.withAlpha(0.8),
+          outlineWidth: 1,
+          scaleByDistance: new Cesium.NearFarScalar(300, 1.8, 400000, 0.6),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        label: {
+          text: cam.location || cam.id,
+          font: '12px Inter, system-ui, sans-serif',
+          fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.fromCssColorString('#0f172a'),
+          outlineWidth: 3,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          pixelOffset: new Cesium.Cartesian2(0, -10),
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          show: false,
+        },
+      });
+      entity._bfp       = entity.position.getValue(Cesium.JulianDate.now());
+      entity._searchOff = false;
+    });
+
+    done += chunk.length;
+    document.getElementById('statusCameras').textContent =
+      `Loading ${Math.round(done / total * 100)}%…`;
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  viewer.dataSources.add(dataSource);
+  document.getElementById('statusCameras').textContent =
+    `${total.toLocaleString()} cameras`;
+}
+
+// ==========================================================
+//  CLICK HANDLER
+// ==========================================================
+function setupClickHandler() {
+  viewer.screenSpaceEventHandler.setInputAction(click => {
+    const picked = viewer.scene.pick(click.position);
+
+    if (!picked || !picked.id) { deselect(); return; }
+
+    const entity = picked.id;
+    const cam    = cameras.find(c => c.id === entity.id);
+    if (cam) { selectCamera(cam); return; }
+
+    const cartesian = viewer.scene.pickPosition(click.position);
+    if (cartesian) {
+      const height = viewer.camera.positionCartographic.height;
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.add(
+          cartesian,
+          new Cesium.Cartesian3(0, 0, height * 0.1),
+          new Cesium.Cartesian3()
+        ),
+        duration: 0.7,
+      });
+    }
+  }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+}
+
+// ==========================================================
+//  SELECT / DESELECT
+// ==========================================================
+async function selectCamera(cam) {
+  selectedCamera = cam;
+  showFrustum(cam);
+
+  const groundH = await sampleGroundHeight(cam.lng, cam.lat);
+  const heading  = inferHeading(cam);
+
+  if (heading !== null) {
+    const backAngle = (heading + 180) % 360;
+    const hRad      = Cesium.Math.toRadians(backAngle);
+    const camPos    = Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, groundH);
+    const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(camPos);
+
+    const offsetENU  = new Cesium.Cartesian3(Math.sin(hRad) * 90, Math.cos(hRad) * 90, 35);
+    const offsetECEF = Cesium.Matrix4.multiplyByPointAsVector(enuToWorld, offsetENU, new Cesium.Cartesian3());
+    const viewerPos  = Cesium.Cartesian3.add(camPos, offsetECEF, new Cesium.Cartesian3());
+
+    viewer.camera.flyTo({
+      destination: viewerPos,
+      orientation: {
+        heading: Cesium.Math.toRadians(heading),
+        pitch:   Cesium.Math.toRadians(-18),
+        roll: 0,
+      },
+      duration: 1.5,
+      easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
+    });
+  } else {
+    // No direction known — fly straight overhead so the dot is centred on screen
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, groundH + 180),
+      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
+      duration: 1.2,
+      easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
+    });
+  }
+
+  // Lift dot to terrain height so it aligns with frustum apex
+  if (dataSource) {
+    const selEntity = dataSource.entities.getById(cam.id);
+    if (selEntity) {
+      selEntity.position = new Cesium.ConstantPositionProperty(
+        Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, groundH + 2)
+      );
+    }
+  }
+
+  populateSidePanel(cam);
+  document.getElementById('sidePanel').classList.add('open');
+  document.getElementById('frustumInfo').style.left = '312px';
+}
+
+function deselect() {
+  if (selectedCamera && dataSource) {
+    const prev = dataSource.entities.getById(selectedCamera.id);
+    if (prev) {
+      prev.position = new Cesium.ConstantPositionProperty(
+        Cesium.Cartesian3.fromDegrees(selectedCamera.lng, selectedCamera.lat, 0)
+      );
+    }
+  }
+  selectedCamera = null;
+  removeFrustum();
+  document.getElementById('sidePanel').classList.remove('open');
+  document.getElementById('frustumInfo').style.left = '12px';
+  closePip();
+}
+
+// ==========================================================
+//  SIDE PANEL
+// ==========================================================
+function populateSidePanel(cam) {
+  // Strip leading duplicate: "Suburb - Suburb - Rest" → "Suburb - Rest"
+  let title = cam.location || cam.id;
+  if (title.includes(' - ')) {
+    const parts = title.split(' - ');
+    if (parts.length >= 2 && parts[0].trim() === parts[1].trim()) {
+      title = parts.slice(1).join(' - ');
+    }
+  }
+  document.getElementById('camTitle').textContent = title;
+  document.getElementById('camDesc').textContent  = cam.description || '';
+
+  const badgesEl = document.getElementById('camBadges');
+  badgesEl.innerHTML = '';
+
+  const heading = inferHeading(cam);
+  if (heading !== null) {
+    badgesEl.innerHTML += `<span class="badge badge-dir" title="Camera facing direction">Facing ${DIR_NAMES[heading]} · ${heading}°</span>`;
+  }
+  if (cam._source) {
+    badgesEl.innerHTML += `<span class="badge badge-src">${cam._source.replace('-cameras.json','').replace('.json','')}</span>`;
+  }
+  if (cam.feedType) {
+    badgesEl.innerHTML += `<span class="badge badge-type">${cam.feedType}</span>`;
+  }
+
+  const viewList = document.getElementById('viewAngleList');
+  viewList.style.display = 'none';
+  while (viewList.children.length > 1) viewList.removeChild(viewList.lastChild);
+
+  if (cam.hasMultipleViews && cam.views && cam.views.length > 1) {
+    viewList.style.display = 'block';
+    cam.views.forEach((v, i) => {
+      const btn = document.createElement('button');
+      btn.className   = 'viewBtn' + (i === 0 ? ' active' : '');
+      btn.textContent = v.angleName || `View ${i + 1}`;
+      btn.title       = v.angleName || `View ${i + 1}`;
+      btn.onclick     = () => {
+        viewList.querySelectorAll('.viewBtn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        setImage(v.imageUrl);
+        removeFrustum();
+        if (frustumsEnabled) showFrustum({ ...cam, description: v.angleName || cam.description });
+      };
+      viewList.appendChild(btn);
+    });
+  }
+
+  const rows = document.getElementById('camDataRows');
+  rows.innerHTML = '';
+
+  const feedUrl = cam.imageUrl || cam.videoUrl || null;
+
+  const fields = [
+    ['Coords',   `${cam.lat.toFixed(5)}, ${cam.lng.toFixed(5)}`, 'accent'],
+    cam.country  && ['Country',  cam.country],
+    cam.state    && ['State',    cam.state],
+    cam.city     && ['City',     cam.city],
+    cam.county   && ['County',   cam.county],
+    cam.road     && ['Road',     cam.road],
+    cam.roadway  && cam.roadway !== cam.road && ['Area',     cam.roadway],
+    cam.postcode && ['Postcode', cam.postcode],
+    cam.id       && ['ID',       cam.id],
+  ].filter(Boolean);
+
+  fields.forEach(([key, val, cls]) => {
+    const div = document.createElement('div');
+    div.className = 'dataRow';
+    div.innerHTML = `<span class="dataKey">${key}</span><span class="dataVal${cls ? ' '+cls : ''}">${val}</span>`;
+    rows.appendChild(div);
+  });
+
+  // URL row — clickable link
+  if (feedUrl) {
+    const div = document.createElement('div');
+    div.className = 'dataRow';
+    div.innerHTML = `<span class="dataKey">URL</span><span class="dataVal"><a href="${feedUrl}" target="_blank" rel="noopener" style="color:var(--c-accent);text-decoration:none;word-break:break-all;font-size:11px;" title="${feedUrl}">${feedUrl.length > 42 ? feedUrl.slice(0,42)+'…' : feedUrl}</a></span>`;
+    rows.appendChild(div);
+  }
+
+  // Prefer video feed when available, fall back to image
+  setFeed(cam.imageUrl || null, cam.videoUrl || null);
+
+  // Open PiP with this camera's title
+  let pipTitle = cam.location || cam.id;
+  if (pipTitle.includes(' - ')) {
+    const parts = pipTitle.split(' - ');
+    if (parts.length >= 2 && parts[0].trim() === parts[1].trim()) {
+      pipTitle = parts.slice(1).join(' - ');
+    }
+  }
+  openPip(pipTitle);
+}
+
+let currentImageUrl = null;
+let currentVideoUrl  = null;
+let currentFeedType  = null; // 'image' | 'video' | null
+let pipRefreshTimer  = null;
+let hlsInstance      = null;
+
+// ─── PiP WINDOW ───
+function setImage(url) {
+  // Compatibility shim — callers that only pass imageUrl
+  setFeed(url || null, null);
+}
+
+function setFeed(imageUrl, videoUrl) {
+  currentImageUrl = imageUrl || null;
+  currentVideoUrl = videoUrl || null;
+  // Prefer video when available
+  currentFeedType = videoUrl ? 'video' : (imageUrl ? 'image' : null);
+  updatePipFeed();
+  // Show toggle button only when both feeds exist
+  const toggleBtn = document.getElementById('pip-toggle-feed');
+  if (toggleBtn) {
+    const hasBoth = !!(currentImageUrl && currentVideoUrl);
+    toggleBtn.style.display = hasBoth ? 'flex' : 'none';
+    if (hasBoth) updateToggleLabel();
+  }
+}
+
+function toggleFeedType() {
+  if (!currentImageUrl || !currentVideoUrl) return;
+  currentFeedType = currentFeedType === 'video' ? 'image' : 'video';
+  updatePipFeed();
+  updateToggleLabel();
+}
+
+function updateToggleLabel() {
+  const lbl = document.getElementById('pip-toggle-label');
+  if (lbl) lbl.textContent = currentFeedType === 'video' ? 'Image' : 'Video';
+}
+
+function updatePipFeed() {
+  const img    = document.getElementById('pip-img');
+  const video  = document.getElementById('pip-video');
+  const noFeed = document.getElementById('pip-no-feed');
+
+  img.style.display    = 'none';
+  video.style.display  = 'none';
+  noFeed.style.display = 'none';
+
+  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+
+  if (currentFeedType === 'video' && currentVideoUrl) {
+    video.style.display = 'block';
+    document.getElementById('pip-refresh-btn').style.display = 'none';
+    const url = currentVideoUrl;
+
+    if (url.includes('.m3u8')) {
+      if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+        hlsInstance = new Hls({ enableWorker: true, lowLatencyMode: true });
+        hlsInstance.loadSource(url);
+        hlsInstance.attachMedia(video);
+        hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+        hlsInstance.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            if (currentImageUrl) { currentFeedType = 'image'; updatePipFeed(); }
+            else showNoFeed();
+          }
+        });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        video.src = url;
+        video.play().catch(() => {});
+      } else {
+        // HLS not supported — fall back to image
+        if (currentImageUrl) { currentFeedType = 'image'; updatePipFeed(); return; }
+        showNoFeed(); return;
+      }
+      document.getElementById('pip-refresh-status').textContent = '● Live stream';
+    } else {
+      video.src = url;
+      video.play().catch(() => {});
+      document.getElementById('pip-refresh-status').textContent = '● Video';
+    }
+    video.onloadedmetadata = () => {
+      if (video.videoWidth && video.videoHeight) {
+        window.onPipImageLoad && window.onPipImageLoad({ naturalWidth: video.videoWidth, naturalHeight: video.videoHeight });
+      }
+    };
+
+  } else if (currentFeedType === 'image' && currentImageUrl) {
+    img.style.display = 'block';
+    document.getElementById('pip-refresh-btn').style.display = '';
+    const ts = currentImageUrl.includes('?') ? '&' : '?';
+    img.onload = () => window.onPipImageLoad && window.onPipImageLoad(img);
+    img.src = currentImageUrl + ts + '_t=' + Date.now();
+    document.getElementById('pip-refresh-status').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  } else {
+    showNoFeed();
+  }
+}
+
+function showNoFeed() {
+  document.getElementById('pip-no-feed').style.display = 'flex';
+  document.getElementById('pip-refresh-status').textContent = 'No feed';
+}
+
+function updatePipImage() { updatePipFeed(); }
+
+function refreshPipImage() {
+  if (currentFeedType === 'image') updatePipFeed();
+}
+
+function openPip(title) {
+  const pip = document.getElementById('pip');
+  document.getElementById('pip-title').textContent = title || 'Camera feed';
+  pip.classList.add('pip-visible');
+  updatePipFeed();
+}
+
+function closePip() {
+  document.getElementById('pip').classList.remove('pip-visible');
+  clearInterval(pipRefreshTimer);
+  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+  const video = document.getElementById('pip-video');
+  video.pause(); video.src = '';
+}
+
+function openImageFullscreen() {
+  const url   = currentVideoUrl || currentImageUrl;
+  if (!url) return;
+  const title = selectedCamera ? (selectedCamera.location || selectedCamera.id) : 'Camera';
+  const isVid = !!currentVideoUrl;
+  // Override locals for the template below
+  // (we shadow the outer vars intentionally)
+  const currentImageUrl = isVid ? null : url;
+  const win = window.open('', '_blank');
+  win.document.write(
+    `<!DOCTYPE html><html><head><title>${title}</title>` +
+    `<style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      html, body { width:100%; height:100%; background:#000; overflow:hidden; }
+      img { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+      #lbl { position:fixed; bottom:0; left:0; right:0; padding:10px 16px;
+             background:linear-gradient(transparent,rgba(0,0,0,0.7));
+             color:#fff; font:500 14px/1.4 system-ui,sans-serif; pointer-events:none; }
+      #fs  { position:fixed; top:12px; right:12px; background:rgba(0,0,0,0.5);
+             border:1px solid rgba(255,255,255,0.2); color:#fff; border-radius:5px;
+             padding:6px 12px; font:13px system-ui; cursor:pointer; }
+    </style></head>` +
+    `<body><img src="${currentImageUrl}" alt="Camera feed">
+      <div id="lbl">${title}</div>
+      <button id="fs" onclick="document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen()">⛶ Fullscreen</button>
+    </body></html>`
+  );
+  win.document.close();
+}
+
+// ─── PiP DRAG + RESIZE (aspect-ratio locked) ───
+(function () {
+  // Chrome heights: titlebar ~37px + refresh bar ~29px = 66px
+  const CHROME_H = 66;
+  const ABS_MIN_W = 200; // absolute floor in case image is tiny
+
+  let mode = null;
+  let startX, startY, startW, startH, startL, startT;
+  let imgAspect = null; // width / height of the image, set on load
+  let minW = ABS_MIN_W;
+
+  // Called from updatePipImage() after each image load
+  window.onPipImageLoad = function(img) {
+    if (img.naturalWidth && img.naturalHeight) {
+      imgAspect = img.naturalWidth / img.naturalHeight;
+      // Min width = image natural width, capped between 200 and 600
+      minW = Math.min(600, Math.max(ABS_MIN_W, img.naturalWidth));
+      applyAspect(minW);
+    }
+  };
+
+  function applyAspect(w) {
+    if (!imgAspect) return;
+    const pip = document.getElementById('pip');
+    const iw  = document.getElementById('pip-img-wrap');
+    const newW = Math.max(minW, w);
+    const imgH = Math.round(newW / imgAspect);
+    pip.style.width = newW + 'px';
+    // Only clear `right` if the user has already dragged the window
+    // (i.e. an explicit left has been set). Otherwise keep right:12px
+    // so it doesn't snap to left:0 on initial image load.
+    if (pip.style.left && pip.style.left !== '') {
+      pip.style.right = 'auto';
+    }
+    iw.style.height = imgH + 'px';
+    iw.style.flex   = 'none';
+  }
+
+  function onDown(m, e) {
+    if (e.button !== 0) return;
+    mode = m;
+    const r = document.getElementById('pip').getBoundingClientRect();
+    startX = e.clientX; startY = e.clientY;
+    startW = r.width;   startH = r.height;
+    startL = r.left;    startT = r.top;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = m === 'drag' ? 'grabbing' : 'se-resize';
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const pip = document.getElementById('pip');
+
+    // Drag via titlebar
+    document.getElementById('pip-titlebar').addEventListener('mousedown', e => {
+      if (!e.target.closest('button')) onDown('drag', e);
+    });
+
+    // All resize handles do the same thing: scale by width, derive height
+    pip.querySelectorAll('.pip-edge').forEach(el =>
+      el.addEventListener('mousedown', e => onDown('se', e))
+    );
+
+    document.addEventListener('mousemove', e => {
+      if (!mode) return;
+      const dX = e.clientX - startX;
+      const dY = e.clientY - startY;
+
+      if (mode === 'drag') {
+        const p = pip;
+        p.style.left   = (startL + dX) + 'px';
+        p.style.top    = (startT + dY) + 'px';
+        p.style.right  = 'auto';
+        p.style.bottom = 'auto';
+      } else {
+        // Use whichever axis moved more to drive the resize,
+        // then derive the other from the aspect ratio
+        const newW = imgAspect
+          ? Math.max(minW, startW + dX)
+          : Math.max(ABS_MIN_W, startW + dX);
+        applyAspect(newW);
+      }
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (!mode) return;
+      mode = null;
+      document.body.style.userSelect = '';
+      document.body.style.cursor     = '';
+    });
+  });
+})();
+
+// ==========================================================
+//  SEARCH
+// ==========================================================
+// Haversine distance in km between two lat/lng points
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R  = 6371;
+  const dL = (lat2 - lat1) * Math.PI / 180;
+  const dG = (lng2 - lng1) * Math.PI / 180;
+  const a  = Math.sin(dL/2) ** 2 +
+             Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dG/2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+let searchResultCameras = []; // currently highlighted search results
+let searchMarker = null;      // yellow pin at geocoded location
+let minimapLeaflet  = null;   // Leaflet map instance
+let minimapMarker   = null;   // current position dot
+let minimapCone     = null;   // view direction cone
+let minimapVisible  = true;
+let minimapThrottle = 0;
+
+function clearSearchResults() {
+  // Restore all entity visibility
+  if (dataSource) {
+    dataSource.entities.values.forEach(e => { e._searchOff = false; e.show = true; });
+  }
+  // Remove highlight overrides
+  searchResultCameras.forEach(cam => {
+    const e = dataSource && dataSource.entities.getById(cam.id);
+    if (e && e.point) {
+      e.point.color = new Cesium.ConstantProperty(getDirColor(inferHeading(cam)));
+      e.point.pixelSize = new Cesium.ConstantProperty(7);
+      e.point.outlineWidth = new Cesium.ConstantProperty(1);
+    }
+  });
+  searchResultCameras = [];
+  // Remove pin
+  if (searchMarker && viewer) {
+    viewer.entities.remove(searchMarker);
+    searchMarker = null;
+  }
+  // Hide results panel
+  document.getElementById('searchResults').style.display = 'none';
+  document.getElementById('statusCameras').textContent =
+    cameras.length ? `${cameras.length.toLocaleString()} cameras` : 'Ready';
+}
+
+async function runLocationSearch(query) {
+  const q = query.trim();
+  if (!q) { clearSearchResults(); return; }
+
+  const statusEl = document.getElementById('statusCameras');
+  statusEl.textContent = 'Geocoding…';
+
+  // Geocode via Nominatim (free, no key)
+  let place;
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
+    const res  = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    const data = await res.json();
+    if (!data.length) {
+      statusEl.textContent = 'Location not found';
+      return;
+    }
+    place = data[0];
+  } catch (e) {
+    statusEl.textContent = 'Geocode error';
+    return;
+  }
+
+  const lat = parseFloat(place.lat);
+  const lng  = parseFloat(place.lon);
+  const name = place.display_name.split(',').slice(0, 2).join(',');
+
+  // Clear previous results first
+  clearSearchResults();
+
+  // Drop a yellow pin at the geocoded location
+  searchMarker = viewer.entities.add({
+    position: Cesium.Cartesian3.fromDegrees(lng, lat, 0),
+    point: {
+      pixelSize: 14,
+      color: Cesium.Color.fromCssColorString('#f59e0b'),
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 2,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+    label: {
+      text: name,
+      font: '13px Inter, sans-serif',
+      fillColor: Cesium.Color.fromCssColorString('#0f172a'),
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 3,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      pixelOffset: new Cesium.Cartesian2(0, -18),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    }
+  });
+
+  // Fly to location
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(lng, lat, 18000),
+    orientation: { heading: 0, pitch: Cesium.Math.toRadians(-55), roll: 0 },
+    duration: 1.8,
+    easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
+  });
+
+  // Find 10 nearest cameras using haversine distance
+  const N = 10;
+  const nearest = cameras
+    .filter(c => c.lat && c.lng)
+    .map(c => ({ cam: c, dist: haversineKm(lat, lng, c.lat, c.lng) }))
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, N);
+
+  searchResultCameras = nearest.map(r => r.cam);
+
+  // Highlight nearest cameras in yellow/amber
+  searchResultCameras.forEach(cam => {
+    const e = dataSource && dataSource.entities.getById(cam.id);
+    if (e && e.point) {
+      e.point.color      = new Cesium.ConstantProperty(Cesium.Color.fromCssColorString('#f59e0b'));
+      e.point.pixelSize  = new Cesium.ConstantProperty(11);
+      e.point.outlineWidth = new Cesium.ConstantProperty(2);
+    }
+  });
+
+  // Populate results list
+  const panel = document.getElementById('searchResults');
+  const list  = document.getElementById('searchResultsList');
+  list.innerHTML = '';
+
+  nearest.forEach(({ cam, dist }) => {
+    const item = document.createElement('div');
+    item.className = 'sr-item';
+    const distStr = dist < 1 ? `${(dist * 1000).toFixed(0)} m` : `${dist.toFixed(1)} km`;
+    const heading  = inferHeading(cam);
+    const dirBadge = heading !== null
+      ? `<span class="sr-dir">${['N','NE','E','SE','S','SW','W','NW'][heading/45]}</span>`
+      : '';
+    item.innerHTML = `
+      <div class="sr-name">${cam.location || cam.id}</div>
+      <div class="sr-meta">${distStr} away ${dirBadge}</div>
+    `;
+    item.onclick = () => selectCamera(cam);
+    list.appendChild(item);
+  });
+
+  panel.style.display = 'block';
+  statusEl.textContent = `${nearest.length} nearest cameras to "${name}"`;
+}
+
+// ==========================================================
+//  FIT
+// ==========================================================
+function fitToData() {
+  if (!cameras.length || !viewer) return;
+  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+  for (const c of cameras) {
+    if (!c.lat || !c.lng) continue;
+    if (c.lat < minLat) minLat = c.lat;
+    if (c.lat > maxLat) maxLat = c.lat;
+    if (c.lng < minLng) minLng = c.lng;
+    if (c.lng > maxLng) maxLng = c.lng;
+  }
+  if (minLat === Infinity) return;
+  viewer.camera.flyTo({
+    destination: Cesium.Rectangle.fromDegrees(minLng - 10, minLat - 5, maxLng + 10, maxLat + 5),
+    duration: 1.5,
+    easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
+  });
+}
+
+// ==========================================================
+//  FILE LOADING
+// ==========================================================
+function loadFile(file) {
+  const pw   = document.getElementById('progressWrap');
+  const fill = document.getElementById('progressFill');
+  const txt  = document.getElementById('progressText');
+
+  pw.style.display  = 'block';
+  txt.textContent   = 'Reading file…';
+  const reader      = new FileReader();
+
+  reader.onprogress = e => {
+    if (e.lengthComputable) {
+      fill.style.width = (e.loaded / e.total * 50) + '%';
+      txt.textContent  = `Reading… ${Math.round(e.loaded / e.total * 50)}%`;
+    }
+  };
+
+  reader.onload = e => {
+    fill.style.width = '60%';
+    txt.textContent  = 'Parsing…';
+    setTimeout(() => {
+      try {
+        cameras = JSON.parse(e.target.result);
+        cameraMap.clear();
+        cameras.forEach(c => cameraMap.set(c.id, c));
+        fill.style.width = '80%';
+        txt.textContent  = `${cameras.length.toLocaleString()} cameras — building map…`;
+        setTimeout(initializeMap, 80);
+      } catch (err) {
+        txt.textContent = 'Error: ' + err.message;
+      }
+    }, 60);
+  };
+
+  reader.onerror = () => { txt.textContent = 'File read error'; };
+  reader.readAsText(file);
+}
+
+async function initializeMap() {
+  document.getElementById('uploadOverlay').style.display = 'none';
+  document.getElementById('topBar').style.display = 'flex';
+  document.getElementById('statusBar').style.display = 'flex';
+  document.getElementById('progressFill').style.width = '90%';
+  document.getElementById('cameraCount').textContent   = `${cameras.length.toLocaleString()} cameras`;
+
+  if (!viewer) initCesium();
+  await createCameraEntities(cameras);
+  document.getElementById('progressFill').style.width = '100%';
+
+  // Show and init minimap
+  document.getElementById('minimap-wrap').style.display = 'block';
+  initMinimap();
+  viewer.scene.postRender.addEventListener(updateMinimap);
+
+  setTimeout(fitToData, 600);
+}
+
+// ==========================================================
+//  MINIMAP
+// ==========================================================
+function initMinimap() {
+  minimapLeaflet = L.map('minimap', {
+    zoomControl: false,
+    attributionControl: false,
+    dragging: false,
+    touchZoom: false,
+    doubleClickZoom: false,
+    scrollWheelZoom: false,
+    boxZoom: false,
+    keyboard: false,
+  }).setView([20, 0], 2);
+
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+  }).addTo(minimapLeaflet);
+
+  // Current position marker — small blue dot
+  minimapMarker = L.circleMarker([20, 0], {
+    radius: 5,
+    color: '#2563eb',
+    fillColor: '#2563eb',
+    fillOpacity: 1,
+    weight: 2,
+    opacity: 1,
+  }).addTo(minimapLeaflet);
+
+  // View cone polygon (heading + fov wedge projected on 2D map)
+  minimapCone = L.polygon([], {
+    color: '#2563eb',
+    fillColor: '#2563eb',
+    fillOpacity: 0.15,
+    weight: 1.5,
+    opacity: 0.7,
+  }).addTo(minimapLeaflet);
+}
+
+function updateMinimap() {
+  if (!minimapLeaflet || !viewer || !minimapVisible) return;
+
+  const now = Date.now();
+  if (now - minimapThrottle < 250) return;
+  minimapThrottle = now;
+
+  // Get the ground point under the camera centre
+  const centre = new Cesium.Cartesian2(
+    viewer.canvas.clientWidth  / 2,
+    viewer.canvas.clientHeight / 2
+  );
+  const cartesian = viewer.scene.pickPosition(centre)
+    || viewer.camera.pickEllipsoid(centre, viewer.scene.globe.ellipsoid);
+
+  if (!cartesian) return;
+
+  const carto = Cesium.Cartographic.fromCartesian(cartesian);
+  const lat   = Cesium.Math.toDegrees(carto.latitude);
+  const lng   = Cesium.Math.toDegrees(carto.longitude);
+
+  // Auto zoom: map altitude to Leaflet zoom
+  const alt      = viewer.camera.positionCartographic.height;
+  const lzoom    = alt > 5000000 ? 2
+                 : alt > 1000000 ? 4
+                 : alt > 200000  ? 7
+                 : alt > 50000   ? 10
+                 : alt > 10000   ? 12
+                 : 14;
+
+  minimapMarker.setLatLng([lat, lng]);
+  minimapLeaflet.setView([lat, lng], lzoom, { animate: false });
+
+  // Build a view-direction cone from camera heading + altitude
+  const heading = viewer.camera.heading; // radians, CW from North
+  const FOV     = Cesium.Math.toRadians(45); // half-angle of cone display
+  const reach   = Math.max(0.003, Math.min(8, alt / 100000)); // degrees
+
+  const tip = [lat, lng];
+
+  // Left and right edges of cone
+  const leftAngle  = heading - FOV;
+  const rightAngle = heading + FOV;
+
+  const leftLat  = lat + reach * Math.cos(leftAngle);
+  const leftLng  = lng + reach * Math.sin(leftAngle);
+  const rightLat = lat + reach * Math.cos(rightAngle);
+  const rightLng = lng + reach * Math.sin(rightAngle);
+
+  minimapCone.setLatLngs([tip, [leftLat, leftLng], [rightLat, rightLng]]);
+}
+
+let minimapExpanded = false;
+
+function toggleMinimapCollapse() {
+  minimapVisible = !minimapVisible;
+  document.getElementById('minimap').style.display = minimapVisible ? 'block' : 'none';
+  document.getElementById('minimap-toggle-icon').textContent = minimapVisible ? '▾' : '▸';
+  if (minimapVisible && minimapLeaflet) {
+    setTimeout(() => minimapLeaflet.invalidateSize(), 220);
+  }
+}
+
+function toggleMinimapExpand() {
+  minimapExpanded = !minimapExpanded;
+  const wrap = document.getElementById('minimap-wrap');
+  wrap.classList.toggle('expanded', minimapExpanded);
+  // Update icon: shrink arrows when expanded, expand arrows when small
+  document.getElementById('minimap-expand-icon').innerHTML = minimapExpanded
+    ? '<path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/>'
+    : '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>';
+  if (minimapLeaflet) {
+    setTimeout(() => minimapLeaflet.invalidateSize(), 220);
+  }
+}
+
+// ==========================================================
+//  UI WIRING
+// ==========================================================
+document.addEventListener('DOMContentLoaded', () => {
+  const dropZone  = document.getElementById('dropZone');
+  const fileInput = document.getElementById('fileInput');
+
+  dropZone.onclick    = () => fileInput.click();
+  dropZone.ondragover = e => { e.preventDefault(); dropZone.classList.add('dragover'); };
+  dropZone.ondragleave = () => dropZone.classList.remove('dragover');
+  dropZone.ondrop     = e => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    const f = e.dataTransfer.files[0];
+    if (f) loadFile(f);
+  };
+  fileInput.onchange = e => { if (e.target.files[0]) loadFile(e.target.files[0]); };
+
+  // Field of view toggle
+  document.getElementById('btnFrustums').onclick = function () {
+    frustumsEnabled = !frustumsEnabled;
+    this.classList.toggle('active', frustumsEnabled);
+    if (!frustumsEnabled) removeFrustum();
+    else if (selectedCamera) showFrustum(selectedCamera);
+  };
+
+  // Legend
+  document.getElementById('btnLegend').onclick = function () {
+    legendOpen = !legendOpen;
+    this.classList.toggle('active', legendOpen);
+    document.getElementById('legend').style.display = legendOpen ? 'block' : 'none';
+    if (legendOpen) {
+      document.getElementById('settingsPanel').style.display = 'none';
+      document.getElementById('btnSettings').classList.remove('active');
+      settingsPanelOpen = false;
+    }
+  };
+
+  // Settings
+  document.getElementById('btnSettings').onclick = function () {
+    settingsPanelOpen = !settingsPanelOpen;
+    this.classList.toggle('active', settingsPanelOpen);
+    document.getElementById('settingsPanel').style.display = settingsPanelOpen ? 'block' : 'none';
+    if (settingsPanelOpen) {
+      document.getElementById('legend').style.display = 'none';
+      document.getElementById('btnLegend').classList.remove('active');
+      legendOpen = false;
+    }
+  };
+
+  // Load 3D tiles
+  document.getElementById('applyGoogleKey').onclick = async () => {
+    const key = document.getElementById('googleKeyInput').value.trim();
+    if (!key || !viewer) return;
+    const btn = document.getElementById('applyGoogleKey');
+    btn.textContent = 'Loading…';
+    await enableGoogle3DTiles(key);
+  };
+
+  // Fit
+  document.getElementById('btnFit').onclick = fitToData;
+
+  // Location search — fires on Enter or after 600ms pause
+  const searchBox = document.getElementById('searchBox');
+  searchBox.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { clearTimeout(searchTimer); runLocationSearch(e.target.value); }
+    if (e.key === 'Escape') { e.target.value = ''; clearSearchResults(); }
+  });
+  searchBox.oninput = e => {
+    if (!e.target.value.trim()) { clearTimeout(searchTimer); clearSearchResults(); return; }
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => runLocationSearch(e.target.value), 600);
+  };
+
+  // Close panel
+  document.getElementById('closeSide').onclick = deselect;
+
+  // Dark mode
+  document.getElementById('btnTheme').onclick = () => {
+    const html = document.documentElement;
+    const dark = html.getAttribute('data-theme') === 'dark';
+    html.setAttribute('data-theme', dark ? 'light' : 'dark');
+    document.getElementById('iconLight').style.display = dark ? 'block' : 'none';
+    document.getElementById('iconDark').style.display  = dark ? 'none'  : 'block';
+  };
+
+  initCesium();
+});
+</script>
+</body>
+</html>
