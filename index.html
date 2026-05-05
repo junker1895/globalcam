@@ -843,6 +843,15 @@ body {
   .sr-name { font-size: 13px; font-weight: 500; color: var(--c-text); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .sr-meta { font-size: 11px; font-family: var(--mono); color: var(--c-text3); display: flex; align-items: center; gap: 6px; }
   .sr-dir { background: var(--c-accent-bg); color: var(--c-accent); border-radius: 3px; padding: 1px 5px; font-size: 10px; font-weight: 600; }
+  .sr-row-main { display:flex; align-items:flex-start; gap:10px; }
+  .sr-row-text { min-width:0; flex:1; }
+  .sr-add-btn {
+    height:24px; padding:0 8px; border:1px solid var(--c-border); border-radius:4px;
+    background:var(--c-surface); color:var(--c-accent); font-family:var(--font);
+    font-size:11px; font-weight:600; cursor:pointer; flex-shrink:0;
+  }
+  .sr-add-btn:hover { background:var(--c-accent-bg); border-color:rgba(37,99,235,0.28); }
+  .sr-add-btn:disabled { color:var(--c-text3); background:var(--c-surface2); cursor:default; }
 
   /* ─── MINIMAP ─── */
   #minimap-wrap {
@@ -883,11 +892,472 @@ body {
     transition: color 0.12s, background 0.12s;
   }
   #minimap-btn-expand:hover { color: var(--c-text); background: var(--c-surface2); }
-  #minimap { height: 160px; width: 100%; transition: height 0.2s ease; }
+  #minimap { height: 160px; width: 100%; transition: height 0.2s ease; pointer-events: none; }
   #minimap-wrap.expanded #minimap { height: 280px; }
   /* Hide Leaflet controls */
   #minimap .leaflet-control-attribution { display: none; }
   #minimap .leaflet-control-zoom { display: none; }
+
+/* ─── DASHBOARD VIEW ─── */
+#dashboardView {
+  position: fixed;
+  top: var(--top-h);
+  left: 0;
+  right: 0;
+  bottom: var(--bar-h);
+  z-index: 40;
+  background: var(--c-bg);
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+body.dashboard-active #cesiumContainer,
+body.dashboard-active #sidePanel,
+body.dashboard-active #frustumInfo,
+body.dashboard-active #pip,
+body.dashboard-active #minimap-wrap,
+body.dashboard-active #legend,
+body.dashboard-active #settingsPanel {
+  display: none !important;
+}
+
+body.dashboard-active #btnFrustums,
+body.dashboard-active #btnLegend {
+  display: none !important;
+}
+
+body.dashboard-active #searchResults {
+  top: calc(var(--top-h) + 8px);
+  left: 360px;
+  transform: none;
+}
+
+.nav-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--c-accent);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 18px;
+  text-align: center;
+}
+
+#dashboardShell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#dashboardFeedPane {
+  flex: 1 1 auto;
+  min-width: 360px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background:
+    linear-gradient(90deg, rgba(148,163,184,0.08) 1px, transparent 1px),
+    linear-gradient(rgba(148,163,184,0.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+#dashboardFeedWall {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  align-content: stretch;
+}
+
+#dashboardFeedWall.grid-2x2 { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(210px, 1fr); }
+#dashboardFeedWall.grid-3x3 { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: minmax(170px, 1fr); }
+#dashboardFeedWall.grid-4x4 { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: minmax(135px, 1fr); }
+
+#dashboardFeedWall.mode-mosaic {
+  position: relative;
+  display: block;
+  overflow: hidden;
+}
+
+#dashboardFeedWall.mode-focus {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  grid-template-rows: repeat(15, minmax(64px, 1fr));
+  gap: 10px;
+}
+
+#dashboardFeedWall.mode-single {
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+.dashboard-empty {
+  height: 100%;
+  min-height: 360px;
+  border: 1px dashed var(--c-border2);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--c-text3);
+  text-align: center;
+  padding: 24px;
+}
+[data-theme="dark"] .dashboard-empty { background: rgba(15,22,35,0.55); }
+
+.dash-card {
+  position: relative;
+  background: #05070b;
+  border: 1px solid rgba(148,163,184,0.35);
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 120px;
+  box-shadow: var(--c-shadow);
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-card.selected {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 2px rgba(37,99,235,0.22), var(--c-shadow-md);
+}
+
+.mode-mosaic .dash-card {
+  position: absolute;
+  min-width: 220px;
+  min-height: 150px;
+}
+
+.mode-focus .dash-card.focus-main {
+  grid-column: 1;
+  grid-row: 1 / -1;
+}
+
+.mode-focus .dash-card.focus-thumb {
+  grid-column: 2;
+  min-height: 70px;
+}
+
+.mode-focus .dash-card.focus-thumb .dash-media {
+  min-height: 0;
+}
+
+.mode-single .dash-card:not(.single-active) { display: none; }
+
+.dash-media {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #090b10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.dash-media img,
+.dash-media video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  background: #000;
+}
+
+.dash-no-feed {
+  color: rgba(226,232,240,0.55);
+  font-size: 12px;
+  text-align: center;
+  padding: 16px;
+}
+
+.dash-meta {
+  flex-shrink: 0;
+  background: var(--c-surface);
+  border-top: 1px solid var(--c-border);
+  padding: 7px 9px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  align-items: center;
+}
+
+.dash-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-sub {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--c-text3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-dir {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--c-accent);
+  background: var(--c-accent-bg);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.dash-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: none;
+  gap: 5px;
+  z-index: 3;
+}
+
+.dash-card:hover .dash-actions { display: flex; }
+
+.dash-mini-btn {
+  height: 26px;
+  min-width: 26px;
+  padding: 0 8px;
+  border-radius: 5px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(15,23,42,0.78);
+  color: #fff;
+  font-size: 11px;
+  font-family: var(--font);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+
+.dash-mini-btn:hover { background: rgba(37,99,235,0.9); }
+
+.dash-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  display: none;
+  background: linear-gradient(135deg, transparent 45%, rgba(255,255,255,0.55) 46%, rgba(255,255,255,0.55) 56%, transparent 57%);
+}
+.mode-mosaic .dash-resize { display: block; }
+
+#dashboardMapResize {
+  width: 6px;
+  background: var(--c-border);
+  cursor: col-resize;
+  display: block;
+  flex-shrink: 0;
+  border-left: 1px solid var(--c-border);
+  border-right: 1px solid var(--c-border);
+}
+
+#dashboardMapPane {
+  width: 34%;
+  min-width: 280px;
+  max-width: 58%;
+  background: var(--c-surface);
+  border-left: 1px solid var(--c-border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#dashboardMapPane.collapsed,
+#dashboardMapResize.collapsed {
+  display: none;
+}
+
+#dashboardMapHeader {
+  height: 40px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--c-border);
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-text2);
+  font-weight: 600;
+}
+
+#dashboardMapHeader .spacer { flex: 1; }
+
+#dashboardMap {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+#dashboardMap .leaflet-control-attribution { display: none; }
+
+.dashboard-map-popup { min-width:180px; }
+.dashboard-map-popup-title { font-weight:600; color:#0f172a; margin-bottom:4px; }
+.dashboard-map-popup-meta { font-size:11px; color:#64748b; margin-bottom:8px; }
+.dashboard-map-popup button {
+  height:26px; padding:0 9px; border:1px solid #cbd5e1; border-radius:4px;
+  background:#fff; color:#2563eb; font-size:12px; font-weight:600; cursor:pointer;
+}
+.dashboard-map-popup button:disabled { color:#94a3b8; background:#f1f5f9; cursor:default; }
+
+#dashboardBar {
+  min-height: 42px;
+  border-top: 1px solid var(--c-border);
+  background: var(--c-surface);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  flex-shrink: 0;
+}
+
+.dash-seg {
+  display: flex;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.dash-seg button,
+.dash-small-btn {
+  height: 30px;
+  border: none;
+  background: var(--c-surface);
+  color: var(--c-text2);
+  padding: 0 10px;
+  font-size: 12px;
+  font-family: var(--font);
+  cursor: pointer;
+  border-right: 1px solid var(--c-border);
+}
+
+.dash-seg button:last-child { border-right: none; }
+.dash-seg button.active {
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
+}
+
+.dash-small-btn {
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  border-right: 1px solid var(--c-border);
+}
+.dash-small-btn:hover,
+.dash-seg button:hover { background: var(--c-surface2); color: var(--c-text); }
+
+#dashboardStatus {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--c-text3);
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+#dashboardAddPanel {
+  position: fixed;
+  top: calc(var(--top-h) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 390px;
+  max-width: calc(100vw - 24px);
+  z-index: 220;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  box-shadow: var(--c-shadow-md);
+  display: none;
+  overflow: hidden;
+}
+
+#dashboardAddPanel.open { display: block; }
+
+#dashboardAddHeader {
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--c-border);
+}
+
+#dashboardSearchInput {
+  flex: 1;
+  height: 32px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface2);
+  border-radius: var(--radius);
+  padding: 0 10px;
+  color: var(--c-text);
+  outline: none;
+  font-family: var(--font);
+}
+
+#dashboardSearchResults {
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.dash-result {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-border);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 10px;
+  align-items: center;
+}
+
+.dash-result:last-child { border-bottom: none; }
+.dash-result-name { font-weight: 600; font-size: 13px; color: var(--c-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-result-meta { grid-column: 1; font-size: 11px; font-family: var(--mono); color: var(--c-text3); }
+.dash-result button { grid-row: 1 / span 2; grid-column: 2; }
+
+.side-actions {
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px solid var(--c-border);
+  display: flex;
+  gap: 6px;
+}
+
+.side-action-btn {
+  width: 100%;
+  height: 32px;
+  background: var(--c-accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.side-action-btn.secondary {
+  background: var(--c-surface2);
+  color: var(--c-text2);
+  border: 1px solid var(--c-border);
+}
+
+.side-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 </style>
 </head>
 <body>
@@ -928,6 +1398,9 @@ body {
   </div>
 
   <div id="cameraCount">0 cameras</div>
+
+  <button class="tbtn active" id="btnGlobeView">Globe</button>
+  <button class="tbtn" id="btnDashboardView">Dashboard <span class="nav-badge" id="dashboardNavBadge">0</span></button>
 
   <div class="divider"></div>
 
@@ -1033,6 +1506,54 @@ body {
 <!-- ─── CESIUM MAP ─── -->
 <div id="cesiumContainer"></div>
 
+<!-- ─── DASHBOARD VIEW ─── -->
+<div id="dashboardView">
+  <div id="dashboardShell">
+    <section id="dashboardFeedPane">
+      <div id="dashboardFeedWall" class="grid-2x2"></div>
+      <div id="dashboardBar">
+        <div class="dash-seg" aria-label="Dashboard layout">
+          <button id="dashModeGrid" data-mode="grid" class="active">Grid</button>
+          <button id="dashModeMosaic" data-mode="mosaic">Mosaic</button>
+          <button id="dashModeFocus" data-mode="focus">Focus</button>
+          <button id="dashModeSingle" data-mode="single">Single</button>
+        </div>
+        <div class="dash-seg" aria-label="Grid size">
+          <button id="dashGrid2" data-grid="2x2" class="active">2×2</button>
+          <button id="dashGrid3" data-grid="3x3">3×3</button>
+          <button id="dashGrid4" data-grid="4x4">4×4</button>
+        </div>
+        <button class="dash-small-btn" id="dashRefreshAll">↻ Refresh all</button>
+        <button class="dash-small-btn" id="dashAddCamera">+ Add camera</button>
+        <button class="dash-small-btn" id="dashFitMap">Fit map</button>
+        <button class="dash-small-btn" id="dashToggleMap">Hide map</button>
+        <button class="dash-small-btn" id="dashClearAll">Clear</button>
+        <div id="dashboardStatus">0/16 cameras · ready</div>
+      </div>
+    </section>
+    <div id="dashboardMapResize" title="Drag to resize map"></div>
+    <aside id="dashboardMapPane">
+      <div id="dashboardMapHeader">
+        <span>2D situation map</span>
+        <span class="spacer"></span>
+        <button class="dash-small-btn" id="dashMapFitHeader">Fit</button>
+        <button class="dash-small-btn" id="dashMapCollapseHeader">Collapse</button>
+      </div>
+      <div id="dashboardMap"></div>
+    </aside>
+  </div>
+</div>
+
+<div id="dashboardAddPanel">
+  <div id="dashboardAddHeader">
+    <input id="dashboardSearchInput" type="text" placeholder="Search city/address, or type camera name…">
+    <button class="dash-small-btn" id="dashboardSearchRun">Search</button>
+    <button class="dash-small-btn" id="dashboardSearchClose">×</button>
+  </div>
+  <div id="dashboardSearchResults"></div>
+</div>
+
+
 <!-- ─── SIDE PANEL ─── -->
 <div id="sidePanel">
   <div id="sidePanelInner">
@@ -1042,6 +1563,10 @@ body {
       <div id="camTitle">—</div>
       <div id="camDesc">—</div>
       <div id="camBadges"></div>
+      <div class="side-actions">
+        <button class="side-action-btn" id="addSelectedToDashboard">+ Add to dashboard</button>
+        <button class="side-action-btn secondary" id="openDashboardFromSide">Open dashboard</button>
+      </div>
     </div>
 
     <div id="viewAngleList" style="display:none">
@@ -1136,6 +1661,7 @@ let cameraMap = new Map(); // id → camera object, for O(1) search lookups
 let viewer = null;
 let dataSource = null;
 let selectedCamera = null;
+let selectedCameraMarker = null;
 let currentFrustumPrimitive = null;
 let frustumsEnabled = true;
 let searchTimer = null;
@@ -1148,6 +1674,31 @@ let lastOcclusionCheck = 0;
 let frustumFovH = 58;
 let frustumRange = 85;
 let frustumTilt  = 15;
+
+// Dashboard state
+const DASHBOARD_MAX_CAMERAS = 16;
+const DASHBOARD_STORAGE_KEY = 'vigil.dashboard.v1';
+let activeView = 'globe';
+let dashboardState = {
+  cameras: [],
+  layout: 'grid',
+  gridSize: '2x2',
+  mapVisible: true,
+  focusCameraId: null,
+  selectedCameraId: null,
+  mosaic: {}
+};
+let dashboardMap = null;
+let dashboardMapLayer = null;
+let dashboardRefreshTimers = new Map();
+let dashboardHls = new Map();
+let dashboardLastRefresh = new Map();
+let dashboardErrorCounts = new Map();
+let dashboardRefreshPaused = false;
+let dashboardResizeActive = false;
+let dashboardMosaicDrag = null;
+let dashboardMapMoveTimer = null;
+let dashboardSearchContext = null;
 
 // ==========================================================
 //  DIRECTION INFERENCE
@@ -1168,38 +1719,86 @@ const DIR_COLORS = {
   315: '#a5d6a7',
 };
 
-function inferHeading(cam) {
-  if (typeof cam.heading === 'number' && isFinite(cam.heading)) {
-    return Math.round(cam.heading / 45) * 45 % 360;
-  }
-  if (cam.direction) {
-    const d = cam.direction.toUpperCase().replace(/[^A-Z]/g, '');
-    if (d === 'NORTH'     || d === 'NORTHBOUND')     return 0;
-    if (d === 'NORTHEAST' || d === 'NORTHEASTBOUND') return 45;
-    if (d === 'EAST'      || d === 'EASTBOUND')      return 90;
-    if (d === 'SOUTHEAST' || d === 'SOUTHEASTBOUND') return 135;
-    if (d === 'SOUTH'     || d === 'SOUTHBOUND')     return 180;
-    if (d === 'SOUTHWEST' || d === 'SOUTHWESTBOUND') return 225;
-    if (d === 'WEST'      || d === 'WESTBOUND')      return 270;
-    if (d === 'NORTHWEST' || d === 'NORTHWESTBOUND') return 315;
-  }
-  const t = [
-    cam.description || '',
-    cam.location    || '',
-    cam.angleName   || '',
-    cam.roadway     || '',
-  ].join(' ').toUpperCase();
+function directionValueToHeading(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const d = raw.toUpperCase().replace(/[^A-Z]/g, '');
 
-  if (/\bEB\b/.test(t) || /EASTBOUND/.test(t))  return 90;
-  if (/\bWB\b/.test(t) || /WESTBOUND/.test(t))  return 270;
-  if (/\bNB\b/.test(t) || /NORTHBOUND/.test(t)) return 0;
-  if (/\bSB\b/.test(t) || /SOUTHBOUND/.test(t)) return 180;
-  if (/\bNE\b/.test(t) || /NORTHEAST/.test(t))  return 45;
-  if (/\bNW\b/.test(t) || /NORTHWEST/.test(t))  return 315;
-  if (/\bSE\b/.test(t) || /SOUTHEAST/.test(t))  return 135;
-  if (/\bSW\b/.test(t) || /SOUTHWEST/.test(t))  return 225;
+  // Only treat the direction field as authoritative when it is actually a
+  // cardinal / intercardinal camera direction. Some providers use this field
+  // for cross-streets, ramps, or named destinations, so those must fall through.
+  const exact = {
+    N: 0, NORTH: 0, NORTHBOUND: 0, NB: 0,
+    NE: 45, NORTHEAST: 45, NORTHEASTBOUND: 45,
+    E: 90, EAST: 90, EASTBOUND: 90, EB: 90,
+    SE: 135, SOUTHEAST: 135, SOUTHEASTBOUND: 135,
+    S: 180, SOUTH: 180, SOUTHBOUND: 180, SB: 180,
+    SW: 225, SOUTHWEST: 225, SOUTHWESTBOUND: 225,
+    W: 270, WEST: 270, WESTBOUND: 270, WB: 270,
+    NW: 315, NORTHWEST: 315, NORTHWESTBOUND: 315,
+  };
+  return Object.prototype.hasOwnProperty.call(exact, d) ? exact[d] : null;
+}
+
+function headingFromText(text) {
+  const t = String(text || '').toUpperCase().replace(/[()_]/g, ' ');
+  if (!t.trim()) return null;
+
+  // Explicit camera/view phrasing only. Do not greedily read every road name or
+  // provider direction field here; those are handled separately below.
+  const explicitPatterns = [
+    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(NORTH\s*EAST|NORTHEAST|NE)\b/, 45],
+    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(SOUTH\s*EAST|SOUTHEAST|SE)\b/, 135],
+    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(SOUTH\s*WEST|SOUTHWEST|SW)\b/, 225],
+    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(NORTH\s*WEST|NORTHWEST|NW)\b/, 315],
+    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(NORTH|N|NORTHBOUND|NB)\b/, 0],
+    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(EAST|E|EASTBOUND|EB)\b/, 90],
+    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(SOUTH|S|SOUTHBOUND|SB)\b/, 180],
+    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(WEST|W|WESTBOUND|WB)\b/, 270],
+  ];
+  for (const [rx, deg] of explicitPatterns) if (rx.test(t)) return deg;
+
+  // Common camera naming convention: final suffix after a separator, e.g.
+  // "Camera - South". This is used as a fallback only, because some feeds have
+  // better structured direction values than their display names.
+  const suffix = t.match(/(?:^|[-–—/|,\[]\s*)(NORTH\s*EAST|NORTHEAST|NE|SOUTH\s*EAST|SOUTHEAST|SE|SOUTH\s*WEST|SOUTHWEST|SW|NORTH\s*WEST|NORTHWEST|NW|NORTHBOUND|SOUTHBOUND|EASTBOUND|WESTBOUND|NB|SB|EB|WB|NORTH|SOUTH|EAST|WEST|N|S|E|W)\s*(?:$|\]|[-–—/|,])/);
+  if (suffix) return directionValueToHeading(suffix[1]);
 
   return null;
+}
+
+function headingFromFeedUrl(url) {
+  const u = String(url || '').toUpperCase();
+  if (!u) return null;
+  const file = u.split(/[/?#]/).filter(Boolean).pop() || u;
+  const token = file.match(/(?:^|[-_])(NORTHWEST|NORTH_EAST|NORTHEAST|SOUTHWEST|SOUTH_EAST|SOUTHEAST|NORTH|SOUTH|EAST|WEST|NW|NE|SW|SE|NB|SB|EB|WB)(?:[-_.]|$)/);
+  return token ? directionValueToHeading(token[1]) : null;
+}
+
+function inferHeading(cam) {
+  // Highest priority: an active view label such as "Facing West". This is only
+  // present when a specific camera view button is selected.
+  const viewHeading = headingFromText([cam.angleName || '', cam.viewLabel || ''].join(' '));
+  if (viewHeading !== null) return viewHeading;
+
+  // Structured provider direction is the best source for the uploaded QLD-style
+  // records: { direction: "North" | "South" | "East" | "West" | ... }.
+  const directionHeading = directionValueToHeading(cam.direction);
+  if (directionHeading !== null) return directionHeading;
+
+  // Numeric heading from the dataset/frustum-generation pipeline, if present.
+  if (typeof cam.heading === 'number' && isFinite(cam.heading)) {
+    return (Math.round(cam.heading / 45) * 45 + 360) % 360;
+  }
+
+  // Filename is often reliable for QLD-style image feeds, but only use it after
+  // structured fields because some providers put road/destination text here.
+  const urlHeading = headingFromFeedUrl(cam.imageUrl || cam.videoUrl || '');
+  if (urlHeading !== null) return urlHeading;
+
+  // Finally fall back to camera name/location suffixes. Avoid description/roadway
+  // here because they frequently contain district, road, or cross-street text.
+  return headingFromText([cam.location || '', cam.name || ''].join(' '));
 }
 
 function getDirColor(heading) {
@@ -1337,6 +1936,71 @@ function removeFrustum() {
   document.getElementById('statusFrustum').style.display = 'none';
 }
 
+function showSelectedCameraMarker(cam, height = 0) {
+  if (!viewer || !cam) return;
+  removeSelectedCameraMarker();
+
+  const heading = inferHeading(cam);
+  const colour = heading === null ? Cesium.Color.fromCssColorString('#2563eb') : getDirColor(heading);
+  const baseHeight = Math.max(0, Number(height) || 0) + 1.5;
+  const beaconHeight = google3DEnabled ? 42 : 1400;
+  const topHeight = baseHeight + beaconHeight;
+  const basePos = Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, baseHeight);
+  const topPos = Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, topHeight);
+
+  // Selected cameras are shown as a ground-anchored beacon instead of a single
+  // floating dot. This is much more stable over photorealistic 3D tiles: the
+  // pole shows the true camera location at the surface, while the glowing top
+  // marker stays visible above trees/buildings/mesh artefacts.
+  selectedCameraMarker = viewer.entities.add({
+    id: `selected-camera-beacon-${cam.id}`,
+    position: topPos,
+    point: {
+      pixelSize: google3DEnabled ? 14 : 12,
+      color: colour.withAlpha ? colour.withAlpha(1) : colour,
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 3,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      heightReference: Cesium.HeightReference.NONE,
+      scaleByDistance: new Cesium.NearFarScalar(50, 1.35, 5000, 0.85),
+    },
+    polyline: {
+      positions: [basePos, topPos],
+      width: google3DEnabled ? 3 : 2,
+      material: new Cesium.PolylineGlowMaterialProperty({
+        glowPower: 0.18,
+        taperPower: 0.45,
+        color: colour.withAlpha ? colour.withAlpha(0.95) : colour,
+      }),
+      depthFailMaterial: new Cesium.PolylineGlowMaterialProperty({
+        glowPower: 0.15,
+        taperPower: 0.45,
+        color: Cesium.Color.WHITE.withAlpha(0.55),
+      }),
+      clampToGround: false,
+    },
+    label: {
+      text: cam.location || cam.name || cam.id || 'Camera',
+      font: '600 12px Inter, system-ui, sans-serif',
+      fillColor: Cesium.Color.WHITE,
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 3,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      pixelOffset: new Cesium.Cartesian2(0, -18),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, google3DEnabled ? 8000 : 250000),
+    },
+  });
+}
+
+function removeSelectedCameraMarker() {
+  if (selectedCameraMarker && viewer) {
+    viewer.entities.remove(selectedCameraMarker);
+    selectedCameraMarker = null;
+  }
+}
+
 
 // ==========================================================
 //  CESIUM INIT
@@ -1348,11 +2012,15 @@ function initCesium() {
     'XcKpgANiY19MC4bdFUXMVEBToBmqS8kuYpUlxJHYZxk';
 
   viewer = new Cesium.Viewer('cesiumContainer', {
-    imageryProvider: new Cesium.UrlTemplateImageryProvider({
-      url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-      credit: '© OpenStreetMap contributors',
-      maximumLevel: 19,
-    }),
+    // Satellite fallback before the user enables Google Photorealistic 3D Tiles.
+    // Use Cesium's ArcGIS provider rather than a raw tile template; the raw /tile/{z}/{y}/{x}
+    // template can render as a plain blue globe in Cesium in some browser/CORS/cache states.
+    baseLayer: Cesium.ImageryLayer.fromProviderAsync(
+      Cesium.ArcGisMapServerImageryProvider.fromUrl(
+        'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer',
+        { credit: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community' }
+      )
+    ),
     terrainProvider: new Cesium.EllipsoidTerrainProvider(),
     baseLayerPicker: false,
     navigationHelpButton: false,
@@ -1404,7 +2072,7 @@ function initCesium() {
     const entities = dataSource.entities.values;
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
-      if (e._searchOff) { e.show = false; continue; }
+      if (e._searchOff || e._selectedHidden) { e.show = false; continue; }
       if (!e._bfp)      { e.show = true;  continue; }
       e.show = (cx * e._bfp.x + cy * e._bfp.y + cz * e._bfp.z) > 0;
     }
@@ -1568,6 +2236,10 @@ function setupClickHandler() {
     if (!picked || !picked.id) { deselect(); return; }
 
     const entity = picked.id;
+    if (typeof entity.id === 'string' && entity.id.startsWith('selected-camera-marker-') && selectedCamera) {
+      selectCamera(selectedCamera);
+      return;
+    }
     const cam    = cameras.find(c => c.id === entity.id);
     if (cam) { selectCamera(cam); return; }
 
@@ -1590,49 +2262,77 @@ function setupClickHandler() {
 //  SELECT / DESELECT
 // ==========================================================
 async function selectCamera(cam) {
+  if (selectedCamera && selectedCamera.id !== cam.id && dataSource) {
+    const prevEntity = dataSource.entities.getById(selectedCamera.id);
+    if (prevEntity) {
+      prevEntity._selectedHidden = false;
+      prevEntity.show = true;
+      prevEntity.position = new Cesium.ConstantPositionProperty(
+        Cesium.Cartesian3.fromDegrees(selectedCamera.lng, selectedCamera.lat, 0)
+      );
+    }
+  }
+
   selectedCamera = cam;
   showFrustum(cam);
 
   const groundH = await sampleGroundHeight(cam.lng, cam.lat);
   const heading  = inferHeading(cam);
+  showSelectedCameraMarker(cam, groundH);
 
-  if (heading !== null) {
-    const backAngle = (heading + 180) % 360;
-    const hRad      = Cesium.Math.toRadians(backAngle);
-    const camPos    = Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, groundH);
-    const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(camPos);
+  // Fly to an oblique inspection angle rather than a top-down view.
+  // This makes Google Photorealistic 3D Tiles legible once they stream in.
+  const cameraHeading = heading !== null ? heading : 0;
+  const backAngle = (cameraHeading + 180) % 360;
+  const hRad      = Cesium.Math.toRadians(backAngle);
+  const camPos    = Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, groundH);
+  const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(camPos);
 
-    const offsetENU  = new Cesium.Cartesian3(Math.sin(hRad) * 90, Math.cos(hRad) * 90, 35);
+  if (google3DEnabled) {
+    // Close, low oblique inspection view for photorealistic 3D tiles.
+    const offsetENU  = new Cesium.Cartesian3(
+      Math.sin(hRad) * 260,
+      Math.cos(hRad) * 260,
+      135
+    );
     const offsetECEF = Cesium.Matrix4.multiplyByPointAsVector(enuToWorld, offsetENU, new Cesium.Cartesian3());
     const viewerPos  = Cesium.Cartesian3.add(camPos, offsetECEF, new Cesium.Cartesian3());
 
     viewer.camera.flyTo({
       destination: viewerPos,
       orientation: {
-        heading: Cesium.Math.toRadians(heading),
-        pitch:   Cesium.Math.toRadians(-18),
+        heading: Cesium.Math.toRadians(cameraHeading),
+        pitch:   Cesium.Math.toRadians(-28),
         roll: 0,
       },
-      duration: 1.5,
+      duration: 1.55,
       easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
     });
   } else {
-    // No direction known — fly straight overhead so the dot is centred on screen
+    // 2D/satellite fallback is just an ellipsoid globe. Keep this view
+    // intentionally top-down and high enough that Cesium does not clip into
+    // black space. This also keeps the selected camera dot centred on screen.
     viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, groundH + 180),
-      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
-      duration: 1.2,
+      destination: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, 28000),
+      orientation: {
+        heading: Cesium.Math.toRadians(cameraHeading),
+        pitch:   Cesium.Math.toRadians(-90),
+        roll: 0,
+      },
+      duration: 1.25,
       easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
     });
   }
 
-  // Lift dot to terrain height so it aligns with frustum apex
+  // Avoid the duplicate selected-camera dot in 3D mode.
+  // The main clustered camera entity remains at its dataset position for normal browsing,
+  // but while selected it is hidden and replaced by the explicit ground-anchored selected beacon.
+  // This avoids one dot appearing under/inside the 3D tiles and another above the surface.
   if (dataSource) {
     const selEntity = dataSource.entities.getById(cam.id);
     if (selEntity) {
-      selEntity.position = new Cesium.ConstantPositionProperty(
-        Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, groundH + 2)
-      );
+      selEntity._selectedHidden = true;
+      selEntity.show = false;
     }
   }
 
@@ -1645,12 +2345,15 @@ function deselect() {
   if (selectedCamera && dataSource) {
     const prev = dataSource.entities.getById(selectedCamera.id);
     if (prev) {
+      prev._selectedHidden = false;
       prev.position = new Cesium.ConstantPositionProperty(
         Cesium.Cartesian3.fromDegrees(selectedCamera.lng, selectedCamera.lat, 0)
       );
+      prev.show = true;
     }
   }
   selectedCamera = null;
+  removeSelectedCameraMarker();
   removeFrustum();
   document.getElementById('sidePanel').classList.remove('open');
   document.getElementById('frustumInfo').style.left = '12px';
@@ -1702,7 +2405,7 @@ function populateSidePanel(cam) {
         btn.classList.add('active');
         setImage(v.imageUrl);
         removeFrustum();
-        if (frustumsEnabled) showFrustum({ ...cam, description: v.angleName || cam.description });
+        if (frustumsEnabled) showFrustum({ ...cam, heading: undefined, direction: undefined, angleName: v.angleName || '', viewLabel: v.label || '', description: v.angleName || v.label || cam.description });
       };
       viewList.appendChild(btn);
     });
@@ -1752,6 +2455,7 @@ function populateSidePanel(cam) {
     }
   }
   openPip(pipTitle);
+  updateDashboardBadge();
 }
 
 let currentImageUrl = null;
@@ -2022,7 +2726,11 @@ let minimapLeaflet  = null;   // Leaflet map instance
 let minimapMarker   = null;   // current position dot
 let minimapCone     = null;   // view direction cone
 let minimapVisible  = true;
+let minimapMouseInside = false;
 let minimapThrottle = 0;
+let minimapManualView = false;
+let minimapSyncing = false;
+let minimapManualBaseline = null;
 
 function clearSearchResults() {
   // Restore all entity visibility
@@ -2039,6 +2747,10 @@ function clearSearchResults() {
     }
   });
   searchResultCameras = [];
+  if (activeView === 'dashboard') {
+    dashboardSearchContext = null;
+    if (dashboardMap) renderDashboardMap();
+  }
   // Remove pin
   if (searchMarker && viewer) {
     viewer.entities.remove(searchMarker);
@@ -2080,7 +2792,17 @@ async function runLocationSearch(query) {
   // Clear previous results first
   clearSearchResults();
 
-  // Drop a yellow pin at the geocoded location
+  if (activeView === 'dashboard') {
+    dashboardSearchContext = { lat, lng, name };
+    if (dashboardMap) {
+      dashboardMap.invalidateSize();
+      dashboardMap.setView([lat, lng], Math.max(dashboardMap.getZoom() || 0, 12), { animate: true });
+    }
+    renderDashboardMap();
+  }
+
+  // Drop a yellow pin at the geocoded location for the globe view.
+  if (activeView === 'globe' && viewer) {
   searchMarker = viewer.entities.add({
     position: Cesium.Cartesian3.fromDegrees(lng, lat, 0),
     point: {
@@ -2110,6 +2832,7 @@ async function runLocationSearch(query) {
     duration: 1.8,
     easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
   });
+  }
 
   // Find 10 nearest cameras using haversine distance
   const N = 10;
@@ -2121,15 +2844,17 @@ async function runLocationSearch(query) {
 
   searchResultCameras = nearest.map(r => r.cam);
 
-  // Highlight nearest cameras in yellow/amber
-  searchResultCameras.forEach(cam => {
-    const e = dataSource && dataSource.entities.getById(cam.id);
-    if (e && e.point) {
-      e.point.color      = new Cesium.ConstantProperty(Cesium.Color.fromCssColorString('#f59e0b'));
-      e.point.pixelSize  = new Cesium.ConstantProperty(11);
-      e.point.outlineWidth = new Cesium.ConstantProperty(2);
-    }
-  });
+  // Highlight nearest cameras in yellow/amber on the globe only.
+  if (activeView === 'globe') {
+    searchResultCameras.forEach(cam => {
+      const e = dataSource && dataSource.entities.getById(cam.id);
+      if (e && e.point) {
+        e.point.color      = new Cesium.ConstantProperty(Cesium.Color.fromCssColorString('#f59e0b'));
+        e.point.pixelSize  = new Cesium.ConstantProperty(11);
+        e.point.outlineWidth = new Cesium.ConstantProperty(2);
+      }
+    });
+  }
 
   // Populate results list
   const panel = document.getElementById('searchResults');
@@ -2144,11 +2869,34 @@ async function runLocationSearch(query) {
     const dirBadge = heading !== null
       ? `<span class="sr-dir">${['N','NE','E','SE','S','SW','W','NW'][heading/45]}</span>`
       : '';
+    const exists = dashboardState.cameras.includes(String(cam.id));
+    const full = dashboardState.cameras.length >= DASHBOARD_MAX_CAMERAS && !exists;
     item.innerHTML = `
-      <div class="sr-name">${cam.location || cam.id}</div>
-      <div class="sr-meta">${distStr} away ${dirBadge}</div>
+      <div class="sr-row-main">
+        <div class="sr-row-text">
+          <div class="sr-name">${escapeHtml(cam.location || cam.id)}</div>
+          <div class="sr-meta">${distStr} away ${dirBadge}</div>
+        </div>
+        <button class="sr-add-btn" ${exists || full ? 'disabled' : ''}>${exists ? 'Added' : full ? 'Full' : '+ Add'}</button>
+      </div>
     `;
-    item.onclick = () => selectCamera(cam);
+    item.onclick = () => {
+      if (activeView === 'dashboard') {
+        dashboardSearchContext = { lat: cam.lat, lng: cam.lng, name: cameraTitle(cam) };
+        if (dashboardMap) dashboardMap.setView([cam.lat, cam.lng], Math.max(dashboardMap.getZoom() || 0, 13), { animate: true });
+        renderDashboardMap();
+      } else {
+        selectCamera(cam);
+      }
+    };
+    const addBtn = item.querySelector('.sr-add-btn');
+    addBtn.onclick = ev => {
+      ev.stopPropagation();
+      if (addCameraToDashboard(cam)) {
+        addBtn.textContent = 'Added';
+        addBtn.disabled = true;
+      }
+    };
     list.appendChild(item);
   });
 
@@ -2203,7 +2951,7 @@ function loadFile(file) {
       try {
         cameras = JSON.parse(e.target.result);
         cameraMap.clear();
-        cameras.forEach(c => cameraMap.set(c.id, c));
+        cameras.forEach(c => { cameraMap.set(c.id, c); cameraMap.set(String(c.id), c); });
         fill.style.width = '80%';
         txt.textContent  = `${cameras.length.toLocaleString()} cameras — building map…`;
         setTimeout(initializeMap, 80);
@@ -2223,6 +2971,9 @@ async function initializeMap() {
   document.getElementById('statusBar').style.display = 'flex';
   document.getElementById('progressFill').style.width = '90%';
   document.getElementById('cameraCount').textContent   = `${cameras.length.toLocaleString()} cameras`;
+  loadDashboardState();
+  updateDashboardBadge();
+  toggleDashboardMap(dashboardState.mapVisible);
 
   if (!viewer) initCesium();
   await createCameraEntities(cameras);
@@ -2251,8 +3002,9 @@ function initMinimap() {
     keyboard: false,
   }).setView([20, 0], 2);
 
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 18,
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 13,
+    keepBuffer: 2,
   }).addTo(minimapLeaflet);
 
   // Current position marker — small blue dot
@@ -2275,56 +3027,177 @@ function initMinimap() {
   }).addTo(minimapLeaflet);
 }
 
-function updateMinimap() {
+function getGlobeCameraSignature() {
+  if (!viewer) return '';
+  const c = viewer.camera.positionCartographic;
+  return [
+    Math.round(Cesium.Math.toDegrees(c.latitude) * 10000),
+    Math.round(Cesium.Math.toDegrees(c.longitude) * 10000),
+    Math.round(c.height),
+    Math.round(viewer.camera.heading * 1000),
+    Math.round(viewer.camera.pitch * 1000),
+    Math.round(viewer.camera.roll * 1000),
+  ].join('|');
+}
+
+function normaliseLng(lng) {
+  return ((lng + 540) % 360) - 180;
+}
+
+function destinationLatLng(latDeg, lngDeg, bearingRad, distanceKm) {
+  const R = 6371.0088;
+  const lat1 = Cesium.Math.toRadians(latDeg);
+  const lon1 = Cesium.Math.toRadians(lngDeg);
+  const d = distanceKm / R;
+
+  const sinLat1 = Math.sin(lat1);
+  const cosLat1 = Math.cos(lat1);
+  const sinD = Math.sin(d);
+  const cosD = Math.cos(d);
+
+  const lat2 = Math.asin(sinLat1 * cosD + cosLat1 * sinD * Math.cos(bearingRad));
+  const lon2 = lon1 + Math.atan2(
+    Math.sin(bearingRad) * sinD * cosLat1,
+    cosD - sinLat1 * Math.sin(lat2)
+  );
+
+  return [Cesium.Math.toDegrees(lat2), normaliseLng(Cesium.Math.toDegrees(lon2))];
+}
+
+function pickGlobeLatLng(screenX, screenY) {
+  const pos = new Cesium.Cartesian2(screenX, screenY);
+  const cartesian = viewer.scene.pickPosition(pos)
+    || viewer.camera.pickEllipsoid(pos, viewer.scene.globe.ellipsoid);
+  if (!cartesian) return null;
+  const carto = Cesium.Cartographic.fromCartesian(cartesian);
+  return [Cesium.Math.toDegrees(carto.latitude), Cesium.Math.toDegrees(carto.longitude)];
+}
+
+function pickEllipsoidLatLng(screenX, screenY) {
+  if (!viewer) return null;
+  const pos = new Cesium.Cartesian2(screenX, screenY);
+  const cartesian = viewer.camera.pickEllipsoid(pos, viewer.scene.globe.ellipsoid);
+  if (!cartesian) return null;
+  const carto = Cesium.Cartographic.fromCartesian(cartesian);
+  return [
+    Cesium.Math.toDegrees(carto.latitude),
+    normaliseLng(Cesium.Math.toDegrees(carto.longitude))
+  ];
+}
+
+function unwrapLngNear(lng, refLng) {
+  let out = normaliseLng(lng);
+  let ref = normaliseLng(refLng);
+  while (out - ref > 180) out -= 360;
+  while (out - ref < -180) out += 360;
+  return out;
+}
+
+function getViewportFootprintLatLngs(centerLat, centerLng) {
+  if (!viewer) return [];
+  const w = viewer.canvas.clientWidth;
+  const h = viewer.canvas.clientHeight;
+  const step = 10;
+  const pad = 2;
+  const pts = [];
+
+  const add = (x, y) => {
+    const p = pickEllipsoidLatLng(
+      Math.max(pad, Math.min(w - pad, x)),
+      Math.max(pad, Math.min(h - pad, y))
+    );
+    if (!p) return;
+    const lat = Math.max(-85, Math.min(85, p[0]));
+    const lng = unwrapLngNear(p[1], centerLng);
+    const last = pts[pts.length - 1];
+    if (!last || Math.abs(last[0] - lat) > 0.01 || Math.abs(last[1] - lng) > 0.01) {
+      pts.push([lat, lng]);
+    }
+  };
+
+  // Walk around the screen edge in order. Points that miss space beyond the
+  // globe limb are skipped, giving a stable footprint for both top-down and
+  // oblique globe views.
+  for (let i = 0; i <= step; i++) add((w * i) / step, 0);
+  for (let i = 1; i <= step; i++) add(w, (h * i) / step);
+  for (let i = 1; i <= step; i++) add(w - (w * i) / step, h);
+  for (let i = 1; i < step; i++) add(0, h - (h * i) / step);
+
+  // If the horizon/limb means the border produces too few hits, sample an
+  // inner rectangle as a fallback rather than drawing a misleading heading cone.
+  if (pts.length < 3) {
+    pts.length = 0;
+    const mx = w * 0.18;
+    const my = h * 0.18;
+    for (let i = 0; i <= step; i++) add(mx + ((w - 2 * mx) * i) / step, my);
+    for (let i = 1; i <= step; i++) add(w - mx, my + ((h - 2 * my) * i) / step);
+    for (let i = 1; i <= step; i++) add(w - mx - ((w - 2 * mx) * i) / step, h - my);
+    for (let i = 1; i < step; i++) add(mx, h - my - ((h - 2 * my) * i) / step);
+  }
+
+  if (pts.length < 3) return [];
+
+  // Prevent pathological wrap/pole cases from drawing across the whole world.
+  const lngs = pts.map(p => p[1]);
+  const span = Math.max(...lngs) - Math.min(...lngs);
+  if (span > 300) return [];
+
+  return pts;
+}
+
+function getFallbackHeadingWedge(lat, lng, alt) {
+  const heading = viewer.camera.heading;
+  const halfFov = Cesium.Math.toRadians(28);
+  const reachKm = Math.max(2, Math.min(350, alt / 25000));
+  const left  = destinationLatLng(lat, lng, heading - halfFov, reachKm);
+  const tip   = destinationLatLng(lat, lng, heading, reachKm * 1.12);
+  const right = destinationLatLng(lat, lng, heading + halfFov, reachKm);
+  return [[lat, lng], left, tip, right].map(p => [
+    Math.max(-85, Math.min(85, p[0])),
+    unwrapLngNear(p[1], lng)
+  ]);
+}
+
+function updateMinimap(force = false) {
   if (!minimapLeaflet || !viewer || !minimapVisible) return;
 
   const now = Date.now();
-  if (now - minimapThrottle < 250) return;
+  if (!force && now - minimapThrottle < 250) return;
   minimapThrottle = now;
 
-  // Get the ground point under the camera centre
-  const centre = new Cesium.Cartesian2(
-    viewer.canvas.clientWidth  / 2,
-    viewer.canvas.clientHeight / 2
-  );
-  const cartesian = viewer.scene.pickPosition(centre)
-    || viewer.camera.pickEllipsoid(centre, viewer.scene.globe.ellipsoid);
+  const w = viewer.canvas.clientWidth;
+  const h = viewer.canvas.clientHeight;
 
-  if (!cartesian) return;
+  // Centre the minimap on the real globe point under the centre of the Cesium
+  // canvas, not on the camera's position in space.
+  const centreLL = pickEllipsoidLatLng(w / 2, h / 2)
+    || pickGlobeLatLng(w / 2, h / 2)
+    || [
+      Cesium.Math.toDegrees(viewer.camera.positionCartographic.latitude),
+      Cesium.Math.toDegrees(viewer.camera.positionCartographic.longitude)
+    ];
 
-  const carto = Cesium.Cartographic.fromCartesian(cartesian);
-  const lat   = Cesium.Math.toDegrees(carto.latitude);
-  const lng   = Cesium.Math.toDegrees(carto.longitude);
+  const lat = Math.max(-85, Math.min(85, centreLL[0]));
+  const lng = normaliseLng(centreLL[1]);
 
-  // Auto zoom: map altitude to Leaflet zoom
-  const alt      = viewer.camera.positionCartographic.height;
-  const lzoom    = alt > 5000000 ? 2
-                 : alt > 1000000 ? 4
-                 : alt > 200000  ? 7
-                 : alt > 50000   ? 10
-                 : alt > 10000   ? 12
-                 : 14;
+  const alt = viewer.camera.positionCartographic.height;
+  const lzoom = alt > 5000000 ? 2
+              : alt > 1000000 ? 4
+              : alt > 200000  ? 7
+              : alt > 50000   ? 10
+              : alt > 10000   ? 11
+              : 12;
 
   minimapMarker.setLatLng([lat, lng]);
   minimapLeaflet.setView([lat, lng], lzoom, { animate: false });
+  minimapLeaflet.invalidateSize(false);
 
-  // Build a view-direction cone from camera heading + altitude
-  const heading = viewer.camera.heading; // radians, CW from North
-  const FOV     = Cesium.Math.toRadians(45); // half-angle of cone display
-  const reach   = Math.max(0.003, Math.min(8, alt / 100000)); // degrees
-
-  const tip = [lat, lng];
-
-  // Left and right edges of cone
-  const leftAngle  = heading - FOV;
-  const rightAngle = heading + FOV;
-
-  const leftLat  = lat + reach * Math.cos(leftAngle);
-  const leftLng  = lng + reach * Math.sin(leftAngle);
-  const rightLat = lat + reach * Math.cos(rightAngle);
-  const rightLng = lng + reach * Math.sin(rightAngle);
-
-  minimapCone.setLatLngs([tip, [leftLat, leftLng], [rightLat, rightLng]]);
+  // Draw the actual visible globe footprint on the minimap. This is more
+  // accurate than a simple heading wedge because it follows the current globe
+  // view, zoom, pitch, roll, and screen aspect ratio.
+  let footprint = getViewportFootprintLatLngs(lat, lng);
+  if (footprint.length < 3) footprint = getFallbackHeadingWedge(lat, lng, alt);
+  minimapCone.setLatLngs(footprint);
 }
 
 let minimapExpanded = false;
@@ -2349,6 +3222,793 @@ function toggleMinimapExpand() {
   if (minimapLeaflet) {
     setTimeout(() => minimapLeaflet.invalidateSize(), 220);
   }
+}
+
+
+// ==========================================================
+//  DASHBOARD
+// ==========================================================
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
+}
+
+function dashDomId(id) {
+  return String(id ?? '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function cameraTitle(cam) {
+  let title = cam?.location || cam?.name || cam?.id || 'Camera';
+  if (typeof title === 'string' && title.includes(' - ')) {
+    const parts = title.split(' - ');
+    if (parts.length >= 2 && parts[0].trim() === parts[1].trim()) {
+      title = parts.slice(1).join(' - ');
+    }
+  }
+  return title;
+}
+
+function getCameraFeed(cam) {
+  const firstView = cam?.views && cam.views.length ? cam.views[0] : null;
+  return {
+    imageUrl: cam?.imageUrl || firstView?.imageUrl || null,
+    videoUrl: cam?.videoUrl || firstView?.videoUrl || null,
+  };
+}
+
+function loadDashboardState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(DASHBOARD_STORAGE_KEY) || '{}');
+    dashboardState = {
+      ...dashboardState,
+      ...saved,
+      cameras: Array.isArray(saved.cameras) ? saved.cameras.map(String).slice(0, DASHBOARD_MAX_CAMERAS) : [],
+      focusCameraId: saved.focusCameraId != null ? String(saved.focusCameraId) : null,
+      selectedCameraId: saved.selectedCameraId != null ? String(saved.selectedCameraId) : null,
+      mosaic: saved.mosaic || {}
+    };
+  } catch (_) {}
+}
+
+function saveDashboardState() {
+  localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify({
+    cameras: dashboardState.cameras,
+    layout: dashboardState.layout,
+    gridSize: dashboardState.gridSize,
+    mapVisible: dashboardState.mapVisible,
+    focusCameraId: dashboardState.focusCameraId,
+    selectedCameraId: dashboardState.selectedCameraId,
+    mosaic: dashboardState.mosaic
+  }));
+}
+
+function dashboardCameras() {
+  return dashboardState.cameras
+    .map(id => cameraMap.get(id) || cameras.find(c => c.id === id))
+    .filter(Boolean);
+}
+
+function updateDashboardBadge() {
+  const badge = document.getElementById('dashboardNavBadge');
+  if (badge) badge.textContent = dashboardState.cameras.length;
+  const sideBtn = document.getElementById('addSelectedToDashboard');
+  if (sideBtn && selectedCamera) {
+    const exists = dashboardState.cameras.includes(String(selectedCamera.id));
+    sideBtn.textContent = exists ? '✓ In dashboard' : '+ Add to dashboard';
+    sideBtn.disabled = exists || dashboardState.cameras.length >= DASHBOARD_MAX_CAMERAS;
+  }
+}
+
+function switchView(view) {
+  activeView = view === 'dashboard' ? 'dashboard' : 'globe';
+  document.body.classList.toggle('dashboard-active', activeView === 'dashboard');
+  document.getElementById('dashboardView').style.display = activeView === 'dashboard' ? 'flex' : 'none';
+  document.getElementById('btnGlobeView').classList.toggle('active', activeView === 'globe');
+  document.getElementById('btnDashboardView').classList.toggle('active', activeView === 'dashboard');
+
+  if (activeView === 'dashboard') {
+    closePip();
+    legendOpen = false;
+    settingsPanelOpen = false;
+    document.getElementById('legend').style.display = 'none';
+    document.getElementById('settingsPanel').style.display = 'none';
+    document.getElementById('btnLegend').classList.remove('active');
+    document.getElementById('btnSettings').classList.remove('active');
+    document.getElementById('dashboardAddPanel').classList.remove('open');
+    initDashboardMap();
+    renderDashboard();
+    setTimeout(() => dashboardMap && dashboardMap.invalidateSize(), 80);
+  } else {
+    document.getElementById('dashboardAddPanel').classList.remove('open');
+    if (viewer) viewer.resize();
+  }
+}
+
+function addCameraToDashboard(cam, options = {}) {
+  if (!cam || !cam.id) return false;
+  const id = String(cam.id);
+
+  if (dashboardState.cameras.includes(id)) {
+    dashboardState.selectedCameraId = id;
+    if (!dashboardState.focusCameraId) dashboardState.focusCameraId = id;
+    dashboardState._fitPending = true;
+    saveDashboardState();
+    updateDashboardBadge();
+    renderDashboard();
+    if (activeView === 'dashboard') setTimeout(() => fitDashboardMap(), 80);
+    return false;
+  }
+
+  if (dashboardState.cameras.length >= DASHBOARD_MAX_CAMERAS) {
+    alert(`Dashboard is limited to ${DASHBOARD_MAX_CAMERAS} cameras.`);
+    return false;
+  }
+
+  dashboardState.cameras.push(id);
+  if (!dashboardState.focusCameraId) dashboardState.focusCameraId = id;
+  dashboardState.selectedCameraId = id;
+  dashboardState._fitPending = true;
+  saveDashboardState();
+  updateDashboardBadge();
+  renderDashboard();
+
+  // As soon as a camera is added, fit the dashboard map automatically.
+  // This keeps the map situational without needing the user to press Fit.
+  if (activeView === 'dashboard') {
+    setTimeout(() => {
+      if (dashboardMap) {
+        dashboardMap.invalidateSize();
+        fitDashboardMap();
+      }
+    }, options.fitDelay || 90);
+  }
+
+  return true;
+}
+
+function removeCameraFromDashboard(id) {
+  dashboardState.cameras = dashboardState.cameras.filter(x => x !== id);
+  dashboardErrorCounts.delete(String(id));
+  dashboardLastRefresh.delete(String(id));
+  if (dashboardRefreshTimers.has(String(id))) clearTimeout(dashboardRefreshTimers.get(String(id)));
+  dashboardRefreshTimers.delete(String(id));
+  if (dashboardHls.has(String(id))) { dashboardHls.get(String(id)).destroy(); dashboardHls.delete(String(id)); }
+  if (dashboardState.focusCameraId === id) dashboardState.focusCameraId = dashboardState.cameras[0] || null;
+  if (dashboardState.selectedCameraId === id) dashboardState.selectedCameraId = String(dashboardState.focusCameraId);
+  saveDashboardState();
+  updateDashboardBadge();
+  renderDashboard();
+}
+
+function clearDashboard() {
+  dashboardRefreshTimers.forEach(t => clearTimeout(t));
+  dashboardRefreshTimers.clear();
+  dashboardHls.forEach(h => h.destroy());
+  dashboardHls.clear();
+  dashboardLastRefresh.clear();
+  dashboardErrorCounts.clear();
+  dashboardState.cameras = [];
+  dashboardState.focusCameraId = null;
+  dashboardState.selectedCameraId = null;
+  dashboardState.mosaic = {};
+  saveDashboardState();
+  updateDashboardBadge();
+  renderDashboard();
+}
+
+function setDashboardLayout(mode) {
+  dashboardState.layout = mode;
+  saveDashboardState();
+  renderDashboard();
+}
+
+function setDashboardGrid(size) {
+  dashboardState.gridSize = size;
+  saveDashboardState();
+  renderDashboard();
+}
+
+function setDashboardSelected(id) {
+  dashboardState.selectedCameraId = id;
+  if (!dashboardState.focusCameraId) dashboardState.focusCameraId = id;
+  saveDashboardState();
+  renderDashboardMap();
+  document.querySelectorAll('.dash-card').forEach(el => el.classList.toggle('selected', el.dataset.id === String(id)));
+}
+
+function promoteDashboardCamera(id) {
+  dashboardState.focusCameraId = id;
+  dashboardState.selectedCameraId = id;
+  if (dashboardState.layout === 'grid') dashboardState.layout = 'focus';
+  saveDashboardState();
+  renderDashboard();
+}
+
+function dashboardDirectionBadge(cam) {
+  const heading = inferHeading(cam);
+  return heading !== null ? `<span class="dash-dir">${DIR_NAMES[heading]} ${heading}°</span>` : `<span class="dash-dir">UNK</span>`;
+}
+
+function renderDashboard() {
+  const wall = document.getElementById('dashboardFeedWall');
+  if (!wall) return;
+
+  document.querySelectorAll('#dashboardBar [data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === dashboardState.layout));
+  document.querySelectorAll('#dashboardBar [data-grid]').forEach(b => b.classList.toggle('active', b.dataset.grid === dashboardState.gridSize));
+
+  wall.className = '';
+  if (dashboardState.layout === 'grid') wall.classList.add(`grid-${dashboardState.gridSize}`);
+  else wall.classList.add(`mode-${dashboardState.layout}`);
+
+  const cams = dashboardCameras();
+  dashboardRefreshTimers.forEach(t => clearTimeout(t));
+  dashboardRefreshTimers.clear();
+  dashboardHls.forEach(h => h.destroy());
+  dashboardHls.clear();
+
+  if (!cams.length) {
+    wall.innerHTML = `<div class="dashboard-empty">
+      <div>
+        <strong>No dashboard cameras yet.</strong><br>
+        Select a camera on the globe and click “Add to dashboard”, or use “+ Add camera” here.
+      </div>
+    </div>`;
+    updateDashboardStatus();
+    renderDashboardMap();
+    return;
+  }
+
+  if (!dashboardState.focusCameraId || !dashboardState.cameras.includes(dashboardState.focusCameraId)) {
+    dashboardState.focusCameraId = String(cams[0].id);
+  }
+  if (!dashboardState.selectedCameraId || !dashboardState.cameras.includes(String(dashboardState.selectedCameraId))) {
+    dashboardState.selectedCameraId = String(dashboardState.focusCameraId);
+  }
+
+  wall.innerHTML = cams.map((cam, idx) => dashboardCardHtml(cam, idx)).join('');
+  cams.forEach((cam, idx) => mountDashboardFeed(cam, idx));
+  setupMosaicCardHandlers();
+  updateDashboardStatus();
+  renderDashboardMap();
+}
+
+function dashboardCardHtml(cam, idx) {
+  const title = escapeHtml(cameraTitle(cam));
+  const heading = inferHeading(cam);
+  const dir = heading !== null ? `${DIR_NAMES[heading]} · ${heading}°` : 'Direction unknown';
+  const updated = dashboardLastRefresh.get(String(cam.id));
+  const refreshText = updated ? `Updated ${new Date(updated).toLocaleTimeString()}` : 'Waiting for refresh';
+  const isFocusMain = dashboardState.layout === 'focus' && String(cam.id) === String(dashboardState.focusCameraId);
+  const isFocusThumb = dashboardState.layout === 'focus' && String(cam.id) !== String(dashboardState.focusCameraId);
+  const isSingle = dashboardState.layout === 'single' && String(cam.id) === String(dashboardState.focusCameraId);
+  const selected = dashboardState.selectedCameraId === String(cam.id);
+
+  let mosaicStyle = '';
+  if (dashboardState.layout === 'mosaic') {
+    const pos = dashboardState.mosaic[cam.id] || defaultMosaicPos(idx);
+    mosaicStyle = `style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;height:${pos.h}%;"`;
+  }
+
+  const cls = [
+    'dash-card',
+    selected ? 'selected' : '',
+    isFocusMain ? 'focus-main' : '',
+    isFocusThumb ? 'focus-thumb' : '',
+    isSingle ? 'single-active' : ''
+  ].filter(Boolean).join(' ');
+
+  return `<article class="${cls}" data-id="${escapeHtml(cam.id)}" ${mosaicStyle}>
+    <div class="dash-actions">
+      <button class="dash-mini-btn" data-action="focus" title="Promote">Focus</button>
+      <button class="dash-mini-btn" data-action="single" title="Single">Single</button>
+      <button class="dash-mini-btn" data-action="locate" title="Locate on globe">Locate</button>
+      <button class="dash-mini-btn" data-action="open" title="Open feed">↗</button>
+      <button class="dash-mini-btn" data-action="refresh" title="Refresh">↻</button>
+      <button class="dash-mini-btn" data-action="remove" title="Remove">×</button>
+    </div>
+    <div class="dash-media" id="dash-media-${dashDomId(cam.id)}">
+      <div class="dash-no-feed">Loading feed…</div>
+    </div>
+    <div class="dash-meta">
+      <div class="dash-title" title="${title}">${title}</div>
+      ${dashboardDirectionBadge(cam)}
+      <div class="dash-sub">${escapeHtml(dir)} · <span id="dash-updated-${dashDomId(cam.id)}">${escapeHtml(refreshText)}</span></div>
+    </div>
+    <div class="dash-resize" data-action="resize"></div>
+  </article>`;
+}
+
+function defaultMosaicPos(idx) {
+  const col = idx % 4;
+  const row = Math.floor(idx / 4);
+  return { x: 1 + col * 24.5, y: 1 + row * 24, w: 23, h: 22 };
+}
+
+function mountDashboardFeed(cam, idx) {
+  const media = document.getElementById(`dash-media-${dashDomId(cam.id)}`);
+  if (!media) return;
+
+  const { imageUrl, videoUrl } = getCameraFeed(cam);
+  if (videoUrl) {
+    const video = document.createElement('video');
+    video.autoplay = true;
+    video.muted = true;
+    video.playsInline = true;
+    video.controls = false;
+    media.innerHTML = '';
+    media.appendChild(video);
+
+    if (videoUrl.includes('.m3u8') && typeof Hls !== 'undefined' && Hls.isSupported()) {
+      const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+      hls.loadSource(videoUrl);
+      hls.attachMedia(video);
+      dashboardHls.set(String(cam.id), hls);
+      hls.on(Hls.Events.ERROR, () => markDashboardRefresh(cam.id, false));
+      hls.on(Hls.Events.MANIFEST_PARSED, () => { markDashboardRefresh(cam.id, true); video.play().catch(() => {}); });
+    } else {
+      video.src = videoUrl;
+      video.onloadeddata = () => markDashboardRefresh(cam.id, true);
+      video.onerror = () => {
+        if (imageUrl) renderDashboardImageFeed(cam, imageUrl, idx);
+        else markDashboardRefresh(cam.id, false);
+      };
+      video.play().catch(() => {});
+    }
+    return;
+  }
+
+  if (imageUrl) {
+    renderDashboardImageFeed(cam, imageUrl, idx);
+  } else {
+    media.innerHTML = '<div class="dash-no-feed">No feed URL available</div>';
+    markDashboardRefresh(cam.id, false, true);
+  }
+}
+
+function renderDashboardImageFeed(cam, imageUrl, idx, manual=false) {
+  const media = document.getElementById(`dash-media-${dashDomId(cam.id)}`);
+  if (!media) return;
+  const img = document.createElement('img');
+  img.alt = cameraTitle(cam);
+  img.loading = 'lazy';
+  img.onload = () => {
+    markDashboardRefresh(cam.id, true);
+    scheduleDashboardImageRefresh(cam, idx);
+  };
+  img.onerror = () => {
+    markDashboardRefresh(cam.id, false);
+    scheduleDashboardImageRefresh(cam, idx, true);
+  };
+  const sep = imageUrl.includes('?') ? '&' : '?';
+  img.src = imageUrl + sep + '_dash=' + Date.now();
+  media.innerHTML = '';
+  media.appendChild(img);
+}
+
+function scheduleDashboardImageRefresh(cam, idx, errored=false) {
+  if (dashboardRefreshPaused || document.hidden) return;
+  const failures = dashboardErrorCounts.get(String(cam.id)) || 0;
+  if (failures >= 3) return;
+
+  const baseInterval = Number(cam.refreshIntervalSec || cam.refreshSeconds || 30) * 1000;
+  const stagger = Math.round((idx / Math.max(1, dashboardState.cameras.length)) * baseInterval);
+  const delay = errored ? Math.min(120000, baseInterval * 2) : baseInterval + stagger;
+
+  if (dashboardRefreshTimers.has(String(cam.id))) clearTimeout(dashboardRefreshTimers.get(String(cam.id)));
+  dashboardRefreshTimers.set(String(cam.id), setTimeout(() => {
+    const feed = getCameraFeed(cam);
+    if (feed.imageUrl) renderDashboardImageFeed(cam, feed.imageUrl, idx);
+  }, delay));
+}
+
+function markDashboardRefresh(id, ok, noRetry=false) {
+  const idKey = String(id);
+  if (ok) {
+    dashboardLastRefresh.set(idKey, Date.now());
+    dashboardErrorCounts.set(idKey, 0);
+  } else {
+    dashboardErrorCounts.set(idKey, (dashboardErrorCounts.get(idKey) || 0) + 1);
+  }
+
+  const el = document.getElementById(`dash-updated-${dashDomId(idKey)}`);
+  if (el) {
+    const failures = dashboardErrorCounts.get(idKey) || 0;
+    el.textContent = ok
+      ? `Updated ${new Date(dashboardLastRefresh.get(idKey)).toLocaleTimeString()}`
+      : failures >= 3 || noRetry ? 'Feed unavailable' : `Retry ${failures}/3`;
+  }
+  updateDashboardStatus();
+}
+
+function updateDashboardStatus() {
+  const el = document.getElementById('dashboardStatus');
+  if (!el) return;
+  const cams = dashboardState.cameras.length;
+  const last = [...dashboardLastRefresh.values()].sort((a, b) => b - a)[0];
+  el.textContent = `${cams}/${DASHBOARD_MAX_CAMERAS} cameras · ${last ? 'last refresh ' + new Date(last).toLocaleTimeString() : 'ready'}`;
+}
+
+function refreshDashboardAll() {
+  dashboardRefreshTimers.forEach(t => clearTimeout(t));
+  dashboardRefreshTimers.clear();
+  dashboardCameras().forEach((cam, idx) => {
+    const feed = getCameraFeed(cam);
+    if (feed.imageUrl) renderDashboardImageFeed(cam, feed.imageUrl, idx, true);
+    else if (feed.videoUrl) mountDashboardFeed(cam, idx);
+  });
+}
+
+function openDashboardFeed(cam) {
+  const { imageUrl, videoUrl } = getCameraFeed(cam);
+  const url = videoUrl || imageUrl;
+  if (!url) return;
+  window.open(url, '_blank', 'noopener');
+}
+
+function locateDashboardCamera(cam) {
+  switchView('globe');
+  selectCamera(cam);
+}
+
+function setupMosaicCardHandlers() {
+  document.querySelectorAll('.dash-card').forEach(card => {
+    const id = card.dataset.id;
+    const cam = cameraMap.get(id) || cameras.find(c => c.id === id);
+    card.addEventListener('click', e => {
+      const actionEl = e.target.closest('[data-action]');
+      if (actionEl) return;
+      setDashboardSelected(id);
+    });
+    card.querySelectorAll('[data-action]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const action = btn.dataset.action;
+        if (action === 'focus') promoteDashboardCamera(id);
+        if (action === 'single') { dashboardState.focusCameraId = id; dashboardState.selectedCameraId = id; dashboardState.layout = 'single'; saveDashboardState(); renderDashboard(); }
+        if (action === 'locate') locateDashboardCamera(cam);
+        if (action === 'open') openDashboardFeed(cam);
+        if (action === 'refresh') mountDashboardFeed(cam, dashboardState.cameras.indexOf(id));
+        if (action === 'remove') removeCameraFromDashboard(id);
+      });
+    });
+
+    if (dashboardState.layout === 'mosaic') {
+      card.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        const wall = document.getElementById('dashboardFeedWall');
+        const wr = wall.getBoundingClientRect();
+        const cr = card.getBoundingClientRect();
+        const resizing = !!e.target.closest('.dash-resize');
+        dashboardMosaicDrag = {
+          id, resizing, wall,
+          startX: e.clientX, startY: e.clientY,
+          x: ((cr.left - wr.left) / wr.width) * 100,
+          y: ((cr.top - wr.top) / wr.height) * 100,
+          w: (cr.width / wr.width) * 100,
+          h: (cr.height / wr.height) * 100
+        };
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+      });
+    }
+  });
+}
+
+document.addEventListener('mousemove', e => {
+  if (!dashboardMosaicDrag) return;
+  const d = dashboardMosaicDrag;
+  const wr = d.wall.getBoundingClientRect();
+  const dx = ((e.clientX - d.startX) / wr.width) * 100;
+  const dy = ((e.clientY - d.startY) / wr.height) * 100;
+  let pos;
+  if (d.resizing) {
+    pos = { x: d.x, y: d.y, w: Math.max(14, Math.min(70, d.w + dx)), h: Math.max(14, Math.min(70, d.h + dy)) };
+  } else {
+    pos = { x: Math.max(0, Math.min(96 - d.w, d.x + dx)), y: Math.max(0, Math.min(96 - d.h, d.y + dy)), w: d.w, h: d.h };
+  }
+  dashboardState.mosaic[d.id] = pos;
+  const card = document.querySelector(`.dash-card[data-id="${CSS.escape(String(d.id))}"]`);
+  if (card) {
+    card.style.left = pos.x + '%'; card.style.top = pos.y + '%';
+    card.style.width = pos.w + '%'; card.style.height = pos.h + '%';
+  }
+});
+
+document.addEventListener('mouseup', () => {
+  if (dashboardMosaicDrag) {
+    dashboardMosaicDrag = null;
+    document.body.style.userSelect = '';
+    saveDashboardState();
+  }
+});
+
+function initDashboardMap() {
+  if (dashboardMap) return;
+  dashboardMap = L.map('dashboardMap', {
+    zoomControl: true,
+    attributionControl: false
+  }).setView([20, 0], 2);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(dashboardMap);
+  dashboardMapLayer = L.layerGroup().addTo(dashboardMap);
+  dashboardMap.on('moveend zoomend', () => {
+    if (dashboardState._fitPending) return;
+    clearTimeout(dashboardMapMoveTimer);
+    dashboardMapMoveTimer = setTimeout(() => renderDashboardMap(), 120);
+  });
+}
+
+function dashboardFrustumLatLngs(cam) {
+  const heading = inferHeading(cam);
+  if (heading === null || !cam.lat || !cam.lng) return null;
+  const rangeM = frustumRange || 85;
+  const half = frustumFovH / 2;
+  const earth = 6378137;
+  const pointAt = angleDeg => {
+    const brng = angleDeg * Math.PI / 180;
+    const lat1 = cam.lat * Math.PI / 180;
+    const lon1 = cam.lng * Math.PI / 180;
+    const d = rangeM / earth;
+    const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(brng));
+    const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(d) * Math.cos(lat1), Math.cos(d) - Math.sin(lat1) * Math.sin(lat2));
+    return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
+  };
+  return [[cam.lat, cam.lng], pointAt(heading - half), pointAt(heading + half)];
+}
+
+function mapPopupHtml(cam, added=false) {
+  const heading = inferHeading(cam);
+  const dir = heading !== null ? `${DIR_NAMES[heading]} ${heading}°` : 'Direction unknown';
+  const full = dashboardState.cameras.length >= DASHBOARD_MAX_CAMERAS && !added;
+  return `<div class="dashboard-map-popup">
+    <div class="dashboard-map-popup-title">${escapeHtml(cameraTitle(cam))}</div>
+    <div class="dashboard-map-popup-meta">${escapeHtml(dir)} · ${escapeHtml([cam.city, cam.state, cam.country].filter(Boolean).join(' · ') || String(cam.id))}</div>
+    <button data-dash-map-add="${escapeHtml(cam.id)}" ${added || full ? 'disabled' : ''}>${added ? 'Already in dashboard' : full ? 'Dashboard full' : '+ Add to dashboard'}</button>
+  </div>`;
+}
+
+function bindDashboardMapPopupAdd(layer, cam) {
+  layer.on('popupopen', e => {
+    const btn = e.popup.getElement()?.querySelector('[data-dash-map-add]');
+    if (!btn) return;
+    btn.onclick = ev => {
+      ev.stopPropagation();
+      addCameraToDashboard(cam);
+      if (dashboardMap) dashboardMap.closePopup();
+    };
+  });
+}
+
+function dashboardCandidateCamerasForMap() {
+  if (!dashboardMap) return [];
+
+  // Available/non-selected cameras are a close-zoom context layer, not a world overview layer.
+  // This prevents the dashboard map from showing random global dots when zoomed out.
+  const zoom = dashboardMap.getZoom();
+  if (zoom < 10) return [];
+
+  const selectedIds = new Set(dashboardState.cameras.map(String));
+  const selected = dashboardCameras();
+  const limit = zoom >= 13 ? 1200 : zoom >= 11 ? 650 : 300;
+
+  const pool = cameras.filter(cam => cam.lat && cam.lng && !selectedIds.has(String(cam.id)));
+  const mapBounds = dashboardMap.getBounds();
+  const inView = pool.filter(cam => mapBounds.pad(0.10).contains([cam.lat, cam.lng]));
+  if (inView.length) return inView.slice(0, limit);
+
+  // If the user searched from the dashboard and is close enough, seed the context layer
+  // around the searched place even before the next map movement event fires.
+  if (dashboardSearchContext) {
+    return pool
+      .map(cam => ({ cam, dist: haversineKm(dashboardSearchContext.lat, dashboardSearchContext.lng, cam.lat, cam.lng) }))
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, limit)
+      .map(x => x.cam);
+  }
+
+  if (selected.length) {
+    const centre = selected.reduce((acc, cam) => ({ lat: acc.lat + cam.lat, lng: acc.lng + cam.lng }), { lat: 0, lng: 0 });
+    centre.lat /= selected.length;
+    centre.lng /= selected.length;
+    return pool
+      .map(cam => ({ cam, dist: haversineKm(centre.lat, centre.lng, cam.lat, cam.lng) }))
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, limit)
+      .map(x => x.cam);
+  }
+
+  return [];
+}
+
+function renderDashboardMap() {
+  if (!dashboardMap || !dashboardMapLayer) return;
+  dashboardMapLayer.clearLayers();
+  const cams = dashboardCameras();
+  const selectedIds = new Set(dashboardState.cameras.map(String));
+  const bounds = [];
+
+  // Faint available cameras: clickable context layer for adding nearby/visible cameras.
+  // Capped so 140k+ camera datasets do not freeze Leaflet.
+  dashboardCandidateCamerasForMap().forEach(cam => {
+    const marker = L.circleMarker([cam.lat, cam.lng], {
+      radius: dashboardMap.getZoom() >= 13 ? 5 : 4,
+      color: '#334155',
+      weight: 1.4,
+      opacity: 0.72,
+      fillColor: '#64748b',
+      fillOpacity: 0.42,
+      interactive: true
+    }).addTo(dashboardMapLayer);
+    marker.bindTooltip(cameraTitle(cam), { direction: 'top' });
+    marker.bindPopup(mapPopupHtml(cam, false));
+    bindDashboardMapPopupAdd(marker, cam);
+  });
+
+  // Selected dashboard cameras: prominent pins and 2D frustums.
+  cams.forEach(cam => {
+    const heading = inferHeading(cam);
+    const color = heading !== null ? (DIR_COLORS[heading] || '#2563eb') : '#9e9e9e';
+    const selected = dashboardState.selectedCameraId === String(cam.id);
+    const cone = dashboardFrustumLatLngs(cam);
+    if (cone) {
+      const poly = L.polygon(cone, {
+        color,
+        fillColor: color,
+        fillOpacity: selected ? 0.34 : 0.20,
+        opacity: selected ? 1 : 0.78,
+        weight: selected ? 3.2 : 1.8
+      }).addTo(dashboardMapLayer);
+      poly.bindTooltip(cameraTitle(cam), { direction: 'top' });
+      cone.forEach(p => bounds.push(p));
+    }
+
+    const marker = L.circleMarker([cam.lat, cam.lng], {
+      radius: selected ? 9 : 7,
+      color: selected ? '#0f172a' : '#fff',
+      weight: selected ? 3 : 2,
+      fillColor: color,
+      fillOpacity: 0.98
+    }).addTo(dashboardMapLayer);
+
+    marker.bindTooltip(cameraTitle(cam), { direction: 'top' });
+    marker.bindPopup(mapPopupHtml(cam, true));
+    marker.on('click', () => setDashboardSelected(cam.id));
+    bounds.push([cam.lat, cam.lng]);
+  });
+
+  if (bounds.length && activeView === 'dashboard' && dashboardState._fitPending) {
+    const b = L.latLngBounds(bounds);
+    dashboardMap.fitBounds(b.pad(0.24), { animate: false, maxZoom: 15 });
+    dashboardState._fitPending = false;
+  }
+}
+
+function fitDashboardMap() {
+  if (!dashboardMap) return;
+  const pts = [];
+  dashboardCameras().forEach(cam => {
+    if (cam.lat && cam.lng) pts.push([cam.lat, cam.lng]);
+    const cone = dashboardFrustumLatLngs(cam);
+    if (cone) cone.forEach(p => pts.push(p));
+  });
+  if (pts.length) dashboardMap.fitBounds(L.latLngBounds(pts).pad(0.24), { maxZoom: 15 });
+}
+
+function toggleDashboardMap(force) {
+  dashboardState.mapVisible = typeof force === 'boolean' ? force : !dashboardState.mapVisible;
+  document.getElementById('dashboardMapPane').classList.toggle('collapsed', !dashboardState.mapVisible);
+  document.getElementById('dashboardMapResize').classList.toggle('collapsed', !dashboardState.mapVisible);
+  document.getElementById('dashToggleMap').textContent = dashboardState.mapVisible ? 'Hide map' : 'Show map';
+  saveDashboardState();
+  if (dashboardState.mapVisible) {
+    initDashboardMap();
+    setTimeout(() => { dashboardMap.invalidateSize(); fitDashboardMap(); }, 80);
+  }
+}
+
+function openDashboardAddPanel() {
+  document.getElementById('dashboardAddPanel').classList.add('open');
+  document.getElementById('dashboardSearchInput').focus();
+  renderDashboardLocalResults('');
+}
+
+function closeDashboardAddPanel() {
+  document.getElementById('dashboardAddPanel').classList.remove('open');
+}
+
+function renderDashboardLocalResults(query, origin=null) {
+  const list = document.getElementById('dashboardSearchResults');
+  if (!list) return;
+  const q = (query || '').trim().toLowerCase();
+
+  let candidates = cameras.filter(c => c.lat && c.lng);
+  if (origin) {
+    candidates = candidates
+      .map(cam => ({ cam, dist: haversineKm(origin.lat, origin.lng, cam.lat, cam.lng) }))
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, 20)
+      .map(x => ({ ...x.cam, _dashDist: x.dist }));
+  } else if (q) {
+    candidates = candidates.filter(cam => [
+      cam.location, cam.name, cam.description, cam.city, cam.state, cam.country, cam.road, cam.roadway, cam.id
+    ].filter(Boolean).join(' ').toLowerCase().includes(q)).slice(0, 25);
+  } else {
+    candidates = dashboardCameras().concat(cameras.slice(0, 20)).filter((cam, i, arr) => arr.findIndex(x => x.id === cam.id) === i).slice(0, 20);
+  }
+
+  if (!candidates.length) {
+    list.innerHTML = `<div class="dashboard-empty" style="min-height:130px;border:0;">No matching cameras found.</div>`;
+    return;
+  }
+
+  list.innerHTML = candidates.map(cam => {
+    const exists = dashboardState.cameras.includes(String(cam.id));
+    const full = dashboardState.cameras.length >= DASHBOARD_MAX_CAMERAS && !exists;
+    const dist = typeof cam._dashDist === 'number'
+      ? (cam._dashDist < 1 ? `${Math.round(cam._dashDist * 1000)} m away` : `${cam._dashDist.toFixed(1)} km away`)
+      : [cam.city, cam.state, cam.country].filter(Boolean).join(' · ');
+    return `<div class="dash-result" data-id="${escapeHtml(cam.id)}">
+      <div class="dash-result-name">${escapeHtml(cameraTitle(cam))}</div>
+      <div class="dash-result-meta">${escapeHtml(dist || cam.id)}</div>
+      <button class="dash-small-btn" ${exists || full ? 'disabled' : ''}>${exists ? 'Added' : full ? 'Full' : 'Add'}</button>
+    </div>`;
+  }).join('');
+
+  list.querySelectorAll('.dash-result').forEach(row => {
+    const cam = cameraMap.get(row.dataset.id) || cameras.find(c => c.id === row.dataset.id);
+    row.querySelector('button').onclick = () => {
+      if (addCameraToDashboard(cam)) renderDashboardLocalResults(query, origin);
+    };
+  });
+}
+
+async function runDashboardSearch() {
+  const input = document.getElementById('dashboardSearchInput');
+  const q = input.value.trim();
+  if (!q) { renderDashboardLocalResults(''); return; }
+
+  renderDashboardLocalResults(q);
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
+    const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    const data = await res.json();
+    if (data && data.length) {
+      renderDashboardLocalResults(q, { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) });
+    }
+  } catch (_) {}
+}
+
+document.addEventListener('visibilitychange', () => {
+  dashboardRefreshPaused = document.hidden;
+  if (!document.hidden && activeView === 'dashboard') refreshDashboardAll();
+});
+
+function setupDashboardResize() {
+  const handle = document.getElementById('dashboardMapResize');
+  const pane = document.getElementById('dashboardMapPane');
+  if (!handle || !pane) return;
+
+  handle.addEventListener('mousedown', e => {
+    dashboardResizeActive = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dashboardResizeActive) return;
+    const total = document.getElementById('dashboardShell').getBoundingClientRect().width;
+    const pct = Math.max(22, Math.min(58, ((total - e.clientX) / total) * 100));
+    pane.style.width = pct + '%';
+    if (dashboardMap) dashboardMap.invalidateSize();
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dashboardResizeActive) return;
+    dashboardResizeActive = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
 }
 
 // ==========================================================
@@ -2427,6 +4087,45 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Close panel
   document.getElementById('closeSide').onclick = deselect;
+
+  // View switching
+  document.getElementById('btnGlobeView').onclick = () => switchView('globe');
+  document.getElementById('btnDashboardView').onclick = () => switchView('dashboard');
+
+  // Add selected camera to dashboard from the globe side panel
+  document.getElementById('addSelectedToDashboard').onclick = () => {
+    if (selectedCamera && addCameraToDashboard(selectedCamera)) {
+      updateDashboardBadge();
+    }
+  };
+  document.getElementById('openDashboardFromSide').onclick = () => switchView('dashboard');
+
+  // Dashboard controls
+  document.querySelectorAll('#dashboardBar [data-mode]').forEach(btn => {
+    btn.onclick = () => setDashboardLayout(btn.dataset.mode);
+  });
+  document.querySelectorAll('#dashboardBar [data-grid]').forEach(btn => {
+    btn.onclick = () => setDashboardGrid(btn.dataset.grid);
+  });
+  document.getElementById('dashRefreshAll').onclick = refreshDashboardAll;
+  document.getElementById('dashAddCamera').onclick = openDashboardAddPanel;
+  document.getElementById('dashFitMap').onclick = fitDashboardMap;
+  document.getElementById('dashMapFitHeader').onclick = fitDashboardMap;
+  document.getElementById('dashToggleMap').onclick = () => toggleDashboardMap();
+  document.getElementById('dashMapCollapseHeader').onclick = () => toggleDashboardMap(false);
+  document.getElementById('dashClearAll').onclick = clearDashboard;
+
+  document.getElementById('dashboardSearchClose').onclick = closeDashboardAddPanel;
+  document.getElementById('dashboardSearchRun').onclick = runDashboardSearch;
+  document.getElementById('dashboardSearchInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') runDashboardSearch();
+    if (e.key === 'Escape') closeDashboardAddPanel();
+  });
+  document.getElementById('dashboardSearchInput').addEventListener('input', e => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runDashboardSearch, 350);
+  });
+  setupDashboardResize();
 
   // Dark mode
   document.getElementById('btnTheme').onclick = () => {
