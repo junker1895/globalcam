@@ -7,6 +7,7 @@
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link href="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -955,7 +956,7 @@ body.dashboard-active #searchResults {
 
 #dashboardFeedPane {
   flex: 1 1 auto;
-  min-width: 360px;
+  min-width: 520px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1067,9 +1068,46 @@ body.dashboard-active #searchResults {
 .dash-media video {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
   background: #000;
+}
+
+#dashboardFeedWall.media-fit-fill .dash-media img,
+#dashboardFeedWall.media-fit-fill .dash-media video {
+  object-fit: cover;
+}
+
+#dashboardFeedWall.media-fit-fit .dash-media img,
+#dashboardFeedWall.media-fit-fit .dash-media video {
+  object-fit: contain;
+}
+
+/* Smart feed shaping: wide/panoramic feeds get more room in dense grids,
+   while still using contain mode so no feed content is cropped. */
+#dashboardFeedWall.grid-3x3,
+#dashboardFeedWall.grid-4x4 {
+  grid-auto-flow: dense;
+}
+#dashboardFeedWall.grid-3x3 .dash-card.aspect-pano,
+#dashboardFeedWall.grid-4x4 .dash-card.aspect-pano,
+#dashboardFeedWall.grid-4x4 .dash-card.aspect-wide {
+  grid-column: span 2;
+}
+#dashboardFeedWall.grid-4x4 .dash-card.aspect-portrait {
+  grid-row: span 2;
+}
+#dashboardFeedWall.mode-focus .dash-card.focus-thumb.aspect-pano,
+#dashboardFeedWall.mode-focus .dash-card.focus-thumb.aspect-wide,
+#dashboardFeedWall.mode-focus .dash-card.focus-thumb.aspect-portrait {
+  grid-column: 2;
+  grid-row: auto;
+}
+#dashboardFeedWall.mode-single .dash-media img,
+#dashboardFeedWall.mode-single .dash-media video,
+#dashboardFeedWall.mode-focus .focus-main .dash-media img,
+#dashboardFeedWall.mode-focus .focus-main .dash-media video {
+  object-fit: contain;
 }
 
 .dash-no-feed {
@@ -1169,20 +1207,41 @@ body.dashboard-active #searchResults {
 }
 
 #dashboardMapPane {
-  width: 34%;
-  min-width: 280px;
-  max-width: 58%;
+  width: clamp(380px, 30vw, 520px);
+  min-width: 380px;
+  max-width: 520px;
   background: var(--c-surface);
   border-left: 1px solid var(--c-border);
   display: flex;
   flex-direction: column;
   min-height: 0;
+  flex: 0 0 auto;
 }
 
 #dashboardMapPane.collapsed,
 #dashboardMapResize.collapsed {
   display: none;
 }
+
+/* Responsive map handling: when the feed wall would be squeezed, the map
+   becomes an overlay drawer instead of taking layout width. */
+body.dashboard-map-drawer #dashboardShell { position: relative; }
+body.dashboard-map-drawer #dashboardMapResize { display: none !important; }
+body.dashboard-map-drawer #dashboardMapPane:not(.collapsed) {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  bottom: 10px;
+  width: min(460px, calc(100vw - 28px));
+  min-width: 0;
+  max-width: none;
+  z-index: 90;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  box-shadow: 0 18px 60px rgba(15,23,42,0.28);
+  overflow: hidden;
+}
+body.dashboard-map-drawer #dashboardFeedPane { min-width: 0; }
 
 #dashboardMapHeader {
   height: 40px;
@@ -1224,6 +1283,7 @@ body.dashboard-active #searchResults {
   gap: 7px;
   padding: 6px 10px;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .dash-seg {
@@ -1358,6 +1418,146 @@ body.dashboard-active #searchResults {
   cursor: not-allowed;
 }
 
+
+/* ─── AREA SELECTION / POLYGON DASHBOARD TOOL ─── */
+#areaSelectionPanel {
+  position: fixed;
+  top: calc(var(--top-h) + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 260;
+  width: 430px;
+  max-width: calc(100vw - 24px);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  box-shadow: var(--c-shadow-md);
+  display: none;
+  overflow: hidden;
+}
+#areaSelectionPanel.open { display: block; }
+.area-panel-head {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.area-panel-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--c-text);
+}
+.area-panel-source {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--c-text3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.area-panel-body { padding: 10px 12px 12px; }
+.area-panel-text {
+  font-size: 12px;
+  color: var(--c-text2);
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+.area-panel-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.area-stat {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--c-text2);
+  background: var(--c-surface2);
+  border: 1px solid var(--c-border);
+  border-radius: 4px;
+  padding: 3px 7px;
+}
+.area-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.area-btn {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text2);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.area-btn.primary { background: var(--c-accent); color: #fff; border-color: var(--c-accent); }
+.area-btn.danger { color: var(--c-danger); }
+.area-btn:hover { background: var(--c-surface2); color: var(--c-text); }
+.area-btn.primary:hover { background: var(--c-accent); color:#fff; opacity:0.9; }
+.area-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+body.area-drawing #cesiumContainer,
+body.area-drawing #dashboardMap { cursor: crosshair; }
+.area-draw-hint {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--c-text3);
+  margin-top: 8px;
+}
+.dash-page-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* Directional camera markers used on the dashboard Leaflet map. */
+.dashboard-direction-icon {
+  background: transparent !important;
+  border: none !important;
+}
+.dash-dir-marker {
+  position: relative;
+  width: var(--marker-size, 22px);
+  height: var(--marker-size, 22px);
+  opacity: var(--marker-opacity, 1);
+  transform: rotate(var(--marker-heading, 0deg));
+  transform-origin: 50% 50%;
+  filter: drop-shadow(0 1px 2px rgba(15,23,42,0.45));
+}
+.dash-dir-marker .dash-dir-arrow {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: calc(var(--marker-size, 22px) * 0.18) solid transparent;
+  border-right: calc(var(--marker-size, 22px) * 0.18) solid transparent;
+  border-bottom: calc(var(--marker-size, 22px) * 0.34) solid var(--marker-color, #2563eb);
+}
+.dash-dir-marker .dash-dir-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--marker-size, 22px) * 0.48);
+  height: calc(var(--marker-size, 22px) * 0.48);
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: var(--marker-color, #2563eb);
+  border: var(--marker-border-width, 2px) solid var(--marker-border, #fff);
+  box-shadow: 0 0 0 var(--marker-ring, 0px) rgba(37,99,235,0.18);
+}
+
+/* ─── UPLOADED AREA / LAYER FEATURE SELECTION ─── */
+.uploaded-layer-feature { cursor: pointer; }
+.layer-feature-tooltip { font-family: var(--mono); font-size: 11px; }
+.area-panel-source.layer-active { color: var(--c-success); }
+
 </style>
 </head>
 <body>
@@ -1428,6 +1628,27 @@ body.dashboard-active #searchResults {
         <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
       </svg>
       Fit
+    </button>
+
+    <button class="tbtn" id="btnDrawArea" title="Draw a polygon and build dashboard from cameras inside it">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M5 3l14 4-3 13-12-5z"/><circle cx="5" cy="3" r="1.5"/><circle cx="19" cy="7" r="1.5"/><circle cx="16" cy="20" r="1.5"/><circle cx="4" cy="15" r="1.5"/>
+      </svg>
+      Draw area
+    </button>
+
+    <button class="tbtn" id="btnUploadArea" title="Upload GeoJSON/KML/KMZ polygon and build dashboard from contained cameras">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/>
+      </svg>
+      Upload area
+    </button>
+
+    <button class="tbtn" id="btnUploadLayer" title="Upload polygon layer and click a feature to create a dashboard">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5"/><path d="M3 17l9 5 9-5"/>
+      </svg>
+      Upload layer
     </button>
 
 
@@ -1524,11 +1745,16 @@ body.dashboard-active #searchResults {
           <button id="dashGrid4" data-grid="4x4">4×4</button>
         </div>
         <button class="dash-small-btn" id="dashRefreshAll">↻ Refresh all</button>
+        <button class="dash-small-btn" id="dashMediaFitToggle" title="Toggle dashboard feed fit/fill">Fit: all</button>
         <button class="dash-small-btn" id="dashAddCamera">+ Add camera</button>
         <button class="dash-small-btn" id="dashFitMap">Fit map</button>
         <button class="dash-small-btn" id="dashToggleMap">Hide map</button>
         <button class="dash-small-btn" id="dashClearAll">Clear</button>
-        <div id="dashboardStatus">0/16 cameras · ready</div>
+        <div class="dash-page-controls">
+          <button class="dash-small-btn" id="dashPrevPage">Prev</button>
+          <button class="dash-small-btn" id="dashNextPage">Next</button>
+        </div>
+        <div id="dashboardStatus">0 cameras · ready</div>
       </div>
     </section>
     <div id="dashboardMapResize" title="Drag to resize map"></div>
@@ -1536,6 +1762,9 @@ body.dashboard-active #searchResults {
       <div id="dashboardMapHeader">
         <span>2D situation map</span>
         <span class="spacer"></span>
+        <button class="dash-small-btn" id="dashMapDrawArea">Draw area</button>
+        <button class="dash-small-btn" id="dashMapUploadArea">Upload area</button>
+        <button class="dash-small-btn" id="dashMapUploadLayer">Upload layer</button>
         <button class="dash-small-btn" id="dashMapFitHeader">Fit</button>
         <button class="dash-small-btn" id="dashMapCollapseHeader">Collapse</button>
       </div>
@@ -1553,6 +1782,33 @@ body.dashboard-active #searchResults {
   <div id="dashboardSearchResults"></div>
 </div>
 
+<div id="areaSelectionPanel">
+  <div class="area-panel-head">
+    <div>
+      <div class="area-panel-title">Area camera selection</div>
+      <div class="area-panel-source" id="areaSelectionSource">Globe</div>
+    </div>
+    <button class="sr-close" id="areaPanelClose" title="Close">×</button>
+  </div>
+  <div class="area-panel-body">
+    <div class="area-panel-text" id="areaSelectionText">Click on the map to draw a polygon around cameras.</div>
+    <div class="area-panel-stats">
+      <span class="area-stat" id="areaPointCount">0 points</span>
+      <span class="area-stat" id="areaCameraCount">0 cameras found</span>
+      <span class="area-stat" id="areaPageHint">16 per dashboard page</span>
+    </div>
+    <div class="area-panel-actions">
+      <button class="area-btn" id="areaFinishBtn">Finish area</button>
+      <button class="area-btn primary" id="areaReplaceBtn">Replace dashboard</button>
+      <button class="area-btn" id="areaAddBtn">Add to dashboard</button>
+      <button class="area-btn danger" id="areaClearBtn">Clear area</button>
+    </div>
+    <div class="area-draw-hint">Globe: click to add points, double-click to finish. Dashboard map: click to add points, then Finish area.</div>
+  </div>
+</div>
+
+<input id="areaUploadInput" type="file" accept=".geojson,.json,.kml,.kmz,application/geo+json,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" hidden>
+<input id="layerUploadInput" type="file" accept=".geojson,.json,.kml,.kmz,application/geo+json,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" hidden>
 
 <!-- ─── SIDE PANEL ─── -->
 <div id="sidePanel">
@@ -1676,7 +1932,8 @@ let frustumRange = 85;
 let frustumTilt  = 15;
 
 // Dashboard state
-const DASHBOARD_MAX_CAMERAS = 16;
+const DASHBOARD_PAGE_SIZE = 16;
+const DASHBOARD_MAX_CAMERAS = Number.POSITIVE_INFINITY; // legacy guard; dashboard is now paginated
 const DASHBOARD_STORAGE_KEY = 'vigil.dashboard.v1';
 let activeView = 'globe';
 let dashboardState = {
@@ -1686,7 +1943,10 @@ let dashboardState = {
   mapVisible: true,
   focusCameraId: null,
   selectedCameraId: null,
-  mosaic: {}
+  mosaic: {},
+  page: 0,
+  pageSize: DASHBOARD_PAGE_SIZE,
+  mediaFit: 'contain'
 };
 let dashboardMap = null;
 let dashboardMapLayer = null;
@@ -1699,6 +1959,32 @@ let dashboardResizeActive = false;
 let dashboardMosaicDrag = null;
 let dashboardMapMoveTimer = null;
 let dashboardSearchContext = null;
+
+// Area selection state shared by Cesium globe and dashboard Leaflet map
+let areaSelection = {
+  active: false,
+  source: null,
+  points: [],
+  polygons: [],
+  matchedIds: [],
+  cesiumPolygon: null,
+  cesiumPolyline: null,
+  cesiumPointEntities: [],
+  cesiumHighlightEntities: [],
+  leafletLayer: null,
+  leafletPointsLayer: null,
+  leafletHighlightLayer: null
+};
+
+// Uploaded area/layer state. Layer features are clickable polygon features
+// that feed into the same area-selection dashboard workflow.
+let uploadedLayerState = {
+  features: [],
+  fileName: null,
+  selectedIndex: null,
+  leafletLayer: null,
+  cesiumEntities: []
+};
 
 // ==========================================================
 //  DIRECTION INFERENCE
@@ -1804,6 +2090,96 @@ function inferHeading(cam) {
 function getDirColor(heading) {
   if (heading === null) return Cesium.Color.fromCssColorString('#9e9e9e');
   return Cesium.Color.fromCssColorString(DIR_COLORS[heading] || '#90caf9');
+}
+
+// ==========================================================
+//  DIRECTIONAL CAMERA MARKERS
+// ==========================================================
+const CESIUM_CAMERA_ARROW_CACHE = new Map();
+
+function cesiumColorToCss(color, fallback = '#2563eb') {
+  try {
+    if (color && typeof color.toCssColorString === 'function') return color.toCssColorString();
+  } catch (_) {}
+  return fallback;
+}
+
+function getHeadingColorCss(heading, fallback = '#9e9e9e') {
+  return heading !== null ? (DIR_COLORS[heading] || '#2563eb') : fallback;
+}
+
+function cameraArrowCanvasDataUrl(colorCss) {
+  const key = colorCss || '#2563eb';
+  if (CESIUM_CAMERA_ARROW_CACHE.has(key)) return CESIUM_CAMERA_ARROW_CACHE.get(key);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 32;
+  canvas.height = 32;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, 32, 32);
+
+  // Small north-facing arrow. Cesium rotates this image per camera heading.
+  ctx.save();
+  ctx.translate(16, 16);
+  ctx.shadowColor = 'rgba(15, 23, 42, 0.45)';
+  ctx.shadowBlur = 3;
+  ctx.shadowOffsetY = 1;
+  ctx.fillStyle = key;
+  ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(0, -14);
+  ctx.lineTo(7, 1);
+  ctx.lineTo(2.4, -0.5);
+  ctx.lineTo(2.4, 10);
+  ctx.lineTo(-2.4, 10);
+  ctx.lineTo(-2.4, -0.5);
+  ctx.lineTo(-7, 1);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+
+  const url = canvas.toDataURL('image/png');
+  CESIUM_CAMERA_ARROW_CACHE.set(key, url);
+  return url;
+}
+
+function dashboardCameraMarker(cam, options = {}) {
+  const heading = inferHeading(cam);
+  const selected = !!options.selected;
+  const available = !!options.available;
+  const color = options.color || getHeadingColorCss(heading, '#9e9e9e');
+
+  if (heading === null) {
+    return L.circleMarker([cam.lat, cam.lng], {
+      radius: selected ? 9 : available ? 5 : 7,
+      color: selected ? '#0f172a' : available ? '#334155' : '#fff',
+      weight: selected ? 3 : available ? 1.4 : 2,
+      opacity: available ? 0.72 : 1,
+      fillColor: color,
+      fillOpacity: available ? 0.42 : 0.98,
+      interactive: true
+    });
+  }
+
+  const size = selected ? 28 : available ? 21 : 24;
+  const opacity = available ? 0.76 : 1;
+  const border = selected ? '#0f172a' : available ? '#334155' : '#ffffff';
+  const borderWidth = selected ? 3 : available ? 1.5 : 2;
+  const ring = selected ? 3 : 0;
+  const html = `<div class="dash-dir-marker" style="--marker-size:${size}px;--marker-heading:${heading}deg;--marker-color:${color};--marker-opacity:${opacity};--marker-border:${border};--marker-border-width:${borderWidth}px;--marker-ring:${ring}px;"><span class="dash-dir-arrow"></span><span class="dash-dir-dot"></span></div>`;
+
+  return L.marker([cam.lat, cam.lng], {
+    interactive: true,
+    icon: L.divIcon({
+      className: 'dashboard-direction-icon',
+      html,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+      popupAnchor: [0, -size / 2]
+    })
+  });
 }
 
 // ==========================================================
@@ -2185,8 +2561,9 @@ async function createCameraEntities(cams) {
     const chunk = cams.slice(i, i + CHUNK);
     chunk.forEach(cam => {
       if (!cam.lat || !cam.lng) return;
-      const color  = getDirColor(inferHeading(cam));
-      const entity = dataSource.entities.add({
+      const heading = inferHeading(cam);
+      const color  = getDirColor(heading);
+      const entityGraphics = {
         id: cam.id,
         position: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, 0),
         point: {
@@ -2197,6 +2574,26 @@ async function createCameraEntities(cams) {
           scaleByDistance: new Cesium.NearFarScalar(300, 1.8, 400000, 0.6),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
+      };
+
+      // Direction arrow shown before click/selection. The selected camera entity is
+      // hidden while the 3D frustum/beacon is active, so the selected dot does not
+      // show an extra arrow on top of the frustum view.
+      if (heading !== null) {
+        entityGraphics.billboard = {
+          image: cameraArrowCanvasDataUrl(cesiumColorToCss(color, getHeadingColorCss(heading))),
+          width: 20,
+          height: 20,
+          rotation: -Cesium.Math.toRadians(heading),
+          pixelOffset: new Cesium.Cartesian2(0, -13),
+          scaleByDistance: new Cesium.NearFarScalar(300, 1.25, 400000, 0.5),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          heightReference: Cesium.HeightReference.NONE,
+        };
+      }
+
+      const entity = dataSource.entities.add({
+        ...entityGraphics,
         label: {
           text: cam.location || cam.id,
           font: '12px Inter, system-ui, sans-serif',
@@ -2231,11 +2628,19 @@ async function createCameraEntities(cams) {
 // ==========================================================
 function setupClickHandler() {
   viewer.screenSpaceEventHandler.setInputAction(click => {
+    if (areaSelection.active && areaSelection.source === 'globe') {
+      addGlobeAreaPointFromClick(click.position);
+      return;
+    }
     const picked = viewer.scene.pick(click.position);
 
     if (!picked || !picked.id) { deselect(); return; }
 
     const entity = picked.id;
+    if (entity && entity._uploadedLayerFeatureIndex !== undefined && entity._uploadedLayerFeatureIndex !== null) {
+      selectUploadedLayerFeature(entity._uploadedLayerFeatureIndex);
+      return;
+    }
     if (typeof entity.id === 'string' && entity.id.startsWith('selected-camera-marker-') && selectedCamera) {
       selectCamera(selectedCamera);
       return;
@@ -2256,6 +2661,12 @@ function setupClickHandler() {
       });
     }
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+  viewer.screenSpaceEventHandler.setInputAction(click => {
+    if (areaSelection.active && areaSelection.source === 'globe') {
+      finishAreaSelection();
+    }
+  }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
 }
 
 // ==========================================================
@@ -2870,14 +3281,14 @@ async function runLocationSearch(query) {
       ? `<span class="sr-dir">${['N','NE','E','SE','S','SW','W','NW'][heading/45]}</span>`
       : '';
     const exists = dashboardState.cameras.includes(String(cam.id));
-    const full = dashboardState.cameras.length >= DASHBOARD_MAX_CAMERAS && !exists;
+    const full = false;
     item.innerHTML = `
       <div class="sr-row-main">
         <div class="sr-row-text">
           <div class="sr-name">${escapeHtml(cam.location || cam.id)}</div>
           <div class="sr-meta">${distStr} away ${dirBadge}</div>
         </div>
-        <button class="sr-add-btn" ${exists || full ? 'disabled' : ''}>${exists ? 'Added' : full ? 'Full' : '+ Add'}</button>
+        <button class="sr-add-btn" ${exists || full ? 'disabled' : ''}>${exists ? 'Added' : '+ Add'}</button>
       </div>
     `;
     item.onclick = () => {
@@ -3263,10 +3674,13 @@ function loadDashboardState() {
     dashboardState = {
       ...dashboardState,
       ...saved,
-      cameras: Array.isArray(saved.cameras) ? saved.cameras.map(String).slice(0, DASHBOARD_MAX_CAMERAS) : [],
+      cameras: Array.isArray(saved.cameras) ? saved.cameras.map(String) : [],
       focusCameraId: saved.focusCameraId != null ? String(saved.focusCameraId) : null,
       selectedCameraId: saved.selectedCameraId != null ? String(saved.selectedCameraId) : null,
-      mosaic: saved.mosaic || {}
+      mosaic: saved.mosaic || {},
+      page: Number.isFinite(saved.page) ? Math.max(0, saved.page) : 0,
+      pageSize: DASHBOARD_PAGE_SIZE,
+      mediaFit: saved.mediaFit === 'cover' ? 'cover' : 'contain'
     };
   } catch (_) {}
 }
@@ -3279,7 +3693,9 @@ function saveDashboardState() {
     mapVisible: dashboardState.mapVisible,
     focusCameraId: dashboardState.focusCameraId,
     selectedCameraId: dashboardState.selectedCameraId,
-    mosaic: dashboardState.mosaic
+    mosaic: dashboardState.mosaic,
+    page: dashboardState.page || 0,
+    mediaFit: dashboardState.mediaFit === 'cover' ? 'cover' : 'contain'
   }));
 }
 
@@ -3289,6 +3705,37 @@ function dashboardCameras() {
     .filter(Boolean);
 }
 
+
+function dashboardPageCount() {
+  return Math.max(1, Math.ceil(dashboardState.cameras.length / DASHBOARD_PAGE_SIZE));
+}
+
+function clampDashboardPage() {
+  dashboardState.page = Math.max(0, Math.min(dashboardState.page || 0, dashboardPageCount() - 1));
+}
+
+function dashboardPageCameras() {
+  clampDashboardPage();
+  const start = (dashboardState.page || 0) * DASHBOARD_PAGE_SIZE;
+  return dashboardCameras().slice(start, start + DASHBOARD_PAGE_SIZE);
+}
+
+function dashboardPageIndexForId(id) {
+  const idx = dashboardState.cameras.indexOf(String(id));
+  return idx >= 0 ? Math.floor(idx / DASHBOARD_PAGE_SIZE) : 0;
+}
+
+function setDashboardPage(page) {
+  dashboardState.page = Math.max(0, Math.min(page, dashboardPageCount() - 1));
+  saveDashboardState();
+  renderDashboard();
+}
+
+function goToDashboardCameraPage(id) {
+  const idx = dashboardState.cameras.indexOf(String(id));
+  if (idx >= 0) dashboardState.page = Math.floor(idx / DASHBOARD_PAGE_SIZE);
+}
+
 function updateDashboardBadge() {
   const badge = document.getElementById('dashboardNavBadge');
   if (badge) badge.textContent = dashboardState.cameras.length;
@@ -3296,7 +3743,7 @@ function updateDashboardBadge() {
   if (sideBtn && selectedCamera) {
     const exists = dashboardState.cameras.includes(String(selectedCamera.id));
     sideBtn.textContent = exists ? '✓ In dashboard' : '+ Add to dashboard';
-    sideBtn.disabled = exists || dashboardState.cameras.length >= DASHBOARD_MAX_CAMERAS;
+    sideBtn.disabled = exists;
   }
 }
 
@@ -3318,8 +3765,10 @@ function switchView(view) {
     document.getElementById('dashboardAddPanel').classList.remove('open');
     initDashboardMap();
     renderDashboard();
+    updateDashboardMapPresentation();
     setTimeout(() => dashboardMap && dashboardMap.invalidateSize(), 80);
   } else {
+    document.body.classList.remove('dashboard-map-drawer');
     document.getElementById('dashboardAddPanel').classList.remove('open');
     if (viewer) viewer.resize();
   }
@@ -3332,6 +3781,7 @@ function addCameraToDashboard(cam, options = {}) {
   if (dashboardState.cameras.includes(id)) {
     dashboardState.selectedCameraId = id;
     if (!dashboardState.focusCameraId) dashboardState.focusCameraId = id;
+    dashboardState.page = dashboardPageIndexForId(id);
     dashboardState._fitPending = true;
     saveDashboardState();
     updateDashboardBadge();
@@ -3340,12 +3790,8 @@ function addCameraToDashboard(cam, options = {}) {
     return false;
   }
 
-  if (dashboardState.cameras.length >= DASHBOARD_MAX_CAMERAS) {
-    alert(`Dashboard is limited to ${DASHBOARD_MAX_CAMERAS} cameras.`);
-    return false;
-  }
-
   dashboardState.cameras.push(id);
+  dashboardState.page = dashboardPageIndexForId(id);
   if (!dashboardState.focusCameraId) dashboardState.focusCameraId = id;
   dashboardState.selectedCameraId = id;
   dashboardState._fitPending = true;
@@ -3376,6 +3822,7 @@ function removeCameraFromDashboard(id) {
   if (dashboardHls.has(String(id))) { dashboardHls.get(String(id)).destroy(); dashboardHls.delete(String(id)); }
   if (dashboardState.focusCameraId === id) dashboardState.focusCameraId = dashboardState.cameras[0] || null;
   if (dashboardState.selectedCameraId === id) dashboardState.selectedCameraId = String(dashboardState.focusCameraId);
+  clampDashboardPage();
   saveDashboardState();
   updateDashboardBadge();
   renderDashboard();
@@ -3392,6 +3839,7 @@ function clearDashboard() {
   dashboardState.focusCameraId = null;
   dashboardState.selectedCameraId = null;
   dashboardState.mosaic = {};
+  dashboardState.page = 0;
   saveDashboardState();
   updateDashboardBadge();
   renderDashboard();
@@ -3405,21 +3853,28 @@ function setDashboardLayout(mode) {
 
 function setDashboardGrid(size) {
   dashboardState.gridSize = size;
+  if (size === '4x4') dashboardState.mapVisible = false;
   saveDashboardState();
   renderDashboard();
 }
 
 function setDashboardSelected(id) {
-  dashboardState.selectedCameraId = id;
-  if (!dashboardState.focusCameraId) dashboardState.focusCameraId = id;
+  dashboardState.selectedCameraId = String(id);
+  if (!dashboardState.focusCameraId) dashboardState.focusCameraId = String(id);
+  const oldPage = dashboardState.page || 0;
+  goToDashboardCameraPage(id);
   saveDashboardState();
-  renderDashboardMap();
-  document.querySelectorAll('.dash-card').forEach(el => el.classList.toggle('selected', el.dataset.id === String(id)));
+  if ((dashboardState.page || 0) !== oldPage) renderDashboard();
+  else {
+    renderDashboardMap();
+    document.querySelectorAll('.dash-card').forEach(el => el.classList.toggle('selected', el.dataset.id === String(id)));
+  }
 }
 
 function promoteDashboardCamera(id) {
-  dashboardState.focusCameraId = id;
-  dashboardState.selectedCameraId = id;
+  dashboardState.focusCameraId = String(id);
+  dashboardState.selectedCameraId = String(id);
+  goToDashboardCameraPage(id);
   if (dashboardState.layout === 'grid') dashboardState.layout = 'focus';
   saveDashboardState();
   renderDashboard();
@@ -3428,6 +3883,48 @@ function promoteDashboardCamera(id) {
 function dashboardDirectionBadge(cam) {
   const heading = inferHeading(cam);
   return heading !== null ? `<span class="dash-dir">${DIR_NAMES[heading]} ${heading}°</span>` : `<span class="dash-dir">UNK</span>`;
+}
+
+function updateDashboardMediaFitButton() {
+  const btn = document.getElementById('dashMediaFitToggle');
+  if (!btn) return;
+  const fit = dashboardState.mediaFit === 'cover' ? 'cover' : 'contain';
+  btn.textContent = fit === 'cover' ? 'Fill: crop' : 'Fit: all';
+  btn.title = fit === 'cover'
+    ? 'Fill tiles by cropping feeds'
+    : 'Show the full feed with letterboxing where needed';
+  btn.classList.toggle('active', fit === 'contain');
+}
+
+function toggleDashboardMediaFit() {
+  dashboardState.mediaFit = dashboardState.mediaFit === 'cover' ? 'contain' : 'cover';
+  saveDashboardState();
+  renderDashboard();
+}
+
+function classifyDashboardMediaAspect(card, ratio) {
+  if (!card || !Number.isFinite(ratio) || ratio <= 0) return;
+  card.classList.remove('aspect-pano', 'aspect-wide', 'aspect-standard', 'aspect-portrait');
+  if (ratio >= 2.35) card.classList.add('aspect-pano');
+  else if (ratio >= 1.65) card.classList.add('aspect-wide');
+  else if (ratio <= 0.78) card.classList.add('aspect-portrait');
+  else card.classList.add('aspect-standard');
+  card.style.setProperty('--feed-aspect', ratio.toFixed(4));
+}
+
+function applyDashboardMediaAspect(camId, mediaEl) {
+  const card = document.querySelector(`.dash-card[data-id="${CSS.escape(String(camId))}"]`);
+  if (!card || !mediaEl) return;
+  let w = 0;
+  let h = 0;
+  if (mediaEl.tagName === 'IMG') {
+    w = mediaEl.naturalWidth || 0;
+    h = mediaEl.naturalHeight || 0;
+  } else if (mediaEl.tagName === 'VIDEO') {
+    w = mediaEl.videoWidth || 0;
+    h = mediaEl.videoHeight || 0;
+  }
+  if (w > 0 && h > 0) classifyDashboardMediaAspect(card, w / h);
 }
 
 function renderDashboard() {
@@ -3440,14 +3937,19 @@ function renderDashboard() {
   wall.className = '';
   if (dashboardState.layout === 'grid') wall.classList.add(`grid-${dashboardState.gridSize}`);
   else wall.classList.add(`mode-${dashboardState.layout}`);
+  wall.classList.add(dashboardState.mediaFit === 'cover' ? 'media-fit-fill' : 'media-fit-fit');
+  updateDashboardMediaFitButton();
+  ensureDashboardMapResponsive();
 
-  const cams = dashboardCameras();
+  const allCams = dashboardCameras();
+  clampDashboardPage();
+  const cams = dashboardPageCameras();
   dashboardRefreshTimers.forEach(t => clearTimeout(t));
   dashboardRefreshTimers.clear();
   dashboardHls.forEach(h => h.destroy());
   dashboardHls.clear();
 
-  if (!cams.length) {
+  if (!allCams.length) {
     wall.innerHTML = `<div class="dashboard-empty">
       <div>
         <strong>No dashboard cameras yet.</strong><br>
@@ -3459,12 +3961,15 @@ function renderDashboard() {
     return;
   }
 
-  if (!dashboardState.focusCameraId || !dashboardState.cameras.includes(dashboardState.focusCameraId)) {
-    dashboardState.focusCameraId = String(cams[0].id);
+  if (!dashboardState.focusCameraId || !dashboardState.cameras.includes(String(dashboardState.focusCameraId))) {
+    dashboardState.focusCameraId = String(allCams[0].id);
   }
   if (!dashboardState.selectedCameraId || !dashboardState.cameras.includes(String(dashboardState.selectedCameraId))) {
     dashboardState.selectedCameraId = String(dashboardState.focusCameraId);
   }
+
+  const selectedOnPage = cams.some(cam => String(cam.id) === String(dashboardState.selectedCameraId));
+  if (!selectedOnPage && cams[0]) dashboardState.selectedCameraId = String(cams[0].id);
 
   wall.innerHTML = cams.map((cam, idx) => dashboardCardHtml(cam, idx)).join('');
   cams.forEach((cam, idx) => mountDashboardFeed(cam, idx));
@@ -3545,10 +4050,14 @@ function mountDashboardFeed(cam, idx) {
       hls.attachMedia(video);
       dashboardHls.set(String(cam.id), hls);
       hls.on(Hls.Events.ERROR, () => markDashboardRefresh(cam.id, false));
-      hls.on(Hls.Events.MANIFEST_PARSED, () => { markDashboardRefresh(cam.id, true); video.play().catch(() => {}); });
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setTimeout(() => applyDashboardMediaAspect(cam.id, video), 250);
+        markDashboardRefresh(cam.id, true);
+        video.play().catch(() => {});
+      });
     } else {
       video.src = videoUrl;
-      video.onloadeddata = () => markDashboardRefresh(cam.id, true);
+      video.onloadeddata = () => { applyDashboardMediaAspect(cam.id, video); markDashboardRefresh(cam.id, true); };
       video.onerror = () => {
         if (imageUrl) renderDashboardImageFeed(cam, imageUrl, idx);
         else markDashboardRefresh(cam.id, false);
@@ -3573,6 +4082,7 @@ function renderDashboardImageFeed(cam, imageUrl, idx, manual=false) {
   img.alt = cameraTitle(cam);
   img.loading = 'lazy';
   img.onload = () => {
+    applyDashboardMediaAspect(cam.id, img);
     markDashboardRefresh(cam.id, true);
     scheduleDashboardImageRefresh(cam, idx);
   };
@@ -3592,7 +4102,7 @@ function scheduleDashboardImageRefresh(cam, idx, errored=false) {
   if (failures >= 3) return;
 
   const baseInterval = Number(cam.refreshIntervalSec || cam.refreshSeconds || 30) * 1000;
-  const stagger = Math.round((idx / Math.max(1, dashboardState.cameras.length)) * baseInterval);
+  const stagger = Math.round((idx / Math.max(1, dashboardPageCameras().length)) * baseInterval);
   const delay = errored ? Math.min(120000, baseInterval * 2) : baseInterval + stagger;
 
   if (dashboardRefreshTimers.has(String(cam.id))) clearTimeout(dashboardRefreshTimers.get(String(cam.id)));
@@ -3624,15 +4134,22 @@ function markDashboardRefresh(id, ok, noRetry=false) {
 function updateDashboardStatus() {
   const el = document.getElementById('dashboardStatus');
   if (!el) return;
-  const cams = dashboardState.cameras.length;
+  const total = dashboardState.cameras.length;
+  const pageCount = dashboardPageCount();
+  const page = Math.min((dashboardState.page || 0) + 1, pageCount);
+  const visible = dashboardPageCameras().length;
   const last = [...dashboardLastRefresh.values()].sort((a, b) => b - a)[0];
-  el.textContent = `${cams}/${DASHBOARD_MAX_CAMERAS} cameras · ${last ? 'last refresh ' + new Date(last).toLocaleTimeString() : 'ready'}`;
+  const prev = document.getElementById('dashPrevPage');
+  const next = document.getElementById('dashNextPage');
+  if (prev) prev.disabled = (dashboardState.page || 0) <= 0;
+  if (next) next.disabled = (dashboardState.page || 0) >= pageCount - 1;
+  el.textContent = `${total} cameras · page ${page}/${pageCount} · ${visible} visible · ${last ? 'last refresh ' + new Date(last).toLocaleTimeString() : 'ready'}`;
 }
 
 function refreshDashboardAll() {
   dashboardRefreshTimers.forEach(t => clearTimeout(t));
   dashboardRefreshTimers.clear();
-  dashboardCameras().forEach((cam, idx) => {
+  dashboardPageCameras().forEach((cam, idx) => {
     const feed = getCameraFeed(cam);
     if (feed.imageUrl) renderDashboardImageFeed(cam, feed.imageUrl, idx, true);
     else if (feed.videoUrl) mountDashboardFeed(cam, idx);
@@ -3736,6 +4253,11 @@ function initDashboardMap() {
     clearTimeout(dashboardMapMoveTimer);
     dashboardMapMoveTimer = setTimeout(() => renderDashboardMap(), 120);
   });
+  dashboardMap.on('click', e => {
+    if (areaSelection.active && areaSelection.source === 'dashboard') {
+      addDashboardAreaPoint(e.latlng);
+    }
+  });
 }
 
 function dashboardFrustumLatLngs(cam) {
@@ -3759,11 +4281,11 @@ function dashboardFrustumLatLngs(cam) {
 function mapPopupHtml(cam, added=false) {
   const heading = inferHeading(cam);
   const dir = heading !== null ? `${DIR_NAMES[heading]} ${heading}°` : 'Direction unknown';
-  const full = dashboardState.cameras.length >= DASHBOARD_MAX_CAMERAS && !added;
+  const full = false;
   return `<div class="dashboard-map-popup">
     <div class="dashboard-map-popup-title">${escapeHtml(cameraTitle(cam))}</div>
     <div class="dashboard-map-popup-meta">${escapeHtml(dir)} · ${escapeHtml([cam.city, cam.state, cam.country].filter(Boolean).join(' · ') || String(cam.id))}</div>
-    <button data-dash-map-add="${escapeHtml(cam.id)}" ${added || full ? 'disabled' : ''}>${added ? 'Already in dashboard' : full ? 'Dashboard full' : '+ Add to dashboard'}</button>
+    <button data-dash-map-add="${escapeHtml(cam.id)}" ${added || full ? 'disabled' : ''}>${added ? 'Already in dashboard' : '+ Add to dashboard'}</button>
   </div>`;
 }
 
@@ -3823,6 +4345,9 @@ function dashboardCandidateCamerasForMap() {
 function renderDashboardMap() {
   if (!dashboardMap || !dashboardMapLayer) return;
   dashboardMapLayer.clearLayers();
+  // Uploaded layer graphics live outside the camera layer, so rebuild them
+  // after the camera layer has been cleared/redrawn.
+  if (uploadedLayerState.features.length) setTimeout(renderUploadedLayerGraphics, 0);
   const cams = dashboardCameras();
   const selectedIds = new Set(dashboardState.cameras.map(String));
   const bounds = [];
@@ -3830,15 +4355,9 @@ function renderDashboardMap() {
   // Faint available cameras: clickable context layer for adding nearby/visible cameras.
   // Capped so 140k+ camera datasets do not freeze Leaflet.
   dashboardCandidateCamerasForMap().forEach(cam => {
-    const marker = L.circleMarker([cam.lat, cam.lng], {
-      radius: dashboardMap.getZoom() >= 13 ? 5 : 4,
-      color: '#334155',
-      weight: 1.4,
-      opacity: 0.72,
-      fillColor: '#64748b',
-      fillOpacity: 0.42,
-      interactive: true
-    }).addTo(dashboardMapLayer);
+    const heading = inferHeading(cam);
+    const color = heading !== null ? (DIR_COLORS[heading] || '#64748b') : '#64748b';
+    const marker = dashboardCameraMarker(cam, { available: true, color }).addTo(dashboardMapLayer);
     marker.bindTooltip(cameraTitle(cam), { direction: 'top' });
     marker.bindPopup(mapPopupHtml(cam, false));
     bindDashboardMapPopupAdd(marker, cam);
@@ -3862,19 +4381,23 @@ function renderDashboardMap() {
       cone.forEach(p => bounds.push(p));
     }
 
-    const marker = L.circleMarker([cam.lat, cam.lng], {
-      radius: selected ? 9 : 7,
-      color: selected ? '#0f172a' : '#fff',
-      weight: selected ? 3 : 2,
-      fillColor: color,
-      fillOpacity: 0.98
-    }).addTo(dashboardMapLayer);
+    const marker = dashboardCameraMarker(cam, { selected, color }).addTo(dashboardMapLayer);
 
     marker.bindTooltip(cameraTitle(cam), { direction: 'top' });
     marker.bindPopup(mapPopupHtml(cam, true));
     marker.on('click', () => setDashboardSelected(cam.id));
     bounds.push([cam.lat, cam.lng]);
   });
+
+  if (areaSelection.points.length) {
+    // Re-add area drawing/result overlay after the dashboard camera layer is rebuilt.
+    const savedPts = areaSelection.points.slice();
+    const savedMatches = areaSelection.matchedIds.slice();
+    areaSelection.points = savedPts;
+    areaSelection.matchedIds = savedMatches;
+    redrawAreaSelectionGraphics();
+    if (savedMatches.length) highlightAreaMatches();
+  }
 
   if (bounds.length && activeView === 'dashboard' && dashboardState._fitPending) {
     const b = L.latLngBounds(bounds);
@@ -3894,15 +4417,54 @@ function fitDashboardMap() {
   if (pts.length) dashboardMap.fitBounds(L.latLngBounds(pts).pad(0.24), { maxZoom: 15 });
 }
 
+function dashboardShouldUseMapDrawer() {
+  const shell = document.getElementById('dashboardShell');
+  const width = shell ? shell.getBoundingClientRect().width : window.innerWidth;
+  return (dashboardState.layout === 'grid' && dashboardState.gridSize === '4x4') || width < 1240;
+}
+
+function updateDashboardMapPresentation() {
+  const pane = document.getElementById('dashboardMapPane');
+  const resize = document.getElementById('dashboardMapResize');
+  const toggle = document.getElementById('dashToggleMap');
+  const collapse = document.getElementById('dashMapCollapseHeader');
+  if (!pane || !resize) return;
+
+  const drawer = dashboardShouldUseMapDrawer();
+  document.body.classList.toggle('dashboard-map-drawer', drawer && activeView === 'dashboard' && dashboardState.mapVisible);
+  pane.classList.toggle('collapsed', !dashboardState.mapVisible);
+  resize.classList.toggle('collapsed', !dashboardState.mapVisible || drawer);
+
+  if (toggle) toggle.textContent = dashboardState.mapVisible ? (drawer ? 'Close map' : 'Hide map') : 'Show map';
+  if (collapse) collapse.textContent = drawer ? 'Close' : 'Collapse';
+
+  if (dashboardMap && dashboardState.mapVisible) {
+    setTimeout(() => dashboardMap.invalidateSize(), 30);
+  }
+}
+
+function ensureDashboardMapResponsive() {
+  // 4×4 is too dense for side-by-side. Keep the feeds usable and let the
+  // user open the map as an overlay drawer when needed.
+  if (dashboardState.layout === 'grid' && dashboardState.gridSize === '4x4' && dashboardState.mapVisible) {
+    dashboardState.mapVisible = false;
+    saveDashboardState();
+  }
+  updateDashboardMapPresentation();
+}
+
 function toggleDashboardMap(force) {
   dashboardState.mapVisible = typeof force === 'boolean' ? force : !dashboardState.mapVisible;
-  document.getElementById('dashboardMapPane').classList.toggle('collapsed', !dashboardState.mapVisible);
-  document.getElementById('dashboardMapResize').classList.toggle('collapsed', !dashboardState.mapVisible);
-  document.getElementById('dashToggleMap').textContent = dashboardState.mapVisible ? 'Hide map' : 'Show map';
+  updateDashboardMapPresentation();
   saveDashboardState();
   if (dashboardState.mapVisible) {
     initDashboardMap();
-    setTimeout(() => { dashboardMap.invalidateSize(); fitDashboardMap(); }, 80);
+    setTimeout(() => {
+      if (dashboardMap) {
+        dashboardMap.invalidateSize();
+        fitDashboardMap();
+      }
+    }, 80);
   }
 }
 
@@ -3943,14 +4505,14 @@ function renderDashboardLocalResults(query, origin=null) {
 
   list.innerHTML = candidates.map(cam => {
     const exists = dashboardState.cameras.includes(String(cam.id));
-    const full = dashboardState.cameras.length >= DASHBOARD_MAX_CAMERAS && !exists;
+    const full = false;
     const dist = typeof cam._dashDist === 'number'
       ? (cam._dashDist < 1 ? `${Math.round(cam._dashDist * 1000)} m away` : `${cam._dashDist.toFixed(1)} km away`)
       : [cam.city, cam.state, cam.country].filter(Boolean).join(' · ');
     return `<div class="dash-result" data-id="${escapeHtml(cam.id)}">
       <div class="dash-result-name">${escapeHtml(cameraTitle(cam))}</div>
       <div class="dash-result-meta">${escapeHtml(dist || cam.id)}</div>
-      <button class="dash-small-btn" ${exists || full ? 'disabled' : ''}>${exists ? 'Added' : full ? 'Full' : 'Add'}</button>
+      <button class="dash-small-btn" ${exists || full ? 'disabled' : ''}>${exists ? 'Added' : 'Add'}</button>
     </div>`;
   }).join('');
 
@@ -3983,6 +4545,13 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && activeView === 'dashboard') refreshDashboardAll();
 });
 
+window.addEventListener('resize', () => {
+  if (activeView === 'dashboard') {
+    updateDashboardMapPresentation();
+    if (dashboardMap) setTimeout(() => dashboardMap.invalidateSize(), 60);
+  }
+});
+
 function setupDashboardResize() {
   const handle = document.getElementById('dashboardMapResize');
   const pane = document.getElementById('dashboardMapPane');
@@ -3997,9 +4566,10 @@ function setupDashboardResize() {
 
   document.addEventListener('mousemove', e => {
     if (!dashboardResizeActive) return;
-    const total = document.getElementById('dashboardShell').getBoundingClientRect().width;
-    const pct = Math.max(22, Math.min(58, ((total - e.clientX) / total) * 100));
-    pane.style.width = pct + '%';
+    if (dashboardShouldUseMapDrawer()) return;
+    const shellRect = document.getElementById('dashboardShell').getBoundingClientRect();
+    const px = Math.max(380, Math.min(520, shellRect.right - e.clientX));
+    pane.style.width = px + 'px';
     if (dashboardMap) dashboardMap.invalidateSize();
   });
 
@@ -4009,6 +4579,676 @@ function setupDashboardResize() {
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
   });
+}
+
+
+
+// ==========================================================
+//  AREA / POLYGON SELECTION
+// ==========================================================
+function normaliseLng(lng) {
+  let x = Number(lng);
+  while (x > 180) x -= 360;
+  while (x < -180) x += 360;
+  return x;
+}
+
+// ==========================================================
+//  POLYGON / LAYER UPLOAD PARSING
+// ==========================================================
+function cleanPolygonRing(points) {
+  if (!Array.isArray(points)) return [];
+  const out = [];
+  points.forEach(p => {
+    const lat = Number(p.lat);
+    const lng = Number(p.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    if (lat < -90 || lat > 90) return;
+    const prev = out[out.length - 1];
+    if (!prev || Math.abs(prev.lat - lat) > 1e-10 || Math.abs(prev.lng - lng) > 1e-10) {
+      out.push({ lat, lng });
+    }
+  });
+  if (out.length > 2) {
+    const a = out[0], b = out[out.length - 1];
+    if (Math.abs(a.lat - b.lat) < 1e-10 && Math.abs(a.lng - b.lng) < 1e-10) out.pop();
+  }
+  return out.length >= 3 ? out : [];
+}
+
+function geoJsonGeometryToPolygons(geometry) {
+  if (!geometry || !geometry.type) return [];
+  const polys = [];
+  const type = geometry.type;
+  const coords = geometry.coordinates;
+  if (type === 'Polygon' && Array.isArray(coords)) {
+    const outer = cleanPolygonRing((coords[0] || []).map(c => ({ lng: c[0], lat: c[1] })));
+    if (outer.length) polys.push(outer);
+  } else if (type === 'MultiPolygon' && Array.isArray(coords)) {
+    coords.forEach(poly => {
+      const outer = cleanPolygonRing(((poly && poly[0]) || []).map(c => ({ lng: c[0], lat: c[1] })));
+      if (outer.length) polys.push(outer);
+    });
+  } else if (type === 'GeometryCollection' && Array.isArray(geometry.geometries)) {
+    geometry.geometries.forEach(g => polys.push(...geoJsonGeometryToPolygons(g)));
+  }
+  return polys;
+}
+
+function geoJsonToPolygonFeatures(obj, fallbackName='GeoJSON feature') {
+  const features = [];
+  const pushFeature = (feature, idx) => {
+    const polygons = geoJsonGeometryToPolygons(feature.geometry || feature);
+    if (!polygons.length) return;
+    const props = feature.properties || {};
+    const name = props.name || props.Name || props.NAME || props.title || props.id || feature.id || `${fallbackName} ${idx + 1}`;
+    features.push({ name: String(name), properties: props, polygons, source: 'geojson' });
+  };
+
+  if (!obj) return features;
+  if (obj.type === 'FeatureCollection' && Array.isArray(obj.features)) obj.features.forEach(pushFeature);
+  else if (obj.type === 'Feature') pushFeature(obj, 0);
+  else pushFeature({ geometry: obj, properties: {} }, 0);
+  return features;
+}
+
+function parseKmlCoordinateText(text) {
+  return cleanPolygonRing(String(text || '').trim().split(/\s+/).map(token => {
+    const parts = token.split(',').map(Number);
+    return { lng: parts[0], lat: parts[1] };
+  }));
+}
+
+function kmlToPolygonFeatures(kmlText, fallbackName='KML polygon') {
+  const doc = new DOMParser().parseFromString(kmlText, 'application/xml');
+  if (doc.querySelector('parsererror')) throw new Error('Invalid KML XML');
+  const placemarks = Array.from(doc.getElementsByTagName('Placemark'));
+  const features = [];
+
+  const placemarkList = placemarks.length ? placemarks : [doc];
+  placemarkList.forEach((pm, idx) => {
+    const nameEl = pm.getElementsByTagName ? pm.getElementsByTagName('name')[0] : null;
+    const name = nameEl ? nameEl.textContent.trim() : `${fallbackName} ${idx + 1}`;
+    const polygons = [];
+    Array.from(pm.getElementsByTagName ? pm.getElementsByTagName('Polygon') : []).forEach(poly => {
+      const coordEl = poly.getElementsByTagName('coordinates')[0];
+      const ring = parseKmlCoordinateText(coordEl ? coordEl.textContent : '');
+      if (ring.length) polygons.push(ring);
+    });
+    if (polygons.length) features.push({ name, properties: { name }, polygons, source: 'kml' });
+  });
+  return features;
+}
+
+async function readUploadedPolygonFeatures(file) {
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  if (ext === 'kmz') {
+    if (typeof JSZip === 'undefined') throw new Error('KMZ support requires JSZip, which did not load.');
+    const zip = await JSZip.loadAsync(await file.arrayBuffer());
+    const kmlEntry = Object.values(zip.files).find(f => !f.dir && f.name.toLowerCase().endsWith('.kml'));
+    if (!kmlEntry) throw new Error('No KML file found inside the KMZ.');
+    return kmlToPolygonFeatures(await kmlEntry.async('text'), file.name);
+  }
+
+  const text = await file.text();
+  if (ext === 'kml' || text.trim().startsWith('<')) return kmlToPolygonFeatures(text, file.name);
+  const obj = JSON.parse(text);
+  return geoJsonToPolygonFeatures(obj, file.name);
+}
+
+function flattenFeaturePolygons(features) {
+  const polygons = [];
+  (features || []).forEach(f => (f.polygons || []).forEach(poly => {
+    const ring = cleanPolygonRing(poly);
+    if (ring.length) polygons.push(ring);
+  }));
+  return polygons;
+}
+
+function polygonCentroid(poly) {
+  const ring = cleanPolygonRing(poly);
+  if (!ring.length) return null;
+  const sum = ring.reduce((acc, p) => ({ lat: acc.lat + p.lat, lng: acc.lng + p.lng }), { lat: 0, lng: 0 });
+  return { lat: sum.lat / ring.length, lng: sum.lng / ring.length };
+}
+
+function polygonBoundsPoints(polygons) {
+  const pts = [];
+  (polygons || []).forEach(poly => (poly || []).forEach(p => pts.push([p.lat, p.lng])));
+  return pts;
+}
+
+async function uploadAreaFromFile(file) {
+  if (!file) return;
+  try {
+    const features = await readUploadedPolygonFeatures(file);
+    const polygons = flattenFeaturePolygons(features);
+    if (!polygons.length) throw new Error('No Polygon or MultiPolygon geometry found.');
+
+    clearAreaSelection();
+    areaSelection.active = false;
+    areaSelection.source = 'uploaded-area';
+    areaSelection.points = polygons[0].slice();
+    areaSelection.polygons = polygons;
+    const matched = findCamerasInsidePolygons(polygons);
+    areaSelection.matchedIds = matched.map(cam => String(cam.id));
+    redrawAreaSelectionGraphics();
+    highlightAreaMatches();
+    openAreaPanel();
+    updateAreaPanel();
+
+    if (activeView === 'dashboard') initDashboardMap();
+    setTimeout(() => fitAreaSelectionView(), 100);
+  } catch (err) {
+    alert('Could not upload area: ' + (err.message || err));
+  }
+}
+
+async function uploadLayerFromFile(file) {
+  if (!file) return;
+  try {
+    const features = await readUploadedPolygonFeatures(file);
+    if (!features.length) throw new Error('No clickable polygon features found.');
+    clearUploadedLayerGraphics();
+    clearAreaSelection();
+    uploadedLayerState.features = features;
+    uploadedLayerState.fileName = file.name;
+    uploadedLayerState.selectedIndex = null;
+    renderUploadedLayerGraphics();
+    switchView('dashboard');
+    openAreaPanel();
+    updateAreaPanelForLayerUpload();
+    setTimeout(() => fitUploadedLayerView(), 120);
+  } catch (err) {
+    alert('Could not upload layer: ' + (err.message || err));
+  }
+}
+
+function clearUploadedLayerGraphics() {
+  if (dashboardMap && uploadedLayerState.leafletLayer) dashboardMap.removeLayer(uploadedLayerState.leafletLayer);
+  uploadedLayerState.leafletLayer = null;
+  if (viewer) uploadedLayerState.cesiumEntities.forEach(e => viewer.entities.remove(e));
+  uploadedLayerState.cesiumEntities = [];
+}
+
+function renderUploadedLayerGraphics() {
+  clearUploadedLayerGraphics();
+  const features = uploadedLayerState.features || [];
+  if (!features.length) return;
+
+  if (dashboardMap) {
+    const group = L.layerGroup();
+    features.forEach((feature, idx) => {
+      (feature.polygons || []).forEach(poly => {
+        const latlngs = cleanPolygonRing(poly).map(p => [p.lat, p.lng]);
+        if (latlngs.length < 3) return;
+        const selected = uploadedLayerState.selectedIndex === idx;
+        const layer = L.polygon(latlngs, {
+          color: selected ? '#f59e0b' : '#16a34a',
+          weight: selected ? 3 : 2,
+          opacity: 0.95,
+          fillColor: selected ? '#f59e0b' : '#16a34a',
+          fillOpacity: selected ? 0.20 : 0.10,
+          className: 'uploaded-layer-feature'
+        });
+        layer.bindTooltip(feature.name || `Feature ${idx + 1}`, { direction: 'top', className: 'layer-feature-tooltip' });
+        layer.on('click', () => selectUploadedLayerFeature(idx));
+        group.addLayer(layer);
+      });
+    });
+    uploadedLayerState.leafletLayer = group.addTo(dashboardMap);
+  }
+
+  if (viewer) {
+    features.forEach((feature, idx) => {
+      (feature.polygons || []).forEach((poly, pi) => {
+        const ring = cleanPolygonRing(poly);
+        if (ring.length < 3) return;
+        const selected = uploadedLayerState.selectedIndex === idx;
+        const ent = viewer.entities.add({
+          id: `uploaded-layer-feature-${idx}-${pi}-${Date.now()}`,
+          polygon: {
+            hierarchy: new Cesium.PolygonHierarchy(ring.map(p => Cesium.Cartesian3.fromDegrees(p.lng, p.lat, 0))),
+            material: Cesium.Color.fromCssColorString(selected ? '#f59e0b' : '#16a34a').withAlpha(selected ? 0.22 : 0.10),
+            outline: true,
+            outlineColor: Cesium.Color.fromCssColorString(selected ? '#f59e0b' : '#16a34a'),
+            height: 0
+          },
+          label: {
+            text: feature.name || `Feature ${idx + 1}`,
+            show: false
+          }
+        });
+        ent._uploadedLayerFeatureIndex = idx;
+        uploadedLayerState.cesiumEntities.push(ent);
+      });
+    });
+  }
+}
+
+function selectUploadedLayerFeature(index) {
+  const feature = uploadedLayerState.features[index];
+  if (!feature) return;
+  uploadedLayerState.selectedIndex = index;
+  renderUploadedLayerGraphics();
+
+  clearAreaGraphics();
+  areaSelection.active = false;
+  areaSelection.source = 'uploaded-layer';
+  areaSelection.points = (feature.polygons[0] || []).slice();
+  areaSelection.polygons = flattenFeaturePolygons([feature]);
+  const matched = findCamerasInsidePolygons(areaSelection.polygons);
+  areaSelection.matchedIds = matched.map(cam => String(cam.id));
+  redrawAreaSelectionGraphics();
+  highlightAreaMatches();
+  openAreaPanel();
+  updateAreaPanel();
+  setTimeout(() => fitAreaSelectionView(), 80);
+}
+
+function fitUploadedLayerView() {
+  const pts = polygonBoundsPoints(flattenFeaturePolygons(uploadedLayerState.features));
+  if (dashboardMap && pts.length) dashboardMap.fitBounds(L.latLngBounds(pts).pad(0.12), { maxZoom: 13 });
+  if (viewer && pts.length) {
+    const rect = Cesium.Rectangle.fromDegrees(
+      Math.min(...pts.map(p => p[1])), Math.min(...pts.map(p => p[0])),
+      Math.max(...pts.map(p => p[1])), Math.max(...pts.map(p => p[0]))
+    );
+    viewer.camera.flyTo({ destination: rect, duration: 0.8 });
+  }
+}
+
+function fitAreaSelectionView() {
+  const polys = areaSelectionPolygons();
+  const pts = polygonBoundsPoints(polys);
+  if (dashboardMap && pts.length) dashboardMap.fitBounds(L.latLngBounds(pts).pad(0.18), { maxZoom: 14 });
+  if (viewer && pts.length && activeView === 'globe') {
+    const rect = Cesium.Rectangle.fromDegrees(
+      Math.min(...pts.map(p => p[1])), Math.min(...pts.map(p => p[0])),
+      Math.max(...pts.map(p => p[1])), Math.max(...pts.map(p => p[0]))
+    );
+    viewer.camera.flyTo({ destination: rect, duration: 0.8 });
+  }
+}
+
+function updateAreaPanelForLayerUpload() {
+  const panel = document.getElementById('areaSelectionPanel');
+  if (panel) panel.classList.add('open');
+  const sourceEl = document.getElementById('areaSelectionSource');
+  const textEl = document.getElementById('areaSelectionText');
+  const pointEl = document.getElementById('areaPointCount');
+  const camEl = document.getElementById('areaCameraCount');
+  if (sourceEl) sourceEl.textContent = 'Uploaded layer';
+  if (textEl) textEl.textContent = `${uploadedLayerState.features.length} polygon feature${uploadedLayerState.features.length === 1 ? '' : 's'} loaded. Click one polygon feature on the map to select cameras inside it.`;
+  if (pointEl) pointEl.textContent = `${uploadedLayerState.features.length} feature${uploadedLayerState.features.length === 1 ? '' : 's'}`;
+  if (camEl) camEl.textContent = 'Click a feature';
+  ['areaFinishBtn','areaReplaceBtn','areaAddBtn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = true;
+  });
+}
+
+function pointInPolygonLatLng(lat, lng, polygon) {
+  // Ray-casting in lon/lat. Good for local/regional dashboard selection polygons.
+  const x = normaliseLng(lng);
+  const y = Number(lat);
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = normaliseLng(polygon[i].lng), yi = Number(polygon[i].lat);
+    const xj = normaliseLng(polygon[j].lng), yj = Number(polygon[j].lat);
+    const intersect = ((yi > y) !== (yj > y)) &&
+      (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-12) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function findCamerasInsidePolygon(polygon) {
+  return findCamerasInsidePolygons([polygon]);
+}
+
+function areaSelectionPolygons() {
+  const polys = Array.isArray(areaSelection.polygons) && areaSelection.polygons.length
+    ? areaSelection.polygons
+    : (areaSelection.points && areaSelection.points.length >= 3 ? [areaSelection.points] : []);
+  return polys.map(cleanPolygonRing).filter(poly => poly.length >= 3);
+}
+
+function findCamerasInsidePolygons(polygons) {
+  const cleanPolys = (polygons || []).map(cleanPolygonRing).filter(poly => poly.length >= 3);
+  if (!cleanPolys.length) return [];
+
+  const indexed = cleanPolys.map(poly => {
+    let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+    poly.forEach(p => {
+      minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat);
+      minLng = Math.min(minLng, normaliseLng(p.lng)); maxLng = Math.max(maxLng, normaliseLng(p.lng));
+    });
+    return { poly, minLat, maxLat, minLng, maxLng };
+  });
+
+  return cameras.filter(cam => {
+    if (!Number.isFinite(cam.lat) || !Number.isFinite(cam.lng)) return false;
+    const lng = normaliseLng(cam.lng);
+    return indexed.some(item => {
+      if (cam.lat < item.minLat || cam.lat > item.maxLat || lng < item.minLng || lng > item.maxLng) return false;
+      return pointInPolygonLatLng(cam.lat, cam.lng, item.poly);
+    });
+  });
+}
+function openAreaPanel() {
+  const panel = document.getElementById('areaSelectionPanel');
+  if (panel) panel.classList.add('open');
+  updateAreaPanel();
+}
+
+function closeAreaPanel() {
+  const panel = document.getElementById('areaSelectionPanel');
+  if (panel && !areaSelection.active && !areaSelection.points.length) panel.classList.remove('open');
+  else if (panel && areaSelection.points.length) panel.classList.add('open');
+}
+
+function updateAreaPanel() {
+  const pointCount = areaSelection.points.length;
+  const matchedCount = areaSelection.matchedIds.length;
+  const sourceEl = document.getElementById('areaSelectionSource');
+  const textEl = document.getElementById('areaSelectionText');
+  const pointEl = document.getElementById('areaPointCount');
+  const camEl = document.getElementById('areaCameraCount');
+  const finishBtn = document.getElementById('areaFinishBtn');
+  const replaceBtn = document.getElementById('areaReplaceBtn');
+  const addBtn = document.getElementById('areaAddBtn');
+
+  if (sourceEl) {
+    const labels = {
+      dashboard: 'Dashboard map',
+      globe: 'Globe',
+      'uploaded-area': 'Uploaded area',
+      'uploaded-layer': 'Selected layer feature'
+    };
+    sourceEl.textContent = labels[areaSelection.source] || 'Area';
+    sourceEl.classList.toggle('layer-active', areaSelection.source === 'uploaded-layer');
+  }
+  const polyCount = areaSelectionPolygons().length;
+  if (pointEl) pointEl.textContent = polyCount > 1
+    ? `${polyCount} polygons`
+    : `${pointCount} point${pointCount === 1 ? '' : 's'}`;
+  if (camEl) camEl.textContent = `${matchedCount} camera${matchedCount === 1 ? '' : 's'} found`;
+
+  if (textEl) {
+    if (areaSelection.active) {
+      textEl.textContent = pointCount < 3
+        ? 'Click at least 3 points to define the polygon.'
+        : 'Area is ready. Click Finish area, or keep clicking to add more points.';
+    } else if (pointCount >= 3 || areaSelectionPolygons().length) {
+      if (areaSelection.source === 'uploaded-layer') {
+        const f = uploadedLayerState.features[uploadedLayerState.selectedIndex];
+        textEl.textContent = matchedCount
+          ? `Selected ${f?.name || 'layer feature'}. Use the buttons below to replace the dashboard or append these cameras to the current dashboard.`
+          : `Selected ${f?.name || 'layer feature'}, but no cameras were found inside it.`;
+      } else if (areaSelection.source === 'uploaded-area') {
+        textEl.textContent = matchedCount
+          ? `Uploaded polygon area loaded. Use the buttons below to replace the dashboard or append these cameras to the current dashboard.`
+          : 'Uploaded polygon area loaded, but no cameras were found inside it.';
+      } else {
+        textEl.textContent = matchedCount
+          ? `Area complete. Use the buttons below to replace the dashboard or append these cameras to the current dashboard.`
+          : 'Area complete, but no cameras were found inside it.';
+      }
+    } else if (uploadedLayerState.features.length && uploadedLayerState.selectedIndex == null) {
+      textEl.textContent = `${uploadedLayerState.features.length} polygon features loaded. Click one polygon feature on the map to select cameras inside it.`;
+    } else {
+      textEl.textContent = 'Click Draw area, Upload area, or Upload layer to select cameras by polygon.';
+    }
+  }
+  if (finishBtn) finishBtn.disabled = !areaSelection.active || pointCount < 3;
+  if (replaceBtn) replaceBtn.disabled = areaSelection.active || matchedCount < 1;
+  if (addBtn) addBtn.disabled = areaSelection.active || matchedCount < 1;
+}
+
+function startAreaSelection(source) {
+  clearAreaSelection();
+  areaSelection.active = true;
+  areaSelection.source = source === 'dashboard' ? 'dashboard' : 'globe';
+  document.body.classList.add('area-drawing');
+  openAreaPanel();
+  if (areaSelection.source === 'dashboard') {
+    switchView('dashboard');
+    initDashboardMap();
+    setTimeout(() => dashboardMap && dashboardMap.invalidateSize(), 50);
+  } else {
+    switchView('globe');
+  }
+  updateAreaPanel();
+}
+
+function finishAreaSelection() {
+  if (!areaSelection.active || areaSelection.points.length < 3) return;
+  areaSelection.active = false;
+  document.body.classList.remove('area-drawing');
+  areaSelection.polygons = [areaSelection.points.slice()];
+  const matched = findCamerasInsidePolygons(areaSelection.polygons);
+  areaSelection.matchedIds = matched.map(cam => String(cam.id));
+  redrawAreaSelectionGraphics();
+  highlightAreaMatches();
+  updateAreaPanel();
+}
+
+function clearAreaSelection() {
+  clearAreaGraphics();
+  areaSelection.active = false;
+  areaSelection.source = null;
+  areaSelection.points = [];
+  areaSelection.polygons = [];
+  areaSelection.matchedIds = [];
+  document.body.classList.remove('area-drawing');
+  updateAreaPanel();
+  const panel = document.getElementById('areaSelectionPanel');
+  if (panel) panel.classList.remove('open');
+}
+
+function removeAreaEntityOrArray(value) {
+  if (!viewer || !value) return;
+  if (Array.isArray(value)) value.forEach(v => v && viewer.entities.remove(v));
+  else viewer.entities.remove(value);
+}
+
+function clearAreaGraphics() {
+  removeAreaEntityOrArray(areaSelection.cesiumPolygon);
+  removeAreaEntityOrArray(areaSelection.cesiumPolyline);
+  if (viewer) areaSelection.cesiumPointEntities.forEach(e => viewer.entities.remove(e));
+  if (viewer) areaSelection.cesiumHighlightEntities.forEach(e => viewer.entities.remove(e));
+  areaSelection.cesiumPolygon = null;
+  areaSelection.cesiumPolyline = null;
+  areaSelection.cesiumPointEntities = [];
+  areaSelection.cesiumHighlightEntities = [];
+
+  if (dashboardMap && areaSelection.leafletLayer) dashboardMap.removeLayer(areaSelection.leafletLayer);
+  if (dashboardMap && areaSelection.leafletPointsLayer) dashboardMap.removeLayer(areaSelection.leafletPointsLayer);
+  if (dashboardMap && areaSelection.leafletHighlightLayer) dashboardMap.removeLayer(areaSelection.leafletHighlightLayer);
+  areaSelection.leafletLayer = null;
+  areaSelection.leafletPointsLayer = null;
+  areaSelection.leafletHighlightLayer = null;
+}
+
+function addGlobeAreaPointFromClick(position) {
+  if (!viewer) return;
+  let cartesian;
+  try { cartesian = viewer.scene.pickPosition(position); } catch (_) {}
+  if (!cartesian) cartesian = viewer.camera.pickEllipsoid(position, viewer.scene.globe.ellipsoid);
+  if (!cartesian) return;
+  const carto = Cesium.Cartographic.fromCartesian(cartesian);
+  const lat = Cesium.Math.toDegrees(carto.latitude);
+  const lng = Cesium.Math.toDegrees(carto.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  areaSelection.points.push({ lat, lng });
+  redrawAreaSelectionGraphics();
+  updateAreaPanel();
+}
+
+function addDashboardAreaPoint(latlng) {
+  if (!latlng) return;
+  areaSelection.points.push({ lat: latlng.lat, lng: latlng.lng });
+  redrawAreaSelectionGraphics();
+  updateAreaPanel();
+}
+
+function redrawAreaSelectionGraphics() {
+  const pts = areaSelection.points || [];
+  const polygons = areaSelectionPolygons();
+  // Clear only shape/point graphics, not result highlights.
+  removeAreaEntityOrArray(areaSelection.cesiumPolygon);
+  removeAreaEntityOrArray(areaSelection.cesiumPolyline);
+  if (viewer) areaSelection.cesiumPointEntities.forEach(e => viewer.entities.remove(e));
+  areaSelection.cesiumPolygon = null;
+  areaSelection.cesiumPolyline = null;
+  areaSelection.cesiumPointEntities = [];
+
+  if (dashboardMap && areaSelection.leafletLayer) dashboardMap.removeLayer(areaSelection.leafletLayer);
+  if (dashboardMap && areaSelection.leafletPointsLayer) dashboardMap.removeLayer(areaSelection.leafletPointsLayer);
+  areaSelection.leafletLayer = null;
+  areaSelection.leafletPointsLayer = null;
+
+  if (!pts.length && !polygons.length) return;
+
+  if (viewer) {
+    areaSelection.cesiumPointEntities = pts.map((p, idx) => viewer.entities.add({
+      id: `area-point-${Date.now()}-${idx}`,
+      position: Cesium.Cartesian3.fromDegrees(p.lng, p.lat, 0),
+      point: {
+        pixelSize: 8,
+        color: Cesium.Color.fromCssColorString('#2563eb'),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
+      }
+    }));
+
+    const polyEntities = [];
+    const lineEntities = [];
+    if (areaSelection.active && pts.length >= 2) {
+      lineEntities.push(viewer.entities.add({
+        polyline: {
+          positions: pts.map(p => Cesium.Cartesian3.fromDegrees(p.lng, p.lat, 0)),
+          width: 3,
+          clampToGround: true,
+          material: Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.95)
+        }
+      }));
+    }
+    polygons.forEach(poly => {
+      if (poly.length >= 2) {
+        const linePts = poly.concat([poly[0]]);
+        lineEntities.push(viewer.entities.add({
+          polyline: {
+            positions: linePts.map(p => Cesium.Cartesian3.fromDegrees(p.lng, p.lat, 0)),
+            width: 3,
+            clampToGround: true,
+            material: Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.95)
+          }
+        }));
+      }
+      if (poly.length >= 3) {
+        polyEntities.push(viewer.entities.add({
+          polygon: {
+            hierarchy: new Cesium.PolygonHierarchy(poly.map(p => Cesium.Cartesian3.fromDegrees(p.lng, p.lat, 0))),
+            material: Cesium.Color.fromCssColorString('#2563eb').withAlpha(areaSelection.active ? 0.14 : 0.22),
+            outline: true,
+            outlineColor: Cesium.Color.fromCssColorString('#2563eb'),
+            height: 0
+          }
+        }));
+      }
+    });
+    areaSelection.cesiumPolygon = polyEntities;
+    areaSelection.cesiumPolyline = lineEntities;
+  }
+
+  if (dashboardMap) {
+    const group = L.layerGroup();
+    const pointGroup = L.layerGroup();
+    pts.forEach(p => L.circleMarker([p.lat, p.lng], {
+      radius: 5, color: '#fff', weight: 2, fillColor: '#2563eb', fillOpacity: 1
+    }).addTo(pointGroup));
+    polygons.forEach(poly => {
+      const latlngs = poly.map(p => [p.lat, p.lng]);
+      if (latlngs.length >= 3) {
+        L.polygon(latlngs, {
+          color: '#2563eb', weight: 2.4, opacity: 0.95,
+          fillColor: '#2563eb', fillOpacity: areaSelection.active ? 0.12 : 0.22
+        }).addTo(group);
+      } else if (latlngs.length >= 2) {
+        L.polyline(latlngs, { color: '#2563eb', weight: 2.4, opacity: 0.95 }).addTo(group);
+      }
+    });
+    areaSelection.leafletLayer = group.addTo(dashboardMap);
+    areaSelection.leafletPointsLayer = pointGroup.addTo(dashboardMap);
+  }
+}
+function highlightAreaMatches() {
+  if (viewer) areaSelection.cesiumHighlightEntities.forEach(e => viewer.entities.remove(e));
+  areaSelection.cesiumHighlightEntities = [];
+  if (dashboardMap && areaSelection.leafletHighlightLayer) dashboardMap.removeLayer(areaSelection.leafletHighlightLayer);
+  areaSelection.leafletHighlightLayer = null;
+
+  const matched = areaSelection.matchedIds.map(id => cameraMap.get(id)).filter(Boolean);
+  if (viewer) {
+    areaSelection.cesiumHighlightEntities = matched.slice(0, 5000).map(cam => viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, 0),
+      point: {
+        pixelSize: 10,
+        color: Cesium.Color.fromCssColorString('#f59e0b'),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
+      },
+      label: {
+        text: '',
+        show: false
+      }
+    }));
+  }
+  if (dashboardMap && matched.length) {
+    areaSelection.leafletHighlightLayer = L.layerGroup(matched.slice(0, 2500).map(cam => L.circleMarker([cam.lat, cam.lng], {
+      radius: 6, color: '#0f172a', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.95
+    }).bindTooltip(cameraTitle(cam), { direction: 'top' }))).addTo(dashboardMap);
+  }
+}
+
+function replaceDashboardWithAreaSelection() {
+  if (!areaSelection.matchedIds.length) return;
+  dashboardRefreshTimers.forEach(t => clearTimeout(t));
+  dashboardRefreshTimers.clear();
+  dashboardHls.forEach(h => h.destroy());
+  dashboardHls.clear();
+  dashboardLastRefresh.clear();
+  dashboardErrorCounts.clear();
+  dashboardState.cameras = [...new Set(areaSelection.matchedIds)];
+  dashboardState.page = 0;
+  dashboardState.focusCameraId = dashboardState.cameras[0] || null;
+  dashboardState.selectedCameraId = dashboardState.focusCameraId;
+  dashboardState._fitPending = true;
+  saveDashboardState();
+  updateDashboardBadge();
+  switchView('dashboard');
+  renderDashboard();
+  setTimeout(() => { if (dashboardMap) { dashboardMap.invalidateSize(); fitDashboardMap(); } }, 100);
+}
+
+function addAreaSelectionToDashboard() {
+  if (!areaSelection.matchedIds.length) return;
+  const existing = new Set(dashboardState.cameras.map(String));
+  const additions = areaSelection.matchedIds.filter(id => !existing.has(String(id)));
+  dashboardState.cameras.push(...additions);
+  if (!dashboardState.focusCameraId && dashboardState.cameras.length) dashboardState.focusCameraId = dashboardState.cameras[0];
+  if (!dashboardState.selectedCameraId && dashboardState.focusCameraId) dashboardState.selectedCameraId = dashboardState.focusCameraId;
+  if (additions.length) dashboardState.page = dashboardPageIndexForId(additions[0]);
+  dashboardState._fitPending = true;
+  saveDashboardState();
+  updateDashboardBadge();
+  switchView('dashboard');
+  renderDashboard();
+  setTimeout(() => { if (dashboardMap) { dashboardMap.invalidateSize(); fitDashboardMap(); } }, 100);
 }
 
 // ==========================================================
@@ -4072,6 +5312,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Fit
   document.getElementById('btnFit').onclick = fitToData;
+  document.getElementById('btnDrawArea').onclick = () => startAreaSelection('globe');
+  document.getElementById('btnUploadArea').onclick = () => document.getElementById('areaUploadInput').click();
+  document.getElementById('btnUploadLayer').onclick = () => document.getElementById('layerUploadInput').click();
+  document.getElementById('areaUploadInput').onchange = e => {
+    const f = e.target.files && e.target.files[0];
+    if (f) uploadAreaFromFile(f);
+    e.target.value = '';
+  };
+  document.getElementById('layerUploadInput').onchange = e => {
+    const f = e.target.files && e.target.files[0];
+    if (f) uploadLayerFromFile(f);
+    e.target.value = '';
+  };
 
   // Location search — fires on Enter or after 600ms pause
   const searchBox = document.getElementById('searchBox');
@@ -4114,6 +5367,230 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('dashToggleMap').onclick = () => toggleDashboardMap();
   document.getElementById('dashMapCollapseHeader').onclick = () => toggleDashboardMap(false);
   document.getElementById('dashClearAll').onclick = clearDashboard;
+  document.getElementById('dashPrevPage').onclick = () => setDashboardPage((dashboardState.page || 0) - 1);
+  document.getElementById('dashNextPage').onclick = () => setDashboardPage((dashboardState.page || 0) + 1);
+  document.getElementById('dashMapDrawArea').onclick = () => startAreaSelection('dashboard');
+  document.getElementById('dashMapUploadArea').onclick = () => document.getElementById('areaUploadInput').click();
+  document.getElementById('dashMapUploadLayer').onclick = () => document.getElementById('layerUploadInput').click();
+
+  document.getElementById('areaFinishBtn').onclick = finishAreaSelection;
+  document.getElementById('areaReplaceBtn').onclick = replaceDashboardWithAreaSelection;
+  document.getElementById('areaAddBtn').onclick = addAreaSelectionToDashboard;
+  document.getElementById('areaClearBtn').onclick = clearAreaSelection;
+  document.getElementById('areaPanelClose').onclick = () => {
+    if (areaSelection.active || areaSelection.points.length) clearAreaSelection();
+    else document.getElementById('areaSelectionPanel').classList.remove('open');
+  };
+
+  document.getElementById('dashboardSearchClose').onclick = closeDashboardAddPanel;
+  document.getElementById('dashboardSearchRun').onclick = runDashboardSearch;
+  document.getElementById('dashboardSearchInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') runDashboardSearch();
+    if (e.key === 'Escape') closeDashboardAddPanel();
+  });
+  document.getElementById('dashboardSearchInput').addEventListener('input', e => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runDashboardSearch, 350);
+  });
+  setupDashboardResize();
+
+  // Dark mode
+  document.getElementById('btnTheme').onclick = () => {
+    const html = document.documentElement;
+    const dark = html.getAttribute('data-theme') === 'dark';
+    html.setAttribute('data-theme', dark ? 'light' : 'dark');
+    document.getElementById('iconLight').style.display = dark ? 'block' : 'none';
+    document.getElementById('iconDark').style.display  = dark ? 'none'  : 'block';
+  };
+
+  initCesium();
+});
+</script>
+</body>
+</html>
+function highlightAreaMatches() {
+  if (viewer) areaSelection.cesiumHighlightEntities.forEach(e => viewer.entities.remove(e));
+  areaSelection.cesiumHighlightEntities = [];
+  if (dashboardMap && areaSelection.leafletHighlightLayer) dashboardMap.removeLayer(areaSelection.leafletHighlightLayer);
+  areaSelection.leafletHighlightLayer = null;
+
+  const matched = areaSelection.matchedIds.map(id => cameraMap.get(id)).filter(Boolean);
+  if (viewer) {
+    areaSelection.cesiumHighlightEntities = matched.slice(0, 5000).map(cam => viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, 0),
+      point: {
+        pixelSize: 10,
+        color: Cesium.Color.fromCssColorString('#f59e0b'),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
+      },
+      label: {
+        text: '',
+        show: false
+      }
+    }));
+  }
+  if (dashboardMap && matched.length) {
+    areaSelection.leafletHighlightLayer = L.layerGroup(matched.slice(0, 2500).map(cam => L.circleMarker([cam.lat, cam.lng], {
+      radius: 6, color: '#0f172a', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.95
+    }).bindTooltip(cameraTitle(cam), { direction: 'top' }))).addTo(dashboardMap);
+  }
+}
+
+function replaceDashboardWithAreaSelection() {
+  if (!areaSelection.matchedIds.length) return;
+  dashboardRefreshTimers.forEach(t => clearTimeout(t));
+  dashboardRefreshTimers.clear();
+  dashboardHls.forEach(h => h.destroy());
+  dashboardHls.clear();
+  dashboardLastRefresh.clear();
+  dashboardErrorCounts.clear();
+  dashboardState.cameras = [...new Set(areaSelection.matchedIds)];
+  dashboardState.page = 0;
+  dashboardState.focusCameraId = dashboardState.cameras[0] || null;
+  dashboardState.selectedCameraId = dashboardState.focusCameraId;
+  dashboardState._fitPending = true;
+  saveDashboardState();
+  updateDashboardBadge();
+  switchView('dashboard');
+  renderDashboard();
+  setTimeout(() => { if (dashboardMap) { dashboardMap.invalidateSize(); fitDashboardMap(); } }, 100);
+}
+
+function addAreaSelectionToDashboard() {
+  if (!areaSelection.matchedIds.length) return;
+  const existing = new Set(dashboardState.cameras.map(String));
+  const additions = areaSelection.matchedIds.filter(id => !existing.has(String(id)));
+  dashboardState.cameras.push(...additions);
+  if (!dashboardState.focusCameraId && dashboardState.cameras.length) dashboardState.focusCameraId = dashboardState.cameras[0];
+  if (!dashboardState.selectedCameraId && dashboardState.focusCameraId) dashboardState.selectedCameraId = dashboardState.focusCameraId;
+  if (additions.length) dashboardState.page = dashboardPageIndexForId(additions[0]);
+  dashboardState._fitPending = true;
+  saveDashboardState();
+  updateDashboardBadge();
+  switchView('dashboard');
+  renderDashboard();
+  setTimeout(() => { if (dashboardMap) { dashboardMap.invalidateSize(); fitDashboardMap(); } }, 100);
+}
+
+// ==========================================================
+//  UI WIRING
+// ==========================================================
+document.addEventListener('DOMContentLoaded', () => {
+  const dropZone  = document.getElementById('dropZone');
+  const fileInput = document.getElementById('fileInput');
+
+  dropZone.onclick    = () => fileInput.click();
+  dropZone.ondragover = e => { e.preventDefault(); dropZone.classList.add('dragover'); };
+  dropZone.ondragleave = () => dropZone.classList.remove('dragover');
+  dropZone.ondrop     = e => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    const f = e.dataTransfer.files[0];
+    if (f) loadFile(f);
+  };
+  fileInput.onchange = e => { if (e.target.files[0]) loadFile(e.target.files[0]); };
+
+  // Field of view toggle
+  document.getElementById('btnFrustums').onclick = function () {
+    frustumsEnabled = !frustumsEnabled;
+    this.classList.toggle('active', frustumsEnabled);
+    if (!frustumsEnabled) removeFrustum();
+    else if (selectedCamera) showFrustum(selectedCamera);
+  };
+
+  // Legend
+  document.getElementById('btnLegend').onclick = function () {
+    legendOpen = !legendOpen;
+    this.classList.toggle('active', legendOpen);
+    document.getElementById('legend').style.display = legendOpen ? 'block' : 'none';
+    if (legendOpen) {
+      document.getElementById('settingsPanel').style.display = 'none';
+      document.getElementById('btnSettings').classList.remove('active');
+      settingsPanelOpen = false;
+    }
+  };
+
+  // Settings
+  document.getElementById('btnSettings').onclick = function () {
+    settingsPanelOpen = !settingsPanelOpen;
+    this.classList.toggle('active', settingsPanelOpen);
+    document.getElementById('settingsPanel').style.display = settingsPanelOpen ? 'block' : 'none';
+    if (settingsPanelOpen) {
+      document.getElementById('legend').style.display = 'none';
+      document.getElementById('btnLegend').classList.remove('active');
+      legendOpen = false;
+    }
+  };
+
+  // Load 3D tiles
+  document.getElementById('applyGoogleKey').onclick = async () => {
+    const key = document.getElementById('googleKeyInput').value.trim();
+    if (!key || !viewer) return;
+    const btn = document.getElementById('applyGoogleKey');
+    btn.textContent = 'Loading…';
+    await enableGoogle3DTiles(key);
+  };
+
+  // Fit
+  document.getElementById('btnFit').onclick = fitToData;
+  document.getElementById('btnDrawArea').onclick = () => startAreaSelection('globe');
+
+  // Location search — fires on Enter or after 600ms pause
+  const searchBox = document.getElementById('searchBox');
+  searchBox.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { clearTimeout(searchTimer); runLocationSearch(e.target.value); }
+    if (e.key === 'Escape') { e.target.value = ''; clearSearchResults(); }
+  });
+  searchBox.oninput = e => {
+    if (!e.target.value.trim()) { clearTimeout(searchTimer); clearSearchResults(); return; }
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => runLocationSearch(e.target.value), 600);
+  };
+
+  // Close panel
+  document.getElementById('closeSide').onclick = deselect;
+
+  // View switching
+  document.getElementById('btnGlobeView').onclick = () => switchView('globe');
+  document.getElementById('btnDashboardView').onclick = () => switchView('dashboard');
+
+  // Add selected camera to dashboard from the globe side panel
+  document.getElementById('addSelectedToDashboard').onclick = () => {
+    if (selectedCamera && addCameraToDashboard(selectedCamera)) {
+      updateDashboardBadge();
+    }
+  };
+  document.getElementById('openDashboardFromSide').onclick = () => switchView('dashboard');
+
+  // Dashboard controls
+  document.querySelectorAll('#dashboardBar [data-mode]').forEach(btn => {
+    btn.onclick = () => setDashboardLayout(btn.dataset.mode);
+  });
+  document.querySelectorAll('#dashboardBar [data-grid]').forEach(btn => {
+    btn.onclick = () => setDashboardGrid(btn.dataset.grid);
+  });
+  document.getElementById('dashRefreshAll').onclick = refreshDashboardAll;
+  document.getElementById('dashMediaFitToggle').onclick = toggleDashboardMediaFit;
+  document.getElementById('dashAddCamera').onclick = openDashboardAddPanel;
+  document.getElementById('dashFitMap').onclick = fitDashboardMap;
+  document.getElementById('dashMapFitHeader').onclick = fitDashboardMap;
+  document.getElementById('dashToggleMap').onclick = () => toggleDashboardMap();
+  document.getElementById('dashMapCollapseHeader').onclick = () => toggleDashboardMap(false);
+  document.getElementById('dashClearAll').onclick = clearDashboard;
+  document.getElementById('dashPrevPage').onclick = () => setDashboardPage((dashboardState.page || 0) - 1);
+  document.getElementById('dashNextPage').onclick = () => setDashboardPage((dashboardState.page || 0) + 1);
+  document.getElementById('dashMapDrawArea').onclick = () => startAreaSelection('dashboard');
+
+  document.getElementById('areaFinishBtn').onclick = finishAreaSelection;
+  document.getElementById('areaReplaceBtn').onclick = replaceDashboardWithAreaSelection;
+  document.getElementById('areaAddBtn').onclick = addAreaSelectionToDashboard;
+  document.getElementById('areaClearBtn').onclick = clearAreaSelection;
+  document.getElementById('areaPanelClose').onclick = () => {
+    if (areaSelection.active || areaSelection.points.length) clearAreaSelection();
+    else document.getElementById('areaSelectionPanel').classList.remove('open');
+  };
 
   document.getElementById('dashboardSearchClose').onclick = closeDashboardAddPanel;
   document.getElementById('dashboardSearchRun').onclick = runDashboardSearch;
