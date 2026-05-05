@@ -1553,6 +1553,160 @@ body.area-drawing #dashboardMap { cursor: crosshair; }
   box-shadow: 0 0 0 var(--marker-ring, 0px) rgba(37,99,235,0.18);
 }
 
+
+/* ─── CAMERA 3D VIEW LOADING OVERLAY ─── */
+#tilesLoadOverlay {
+  position: fixed;
+  top: var(--top-h);
+  left: 0;
+  right: 0;
+  bottom: var(--bar-h);
+  z-index: 49;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 280ms ease, visibility 280ms ease;
+}
+#tilesLoadOverlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+}
+body.dashboard-active #tilesLoadOverlay { display: none !important; }
+body.tiles-view-loading #cesiumContainer .cesium-widget canvas {
+  filter: saturate(0.92) contrast(0.96);
+  transition: filter 260ms ease;
+}
+.tiles-loader-card {
+  min-width: 275px;
+  max-width: min(380px, calc(100vw - 32px));
+  border: 1px solid rgba(226,232,240,0.22);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.74);
+  color: #fff;
+  box-shadow: 0 18px 70px rgba(0,0,0,0.35), 0 2px 10px rgba(0,0,0,0.22);
+  backdrop-filter: blur(14px) saturate(1.1);
+  overflow: hidden;
+  transform: translateY(0);
+}
+.tiles-loader-inner {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px 12px;
+}
+.tiles-spinner {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,0.18);
+  border-top-color: #60a5fa;
+  border-right-color: rgba(96,165,250,0.72);
+  animation: tilesSpin 800ms linear infinite;
+}
+.tiles-loader-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #f8fafc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tiles-loader-subtitle {
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.45;
+  color: rgba(226,232,240,0.78);
+}
+.tiles-progress-track {
+  height: 3px;
+  background: rgba(148,163,184,0.24);
+  overflow: hidden;
+}
+.tiles-progress-bar {
+  width: 18%;
+  height: 100%;
+  background: linear-gradient(90deg, rgba(96,165,250,0.4), #60a5fa, rgba(147,197,253,0.75));
+  border-radius: 999px;
+  transform-origin: left center;
+  transition: width 240ms ease;
+  position: relative;
+}
+.tiles-progress-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.58), transparent);
+  animation: tilesShimmer 1.2s ease-in-out infinite;
+}
+@keyframes tilesSpin { to { transform: rotate(360deg); } }
+@keyframes tilesShimmer { to { transform: translateX(160%); } }
+
+
+/* ─── CUSTOM MAP ZOOM CONTROLS ─── */
+#globeZoomControl {
+  position: fixed;
+  top: calc(var(--top-h) + 12px);
+  right: 12px;
+  z-index: 120;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  box-shadow: var(--c-shadow-md);
+  user-select: none;
+}
+body.app-ready.globe-zoom-ready:not(.dashboard-active) #globeZoomControl { display: flex; }
+body.area-drawing #globeZoomControl,
+body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
+#globeZoomControl button,
+.dash-zoom button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface2);
+  color: var(--c-text2);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+#globeZoomControl button:hover,
+.dash-zoom button:hover {
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
+  border-color: rgba(37,99,235,0.25);
+}
+#globeZoomControl button { width: 30px; height: 30px; font-size: 15px; }
+#globeZoomSlider {
+  width: 118px;
+  height: 18px;
+  writing-mode: bt-lr;
+  transform: rotate(-90deg);
+  margin: 50px -48px;
+  accent-color: var(--c-accent);
+  cursor: pointer;
+}
+.dash-zoom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+}
+.dash-zoom button { width: 26px; height: 26px; font-size: 13px; }
+
 /* ─── UPLOADED AREA / LAYER FEATURE SELECTION ─── */
 .uploaded-layer-feature { cursor: pointer; }
 .layer-feature-tooltip { font-family: var(--mono); font-size: 11px; }
@@ -1727,6 +1881,29 @@ body.area-drawing #dashboardMap { cursor: crosshair; }
 <!-- ─── CESIUM MAP ─── -->
 <div id="cesiumContainer"></div>
 
+<!-- ─── GLOBE ZOOM CONTROL ─── -->
+<div id="globeZoomControl" aria-label="Globe zoom control">
+  <button id="globeZoomIn" type="button" title="Zoom in">+</button>
+  <input id="globeZoomSlider" type="range" min="0" max="100" value="50" aria-label="Globe zoom level">
+  <button id="globeZoomOut" type="button" title="Zoom out">−</button>
+</div>
+
+
+<!-- ─── 3D CAMERA VIEW LOADING OVERLAY ─── -->
+<div id="tilesLoadOverlay" class="hidden" aria-live="polite" aria-atomic="true">
+  <div class="tiles-loader-card">
+    <div class="tiles-loader-inner">
+      <div class="tiles-spinner" aria-hidden="true"></div>
+      <div>
+        <div class="tiles-loader-title" id="tilesLoadTitle">Loading 3D view…</div>
+        <div class="tiles-loader-subtitle" id="tilesLoadSubtitle">Streaming nearby photorealistic tiles</div>
+      </div>
+    </div>
+    <div class="tiles-progress-track"><div class="tiles-progress-bar" id="tilesLoadProgress"></div></div>
+  </div>
+</div>
+
+
 <!-- ─── DASHBOARD VIEW ─── -->
 <div id="dashboardView">
   <div id="dashboardShell">
@@ -1750,6 +1927,8 @@ body.area-drawing #dashboardMap { cursor: crosshair; }
         <button class="dash-small-btn" id="dashFitMap">Fit map</button>
         <button class="dash-small-btn" id="dashToggleMap">Hide map</button>
         <button class="dash-small-btn" id="dashClearAll">Clear</button>
+        <button class="dash-small-btn" id="dashSaveView">Save view</button>
+        <button class="dash-small-btn" id="dashLoadView" title="Right-click to delete a saved view">Load view</button>
         <div class="dash-page-controls">
           <button class="dash-small-btn" id="dashPrevPage">Prev</button>
           <button class="dash-small-btn" id="dashNextPage">Next</button>
@@ -1765,6 +1944,10 @@ body.area-drawing #dashboardMap { cursor: crosshair; }
         <button class="dash-small-btn" id="dashMapDrawArea">Draw area</button>
         <button class="dash-small-btn" id="dashMapUploadArea">Upload area</button>
         <button class="dash-small-btn" id="dashMapUploadLayer">Upload layer</button>
+        <div class="dash-zoom" aria-label="Dashboard map zoom control">
+          <button id="dashZoomIn" type="button" title="Zoom in">+</button>
+          <button id="dashZoomOut" type="button" title="Zoom out">−</button>
+        </div>
         <button class="dash-small-btn" id="dashMapFitHeader">Fit</button>
         <button class="dash-small-btn" id="dashMapCollapseHeader">Collapse</button>
       </div>
@@ -1924,7 +2107,23 @@ let searchTimer = null;
 let settingsPanelOpen = false;
 let legendOpen = false;
 let google3DEnabled = false;
+let googleTileset = null;
+let googleTilesLoadProgressRemove = null;
+let cameraTilesLoadToken = 0;
+let cameraTilesLoadState = {
+  active: false,
+  startedAt: 0,
+  cameraMoveDone: false,
+  cameraTitle: '',
+  lastPending: 0,
+  lastProcessing: 0,
+  settledFrames: 0,
+  removePostRender: null,
+  timeoutId: null,
+};
 let lastOcclusionCheck = 0;
+let globeZoomControlsReady = false;
+let suppressGlobeZoomSliderSync = false;
 
 // Frustum parameters
 let frustumFovH = 58;
@@ -1935,6 +2134,7 @@ let frustumTilt  = 15;
 const DASHBOARD_PAGE_SIZE = 16;
 const DASHBOARD_MAX_CAMERAS = Number.POSITIVE_INFINITY; // legacy guard; dashboard is now paginated
 const DASHBOARD_STORAGE_KEY = 'vigil.dashboard.v1';
+const DASHBOARD_VIEWS_STORAGE_KEY = 'vigil.dashboard.views.v1';
 let activeView = 'globe';
 let dashboardState = {
   cameras: [],
@@ -2378,6 +2578,73 @@ function removeSelectedCameraMarker() {
 }
 
 
+
+// ==========================================================
+//  GLOBE ZOOM CONTROL
+// ==========================================================
+function globeZoomHeightToSlider(height) {
+  const min = 50;
+  const max = 20000000;
+  const h = Math.max(min, Math.min(max, Number(height) || max));
+  const t = 1 - Math.log(h / min) / Math.log(max / min);
+  return Math.max(0, Math.min(100, t * 100));
+}
+
+function globeZoomSliderToHeight(value) {
+  const min = 50;
+  const max = 20000000;
+  const t = Math.max(0, Math.min(100, Number(value) || 0)) / 100;
+  return min * Math.pow(max / min, 1 - t);
+}
+
+function getGlobeCameraHeight() {
+  if (!viewer) return 0;
+  return viewer.camera.positionCartographic.height;
+}
+
+function setGlobeCameraHeight(height) {
+  if (!viewer) return;
+  const carto = viewer.camera.positionCartographic;
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, height),
+    orientation: {
+      heading: viewer.camera.heading,
+      pitch: viewer.camera.pitch,
+      roll: viewer.camera.roll
+    }
+  });
+}
+
+function syncGlobeZoomSlider() {
+  if (!viewer || suppressGlobeZoomSliderSync) return;
+  const slider = document.getElementById('globeZoomSlider');
+  if (!slider) return;
+  slider.value = String(Math.round(globeZoomHeightToSlider(getGlobeCameraHeight())));
+}
+
+function setupGlobeZoomControls() {
+  if (!viewer || globeZoomControlsReady) return;
+  const slider = document.getElementById('globeZoomSlider');
+  const zoomIn = document.getElementById('globeZoomIn');
+  const zoomOut = document.getElementById('globeZoomOut');
+  if (!slider || !zoomIn || !zoomOut) return;
+
+  globeZoomControlsReady = true;
+  document.body.classList.add('globe-zoom-ready');
+
+  slider.addEventListener('input', () => {
+    suppressGlobeZoomSliderSync = true;
+    setGlobeCameraHeight(globeZoomSliderToHeight(slider.value));
+    requestAnimationFrame(() => { suppressGlobeZoomSliderSync = false; syncGlobeZoomSlider(); });
+  });
+
+  zoomIn.addEventListener('click', () => viewer && viewer.camera.zoomIn(Math.max(25, getGlobeCameraHeight() * 0.45)));
+  zoomOut.addEventListener('click', () => viewer && viewer.camera.zoomOut(Math.max(25, getGlobeCameraHeight() * 0.65)));
+
+  viewer.camera.changed.addEventListener(syncGlobeZoomSlider);
+  syncGlobeZoomSlider();
+}
+
 // ==========================================================
 //  CESIUM INIT
 // ==========================================================
@@ -2432,6 +2699,7 @@ function initCesium() {
   }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
   setupClickHandler();
+  setupGlobeZoomControls();
 
   viewer.scene.preRender.addEventListener(function () {
     if (!dataSource) return;
@@ -2455,6 +2723,125 @@ function initCesium() {
   });
 
   return viewer;
+}
+
+
+// ==========================================================
+//  3D CAMERA VIEW LOADING UX
+// ==========================================================
+function cameraLoadingTitle(cam) {
+  return cameraTitle(cam) || cam.location || cam.name || cam.id || 'selected camera';
+}
+
+function setTilesLoaderProgress(width, subtitle) {
+  const bar = document.getElementById('tilesLoadProgress');
+  const sub = document.getElementById('tilesLoadSubtitle');
+  if (bar) bar.style.width = `${Math.max(8, Math.min(100, width))}%`;
+  if (sub && subtitle) sub.textContent = subtitle;
+}
+
+function getGoogleTilesLoadCounts() {
+  let pending = cameraTilesLoadState.lastPending || 0;
+  let processing = cameraTilesLoadState.lastProcessing || 0;
+
+  // Public loadProgress event updates the values above. The private statistics
+  // fallback is used only for smoother UI feedback because Cesium 1.111 does not
+  // expose a single public "current view tiles ready" promise for this use case.
+  const stats = googleTileset && googleTileset._statistics;
+  if (stats) {
+    pending = Number(stats.numberOfPendingRequests ?? stats.numberOfPendingLoads ?? pending) || 0;
+    processing = Number(stats.numberOfTilesProcessing ?? stats.numberOfTilesProcessed ?? processing) || 0;
+  }
+  return { pending, processing, total: pending + processing };
+}
+
+function showCameraTilesLoader(cam) {
+  if (!viewer || !google3DEnabled) return null;
+
+  const token = ++cameraTilesLoadToken;
+  const title = cameraLoadingTitle(cam);
+  cameraTilesLoadState.active = true;
+  cameraTilesLoadState.startedAt = performance.now();
+  cameraTilesLoadState.cameraMoveDone = false;
+  cameraTilesLoadState.cameraTitle = title;
+  cameraTilesLoadState.settledFrames = 0;
+
+  if (cameraTilesLoadState.timeoutId) clearTimeout(cameraTilesLoadState.timeoutId);
+  if (cameraTilesLoadState.removePostRender) {
+    cameraTilesLoadState.removePostRender();
+    cameraTilesLoadState.removePostRender = null;
+  }
+
+  const overlay = document.getElementById('tilesLoadOverlay');
+  const titleEl = document.getElementById('tilesLoadTitle');
+  if (titleEl) titleEl.textContent = `Loading 3D view · ${title}`;
+  setTilesLoaderProgress(18, 'Moving camera into inspection view…');
+  if (overlay) overlay.classList.remove('hidden');
+  document.body.classList.add('tiles-view-loading');
+
+  cameraTilesLoadState.timeoutId = setTimeout(() => {
+    if (cameraTilesLoadToken === token) hideCameraTilesLoader(token, true);
+  }, 9000);
+
+  return token;
+}
+
+function hideCameraTilesLoader(token, timedOut = false) {
+  if (token && token !== cameraTilesLoadToken) return;
+  cameraTilesLoadState.active = false;
+  if (cameraTilesLoadState.timeoutId) {
+    clearTimeout(cameraTilesLoadState.timeoutId);
+    cameraTilesLoadState.timeoutId = null;
+  }
+  if (cameraTilesLoadState.removePostRender) {
+    cameraTilesLoadState.removePostRender();
+    cameraTilesLoadState.removePostRender = null;
+  }
+
+  if (!timedOut) setTilesLoaderProgress(100, '3D view ready');
+  const overlay = document.getElementById('tilesLoadOverlay');
+  setTimeout(() => {
+    if (!cameraTilesLoadState.active) {
+      if (overlay) overlay.classList.add('hidden');
+      document.body.classList.remove('tiles-view-loading');
+      setTilesLoaderProgress(18, 'Streaming nearby photorealistic tiles');
+    }
+  }, timedOut ? 0 : 260);
+}
+
+function markCameraFlyCompleteAndWaitForTiles(token) {
+  if (!token || token !== cameraTilesLoadToken) return;
+  cameraTilesLoadState.cameraMoveDone = true;
+  cameraTilesLoadState.settledFrames = 0;
+  setTilesLoaderProgress(58, 'Settling nearby 3D tiles…');
+
+  const minVisibleMs = 650;
+  const requiredSettledFrames = 10;
+
+  const remove = viewer.scene.postRender.addEventListener(() => {
+    if (token !== cameraTilesLoadToken) { remove(); return; }
+
+    const elapsed = performance.now() - cameraTilesLoadState.startedAt;
+    const counts = getGoogleTilesLoadCounts();
+
+    if (counts.total <= 0) cameraTilesLoadState.settledFrames += 1;
+    else cameraTilesLoadState.settledFrames = 0;
+
+    const settlingPct = counts.total <= 0
+      ? 86 + Math.min(10, cameraTilesLoadState.settledFrames)
+      : Math.max(58, 82 - Math.min(30, counts.total * 2));
+
+    const detail = counts.total > 0
+      ? `Streaming nearby tiles · ${counts.pending} requests · ${counts.processing} processing`
+      : 'Finalising view…';
+    setTilesLoaderProgress(settlingPct, detail);
+
+    if (elapsed >= minVisibleMs && cameraTilesLoadState.settledFrames >= requiredSettledFrames) {
+      hideCameraTilesLoader(token);
+    }
+  });
+
+  cameraTilesLoadState.removePostRender = remove;
 }
 
 // ==========================================================
@@ -2494,6 +2881,18 @@ async function enableGoogle3DTiles(ionToken) {
   }
 
   viewer.scene.primitives.add(tileset);
+  googleTileset = tileset;
+
+  if (googleTilesLoadProgressRemove) {
+    googleTilesLoadProgressRemove();
+    googleTilesLoadProgressRemove = null;
+  }
+  if (tileset.loadProgress && typeof tileset.loadProgress.addEventListener === 'function') {
+    googleTilesLoadProgressRemove = tileset.loadProgress.addEventListener((pending, processing) => {
+      cameraTilesLoadState.lastPending = Number(pending) || 0;
+      cameraTilesLoadState.lastProcessing = Number(processing) || 0;
+    });
+  }
 
   const onReady = () => {
     viewer.scene.globe.show = false;
@@ -2507,6 +2906,7 @@ async function enableGoogle3DTiles(ionToken) {
   if (tileset.readyPromise) {
     tileset.readyPromise.then(onReady).catch(e => {
       viewer.scene.primitives.remove(tileset);
+      if (googleTileset === tileset) googleTileset = null;
       setStatus('Tileset failed to load: ' + (e.message || 'unknown error'), 'var(--c-danger)');
     });
   } else {
@@ -2700,6 +3100,7 @@ async function selectCamera(cam) {
   const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(camPos);
 
   if (google3DEnabled) {
+    const tilesLoadToken = showCameraTilesLoader(cam);
     // Close, low oblique inspection view for photorealistic 3D tiles.
     const offsetENU  = new Cesium.Cartesian3(
       Math.sin(hRad) * 260,
@@ -2718,6 +3119,8 @@ async function selectCamera(cam) {
       },
       duration: 1.55,
       easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
+      complete: () => markCameraFlyCompleteAndWaitForTiles(tilesLoadToken),
+      cancel: () => hideCameraTilesLoader(tilesLoadToken, true),
     });
   } else {
     // 2D/satellite fallback is just an ellipsoid globe. Keep this view
@@ -2753,6 +3156,7 @@ async function selectCamera(cam) {
 }
 
 function deselect() {
+  hideCameraTilesLoader(null, true);
   if (selectedCamera && dataSource) {
     const prev = dataSource.entities.getById(selectedCamera.id);
     if (prev) {
@@ -3378,6 +3782,7 @@ function loadFile(file) {
 
 async function initializeMap() {
   document.getElementById('uploadOverlay').style.display = 'none';
+  document.body.classList.add('app-ready');
   document.getElementById('topBar').style.display = 'flex';
   document.getElementById('statusBar').style.display = 'flex';
   document.getElementById('progressFill').style.width = '90%';
@@ -3395,7 +3800,8 @@ async function initializeMap() {
   initMinimap();
   viewer.scene.postRender.addEventListener(updateMinimap);
 
-  setTimeout(fitToData, 600);
+  // Do not auto-fit on dataset load. Keep the current globe camera position;
+  // the Fit button is the only dataset-level camera movement.
 }
 
 // ==========================================================
@@ -4243,7 +4649,7 @@ document.addEventListener('mouseup', () => {
 function initDashboardMap() {
   if (dashboardMap) return;
   dashboardMap = L.map('dashboardMap', {
-    zoomControl: true,
+    zoomControl: false,
     attributionControl: false
   }).setView([20, 0], 2);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(dashboardMap);
@@ -5251,6 +5657,169 @@ function addAreaSelectionToDashboard() {
   setTimeout(() => { if (dashboardMap) { dashboardMap.invalidateSize(); fitDashboardMap(); } }, 100);
 }
 
+
+// ==========================================================
+//  SAVED DASHBOARD VIEWS (LOCAL PRESETS)
+// ==========================================================
+// Current prototype behaviour: saved dashboard views are stored locally in
+// localStorage. When user accounts are implemented, this is the handoff point:
+// replace these localStorage helpers with authenticated backend/API storage so
+// dashboard views sync to each user's account instead of only this browser.
+function getSavedDashboardViews() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DASHBOARD_VIEWS_STORAGE_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function setSavedDashboardViews(views) {
+  try {
+    localStorage.setItem(DASHBOARD_VIEWS_STORAGE_KEY, JSON.stringify(Array.isArray(views) ? views : []));
+  } catch (err) {
+    alert('Could not save dashboard view. Browser storage may be full.');
+  }
+}
+
+function normaliseSavedDashboardState(state) {
+  const base = state && typeof state === 'object' ? state : {};
+  return {
+    cameras: Array.isArray(base.cameras) ? base.cameras.map(String).filter(id => cameraMap.has(id)) : [],
+    layout: ['grid', 'mosaic', 'focus', 'single'].includes(base.layout) ? base.layout : 'grid',
+    gridSize: ['2x2', '3x3', '4x4'].includes(base.gridSize) ? base.gridSize : '2x2',
+    mapVisible: base.mapVisible !== false,
+    focusCameraId: base.focusCameraId != null && cameraMap.has(String(base.focusCameraId)) ? String(base.focusCameraId) : null,
+    selectedCameraId: base.selectedCameraId != null && cameraMap.has(String(base.selectedCameraId)) ? String(base.selectedCameraId) : null,
+    mosaic: base.mosaic && typeof base.mosaic === 'object' ? base.mosaic : {},
+    page: Number.isFinite(base.page) ? Math.max(0, Math.floor(base.page)) : 0,
+    pageSize: DASHBOARD_PAGE_SIZE,
+    mediaFit: base.mediaFit === 'cover' ? 'cover' : 'contain'
+  };
+}
+
+function dashboardStateForPreset() {
+  return {
+    cameras: Array.isArray(dashboardState.cameras) ? dashboardState.cameras.map(String) : [],
+    layout: dashboardState.layout || 'grid',
+    gridSize: dashboardState.gridSize || '2x2',
+    mapVisible: dashboardState.mapVisible !== false,
+    focusCameraId: dashboardState.focusCameraId || null,
+    selectedCameraId: dashboardState.selectedCameraId || null,
+    mosaic: dashboardState.mosaic || {},
+    page: dashboardState.page || 0,
+    pageSize: DASHBOARD_PAGE_SIZE,
+    mediaFit: dashboardState.mediaFit === 'cover' ? 'cover' : 'contain'
+  };
+}
+
+function saveCurrentDashboardView() {
+  if (!dashboardState.cameras.length) {
+    if (!confirm('This dashboard is empty. Save it anyway?')) return;
+  }
+
+  const views = getSavedDashboardViews();
+  const existingNames = views.map(v => v.name).filter(Boolean).join('\n');
+  const name = prompt(existingNames ? 'Dashboard view name:\n\nExisting views:\n' + existingNames : 'Dashboard view name:');
+  if (!name || !name.trim()) return;
+
+  const cleanName = name.trim();
+  const now = Date.now();
+  const existingIndex = views.findIndex(v => String(v.name || '').toLowerCase() === cleanName.toLowerCase());
+  const previous = existingIndex >= 0 ? views[existingIndex] : null;
+
+  const savedView = {
+    id: previous ? previous.id : 'view-' + now,
+    name: cleanName,
+    createdAt: previous ? previous.createdAt : now,
+    updatedAt: now,
+    state: dashboardStateForPreset()
+  };
+
+  if (existingIndex >= 0) views[existingIndex] = savedView;
+  else views.push(savedView);
+
+  views.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+  setSavedDashboardViews(views);
+  updateDashboardSavedViewButtons();
+  alert('Saved dashboard view: ' + cleanName);
+}
+
+function chooseSavedDashboardView(actionText) {
+  const views = getSavedDashboardViews();
+  if (!views.length) {
+    alert('No saved dashboard views yet.');
+    return null;
+  }
+
+  const list = views.map((v, i) => {
+    const count = v.state && Array.isArray(v.state.cameras) ? v.state.cameras.length : 0;
+    return String(i + 1) + '. ' + v.name + ' (' + count + ' cameras)';
+  }).join('\n');
+
+  const choice = prompt((actionText || 'Choose dashboard view') + ':\n\n' + list + '\n\nEnter number or exact name:');
+  if (!choice || !choice.trim()) return null;
+
+  const trimmed = choice.trim();
+  const num = Number(trimmed);
+  if (Number.isInteger(num) && num >= 1 && num <= views.length) return views[num - 1];
+
+  const byName = views.find(v => String(v.name || '').toLowerCase() === trimmed.toLowerCase());
+  if (!byName) alert('No saved dashboard view matched: ' + trimmed);
+  return byName || null;
+}
+
+function loadSavedDashboardView() {
+  const view = chooseSavedDashboardView('Load dashboard view');
+  if (!view) return;
+
+  const restored = normaliseSavedDashboardState(view.state);
+  if (restored.cameras.length !== ((view.state && view.state.cameras) || []).length) {
+    console.warn('Some saved dashboard cameras were not present in the currently loaded camera dataset.');
+  }
+
+  dashboardState = {
+    ...dashboardState,
+    ...restored
+  };
+
+  const maxPage = Math.max(0, Math.ceil(dashboardState.cameras.length / DASHBOARD_PAGE_SIZE) - 1);
+  dashboardState.page = Math.min(dashboardState.page || 0, maxPage);
+  if (!dashboardState.focusCameraId && dashboardState.cameras.length) dashboardState.focusCameraId = dashboardState.cameras[0];
+  if (!dashboardState.selectedCameraId && dashboardState.focusCameraId) dashboardState.selectedCameraId = dashboardState.focusCameraId;
+
+  saveDashboardState();
+  updateDashboardBadge();
+  switchView('dashboard');
+  renderDashboard();
+  updateDashboardMapPresentation();
+  setTimeout(() => {
+    if (dashboardMap) {
+      dashboardMap.invalidateSize();
+      if (dashboardState.mapVisible) fitDashboardMap();
+    }
+  }, 100);
+}
+
+function deleteSavedDashboardView() {
+  const view = chooseSavedDashboardView('Delete dashboard view');
+  if (!view) return;
+  if (!confirm('Delete saved dashboard view "' + view.name + '"?')) return;
+
+  const views = getSavedDashboardViews().filter(v => v.id !== view.id);
+  setSavedDashboardViews(views);
+  updateDashboardSavedViewButtons();
+  alert('Deleted dashboard view: ' + view.name);
+}
+
+function updateDashboardSavedViewButtons() {
+  const loadBtn = document.getElementById('dashLoadView');
+  if (!loadBtn) return;
+  const count = getSavedDashboardViews().length;
+  loadBtn.textContent = count ? 'Load view (' + count + ')' : 'Load view';
+  loadBtn.disabled = false;
+}
+
 // ==========================================================
 //  UI WIRING
 // ==========================================================
@@ -5367,11 +5936,17 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('dashToggleMap').onclick = () => toggleDashboardMap();
   document.getElementById('dashMapCollapseHeader').onclick = () => toggleDashboardMap(false);
   document.getElementById('dashClearAll').onclick = clearDashboard;
+  document.getElementById('dashSaveView').onclick = saveCurrentDashboardView;
+  document.getElementById('dashLoadView').onclick = loadSavedDashboardView;
+  document.getElementById('dashLoadView').addEventListener('contextmenu', e => { e.preventDefault(); deleteSavedDashboardView(); });
+  updateDashboardSavedViewButtons();
   document.getElementById('dashPrevPage').onclick = () => setDashboardPage((dashboardState.page || 0) - 1);
   document.getElementById('dashNextPage').onclick = () => setDashboardPage((dashboardState.page || 0) + 1);
   document.getElementById('dashMapDrawArea').onclick = () => startAreaSelection('dashboard');
   document.getElementById('dashMapUploadArea').onclick = () => document.getElementById('areaUploadInput').click();
   document.getElementById('dashMapUploadLayer').onclick = () => document.getElementById('layerUploadInput').click();
+  document.getElementById('dashZoomIn')?.addEventListener('click', () => { if (dashboardMap) dashboardMap.zoomIn(); });
+  document.getElementById('dashZoomOut')?.addEventListener('click', () => { if (dashboardMap) dashboardMap.zoomOut(); });
 
   document.getElementById('areaFinishBtn').onclick = finishAreaSelection;
   document.getElementById('areaReplaceBtn').onclick = replaceDashboardWithAreaSelection;
