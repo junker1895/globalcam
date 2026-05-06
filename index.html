@@ -2270,6 +2270,8 @@ const DASHBOARD_PAGE_SIZE = 16;
 const DASHBOARD_MAX_CAMERAS = Number.POSITIVE_INFINITY; // legacy guard; dashboard is now paginated
 const DASHBOARD_STORAGE_KEY = 'vigil.dashboard.v1';
 const DASHBOARD_VIEWS_STORAGE_KEY = 'vigil.dashboard.views.v1';
+let savedDashboardViewsCache = [];
+let savedDashboardViewsLoading = false;
 
 // ==========================================================
 //  FREEMIUM / ACCOUNT ENTITLEMENTS
@@ -6136,29 +6138,13 @@ function addAreaSelectionToDashboard() {
 
 
 // ==========================================================
-//  SAVED DASHBOARD VIEWS (LOCAL PRESETS)
+//  SAVED DASHBOARD VIEWS (SUPABASE CLOUD PRESETS)
 // ==========================================================
-// Current prototype behaviour: saved dashboard views are stored locally in
-// localStorage. When user accounts are implemented, this is the handoff point:
-// replace these localStorage helpers with authenticated backend/API storage so
-// dashboard views sync to each user's account instead of only this browser.
-function getSavedDashboardViews() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(DASHBOARD_VIEWS_STORAGE_KEY) || '[]');
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (_) {
-    return [];
-  }
-}
-
-function setSavedDashboardViews(views) {
-  try {
-    localStorage.setItem(DASHBOARD_VIEWS_STORAGE_KEY, JSON.stringify(Array.isArray(views) ? views : []));
-  } catch (err) {
-    alert('Could not save dashboard view. Browser storage may be full.');
-  }
-}
-
+// We intentionally save only dashboard state: selected camera IDs, layout,
+// selected/focus IDs, mosaic positioning, page, and media fit. We do NOT save
+// the uploaded camera JSON or camera feed URLs here. The long-term production
+// pattern is: app loads the global camera source automatically, then saved
+// dashboards restore by stable camera IDs.
 function normaliseSavedDashboardState(state) {
   const base = state && typeof state === 'object' ? state : {};
   return {
@@ -6190,58 +6176,136 @@ function dashboardStateForPreset() {
   };
 }
 
-function saveCurrentDashboardView() {
+function normaliseCloudDashboardRow(row) {
+  const state = row && row.dashboard_json && typeof row.dashboard_json === 'object'
+    ? row.dashboard_json
+    : {};
+  return {
+    id: String(row.id),
+    name: row.name || 'Untitled dashboard',
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+    cameraCount: Number.isFinite(row.camera_count) ? row.camera_count : (Array.isArray(state.cameras) ? state.cameras.length : 0),
+    state
+  };
+}
+
+async function getSavedDashboardViews(forceRefresh = false) {
+  if (!currentUser) {
+    savedDashboardViewsCache = [];
+    return [];
+  }
+  if (!forceRefresh && savedDashboardViewsCache.length) return savedDashboardViewsCache.slice();
+
+  const client = initSupabaseClient();
+  if (!client) {
+    alert('Supabase is not available. Could not load cloud dashboards.');
+    return [];
+  }
+
+  savedDashboardViewsLoading = true;
+  try {
+    const { data, error } = await client
+      .from('dashboards')
+      .select('id,name,dashboard_json,camera_count,created_at,updated_at')
+      .eq('user_id', currentUser.id)
+      .order('updated_at', { ascending: false });
+
+    if (error) throw error;
+    savedDashboardViewsCache = Array.isArray(data) ? data.map(normaliseCloudDashboardRow) : [];
+    return savedDashboardViewsCache.slice();
+  } catch (err) {
+    console.warn('Cloud dashboard load failed:', err);
+    alert('Could not load saved dashboards: ' + (err && err.message ? err.message : err));
+    return [];
+  } finally {
+    savedDashboardViewsLoading = false;
+    updateDashboardSavedViewButtons(false);
+  }
+}
+
+async function saveCurrentDashboardView() {
   if (!requireSaveAccess()) return;
 
   if (!dashboardState.cameras.length) {
     if (!confirm('This dashboard is empty. Save it anyway?')) return;
   }
 
-  const views = getSavedDashboardViews();
+  const client = initSupabaseClient();
+  if (!client || !currentUser) {
+    alert('You need to be logged in to save dashboards.');
+    return;
+  }
+
+  const views = await getSavedDashboardViews(true);
   const existingNames = views.map(v => v.name).filter(Boolean).join('\n');
-  const name = prompt(existingNames ? 'Dashboard view name:\n\nExisting views:\n' + existingNames : 'Dashboard view name:');
+  const name = prompt(existingNames ? 'Dashboard name:\n\nExisting dashboards:\n' + existingNames : 'Dashboard name:');
   if (!name || !name.trim()) return;
 
   const cleanName = name.trim();
-  const now = Date.now();
-  const existingIndex = views.findIndex(v => String(v.name || '').toLowerCase() === cleanName.toLowerCase());
-  const previous = existingIndex >= 0 ? views[existingIndex] : null;
+  const existing = views.find(v => String(v.name || '').toLowerCase() === cleanName.toLowerCase()) || null;
   const maxSaved = getPlanLimits().maxSavedDashboards;
-  if (!previous && maxSaved < 999 && views.length >= maxSaved) {
+  if (!existing && maxSaved < 999 && views.length >= maxSaved) {
     showUpgradePrompt('Your current tier allows up to ' + maxSaved + ' saved dashboard views.');
     return;
   }
 
-  const savedView = {
-    id: previous ? previous.id : 'view-' + now,
+  const state = dashboardStateForPreset();
+  const payload = {
+    user_id: currentUser.id,
     name: cleanName,
-    createdAt: previous ? previous.createdAt : now,
-    updatedAt: now,
-    state: dashboardStateForPreset()
+    dashboard_json: state,
+    camera_count: state.cameras.length,
+    updated_at: new Date().toISOString()
   };
 
-  if (existingIndex >= 0) views[existingIndex] = savedView;
-  else views.push(savedView);
+  try {
+    let result;
+    if (existing) {
+      result = await client
+        .from('dashboards')
+        .update(payload)
+        .eq('id', existing.id)
+        .eq('user_id', currentUser.id)
+        .select('id,name,dashboard_json,camera_count,created_at,updated_at')
+        .maybeSingle();
+    } else {
+      result = await client
+        .from('dashboards')
+        .insert(payload)
+        .select('id,name,dashboard_json,camera_count,created_at,updated_at')
+        .maybeSingle();
+    }
 
-  views.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
-  setSavedDashboardViews(views);
-  updateDashboardSavedViewButtons();
-  alert('Saved dashboard view: ' + cleanName);
+    if (result.error) throw result.error;
+    await getSavedDashboardViews(true);
+    updateDashboardSavedViewButtons(false);
+    alert((existing ? 'Updated' : 'Saved') + ' dashboard: ' + cleanName);
+  } catch (err) {
+    console.warn('Cloud dashboard save failed:', err);
+    alert('Could not save dashboard: ' + (err && err.message ? err.message : err));
+  }
 }
 
-function chooseSavedDashboardView(actionText) {
-  const views = getSavedDashboardViews();
+async function chooseSavedDashboardView(actionText) {
+  if (!currentUser) {
+    showUpgradePrompt('Log in to use saved dashboards.');
+    return null;
+  }
+
+  const views = await getSavedDashboardViews(true);
   if (!views.length) {
-    alert('No saved dashboard views yet.');
+    alert('No saved dashboards yet.');
     return null;
   }
 
   const list = views.map((v, i) => {
-    const count = v.state && Array.isArray(v.state.cameras) ? v.state.cameras.length : 0;
-    return String(i + 1) + '. ' + v.name + ' (' + count + ' cameras)';
+    const count = v.state && Array.isArray(v.state.cameras) ? v.state.cameras.length : v.cameraCount || 0;
+    const updated = v.updatedAt ? new Date(v.updatedAt).toLocaleString() : 'unknown date';
+    return String(i + 1) + '. ' + v.name + ' (' + count + ' cameras · ' + updated + ')';
   }).join('\n');
 
-  const choice = prompt((actionText || 'Choose dashboard view') + ':\n\n' + list + '\n\nEnter number or exact name:');
+  const choice = prompt((actionText || 'Choose dashboard') + ':\n\n' + list + '\n\nEnter number or exact name:');
   if (!choice || !choice.trim()) return null;
 
   const trimmed = choice.trim();
@@ -6249,17 +6313,18 @@ function chooseSavedDashboardView(actionText) {
   if (Number.isInteger(num) && num >= 1 && num <= views.length) return views[num - 1];
 
   const byName = views.find(v => String(v.name || '').toLowerCase() === trimmed.toLowerCase());
-  if (!byName) alert('No saved dashboard view matched: ' + trimmed);
+  if (!byName) alert('No saved dashboard matched: ' + trimmed);
   return byName || null;
 }
 
-function loadSavedDashboardView() {
-  const view = chooseSavedDashboardView('Load dashboard view');
+async function loadSavedDashboardView() {
+  const view = await chooseSavedDashboardView('Load saved dashboard');
   if (!view) return;
 
+  const requestedCameraCount = Array.isArray(view.state && view.state.cameras) ? view.state.cameras.length : 0;
   const restored = normaliseSavedDashboardState(view.state);
-  if (restored.cameras.length !== ((view.state && view.state.cameras) || []).length) {
-    console.warn('Some saved dashboard cameras were not present in the currently loaded camera dataset.');
+  if (restored.cameras.length !== requestedCameraCount) {
+    alert('Loaded dashboard, but ' + (requestedCameraCount - restored.cameras.length) + ' camera(s) were not found in the currently loaded camera source.');
   }
 
   dashboardState = {
@@ -6285,28 +6350,58 @@ function loadSavedDashboardView() {
   }, 100);
 }
 
-function deleteSavedDashboardView() {
-  const view = chooseSavedDashboardView('Delete dashboard view');
-  if (!view) return;
-  if (!confirm('Delete saved dashboard view "' + view.name + '"?')) return;
+async function deleteSavedDashboardView() {
+  if (!currentUser) {
+    showUpgradePrompt('Log in to delete saved dashboards.');
+    return;
+  }
 
-  const views = getSavedDashboardViews().filter(v => v.id !== view.id);
-  setSavedDashboardViews(views);
-  updateDashboardSavedViewButtons();
-  alert('Deleted dashboard view: ' + view.name);
+  const view = await chooseSavedDashboardView('Delete saved dashboard');
+  if (!view) return;
+  if (!confirm('Delete saved dashboard "' + view.name + '"?')) return;
+
+  const client = initSupabaseClient();
+  if (!client) {
+    alert('Supabase is not available. Could not delete dashboard.');
+    return;
+  }
+
+  try {
+    const { error } = await client
+      .from('dashboards')
+      .delete()
+      .eq('id', view.id)
+      .eq('user_id', currentUser.id);
+
+    if (error) throw error;
+    await getSavedDashboardViews(true);
+    updateDashboardSavedViewButtons(false);
+    alert('Deleted dashboard: ' + view.name);
+  } catch (err) {
+    console.warn('Cloud dashboard delete failed:', err);
+    alert('Could not delete dashboard: ' + (err && err.message ? err.message : err));
+  }
 }
 
-function updateDashboardSavedViewButtons() {
+function updateDashboardSavedViewButtons(shouldRefresh = true) {
   const loadBtn = document.getElementById('dashLoadView');
   const saveBtn = document.getElementById('dashSaveView');
-  const count = getSavedDashboardViews().length;
+  const count = savedDashboardViewsCache.length;
+
   if (loadBtn) {
-    loadBtn.textContent = count ? 'Load view (' + count + ')' : 'Load view';
-    loadBtn.disabled = false;
+    loadBtn.textContent = savedDashboardViewsLoading ? 'Loading…' : (count ? 'My dashboards (' + count + ')' : 'My dashboards');
+    loadBtn.disabled = !currentUser || savedDashboardViewsLoading;
+    loadBtn.title = currentUser ? 'Load a cloud-saved dashboard. Right-click to delete one.' : 'Log in to load saved dashboards';
   }
+
   if (saveBtn) {
+    saveBtn.textContent = 'Save dashboard';
     saveBtn.disabled = !getPlanLimits().canSaveDashboards || !currentUser;
-    saveBtn.title = saveBtn.disabled ? 'Create a free account to save dashboards' : 'Save this dashboard view';
+    saveBtn.title = saveBtn.disabled ? 'Create a free account to save dashboards' : 'Save this dashboard to your account';
+  }
+
+  if (shouldRefresh && currentUser && !savedDashboardViewsLoading) {
+    getSavedDashboardViews(true).catch(err => console.warn('Saved dashboard count refresh failed:', err));
   }
 }
 
