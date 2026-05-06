@@ -7,6 +7,7 @@
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link href="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
@@ -53,6 +54,93 @@
   --c-shadow:     0 1px 3px rgba(0,0,0,0.3);
   --c-shadow-md:  0 4px 12px rgba(0,0,0,0.4);
 }
+
+
+/* ─── AUTH UI ─── */
+#authDock {
+  position: fixed;
+  top: 10px;
+  right: 12px;
+  z-index: 650;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255,255,255,0.86);
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  box-shadow: var(--c-shadow);
+  padding: 6px;
+  backdrop-filter: blur(10px);
+}
+[data-theme="dark"] #authDock { background: rgba(26,33,51,0.88); }
+body.app-ready #authDock { top: 8px; }
+.auth-status {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--c-text2);
+  padding: 0 6px;
+}
+.auth-btn {
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text2);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.auth-btn.primary { background: var(--c-accent); color: #fff; border-color: var(--c-accent); }
+.auth-btn:hover { background: var(--c-surface2); color: var(--c-text); }
+.auth-btn.primary:hover { background: var(--c-accent); color:#fff; opacity:0.9; }
+#authModal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15,23,42,0.42);
+  backdrop-filter: blur(4px);
+}
+#authModal.open { display: flex; }
+.auth-card {
+  width: 360px;
+  max-width: calc(100vw - 28px);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  box-shadow: 0 22px 70px rgba(15,23,42,0.32);
+  overflow: hidden;
+}
+.auth-card-head {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--c-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.auth-card-title { font-size: 15px; font-weight: 700; color: var(--c-text); }
+.auth-close { background:none; border:none; color:var(--c-text3); font-size:22px; cursor:pointer; line-height:1; }
+.auth-card-body { padding: 16px; }
+.auth-field { margin-bottom: 10px; }
+.auth-field label { display:block; font-size:11px; font-weight:600; color:var(--c-text2); margin-bottom:5px; }
+.auth-field input {
+  width:100%; height:36px; border:1px solid var(--c-border); border-radius:7px;
+  background:var(--c-surface2); color:var(--c-text); padding:0 10px; outline:none;
+  font-family:var(--font); font-size:13px;
+}
+.auth-field input:focus { border-color:var(--c-accent); box-shadow:0 0 0 3px rgba(37,99,235,0.12); }
+#authSubmit { width:100%; height:36px; margin-top:4px; }
+#authMessage { margin-top:10px; font-family:var(--mono); font-size:11px; color:var(--c-text2); line-height:1.5; min-height:16px; }
+.auth-note { margin-top:12px; padding-top:12px; border-top:1px solid var(--c-border); color:var(--c-text3); font-size:11px; line-height:1.5; }
+body.dashboard-active #authDock { display: flex; }
 
 /* ─── RESET ─── */
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -204,6 +292,18 @@ body {
   color: var(--c-text2);
   background: var(--c-surface2);
   border: 1px solid var(--c-border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+#planBadge {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--c-accent);
+  background: var(--c-accent-bg);
+  border: 1px solid rgba(37,99,235,0.25);
   border-radius: 4px;
   padding: 3px 8px;
   white-space: nowrap;
@@ -1716,6 +1816,40 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
 </head>
 <body>
 
+<!-- ─── AUTH DOCK ─── -->
+<div id="authDock">
+  <div class="auth-status" id="authStatus">Guest</div>
+  <button class="auth-btn" id="btnAuthLogin" type="button">Log in</button>
+  <button class="auth-btn primary" id="btnAuthSignup" type="button">Sign up</button>
+  <button class="auth-btn" id="btnAuthLogout" type="button" style="display:none">Log out</button>
+</div>
+
+<!-- ─── AUTH MODAL ─── -->
+<div id="authModal" aria-hidden="true">
+  <div class="auth-card" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">
+    <div class="auth-card-head">
+      <div class="auth-card-title" id="authModalTitle">Log in</div>
+      <button class="auth-close" id="authModalClose" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="auth-card-body">
+      <div class="auth-field">
+        <label for="authEmail">Email</label>
+        <input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com">
+      </div>
+      <div class="auth-field">
+        <label for="authPassword">Password</label>
+        <input id="authPassword" type="password" autocomplete="current-password" placeholder="Minimum 6 characters">
+      </div>
+      <button class="auth-btn primary" id="authSubmit" type="button">Log in</button>
+      <div id="authMessage"></div>
+      <div class="auth-note">
+        Guest mode still works without logging in. A free account unlocks saved dashboard views; Pro gates will be connected to Lemon Squeezy later.
+      </div>
+    </div>
+  </div>
+</div>
+
+
 <!-- ─── UPLOAD OVERLAY ─── -->
 <div id="uploadOverlay">
   <div class="upload-brand">
@@ -1752,6 +1886,7 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
   </div>
 
   <div id="cameraCount">0 cameras</div>
+  <div id="planBadge" title="Current feature tier">Guest</div>
 
   <button class="tbtn active" id="btnGlobeView">Globe</button>
   <button class="tbtn" id="btnDashboardView">Dashboard <span class="nav-badge" id="dashboardNavBadge">0</span></button>
@@ -2135,6 +2270,325 @@ const DASHBOARD_PAGE_SIZE = 16;
 const DASHBOARD_MAX_CAMERAS = Number.POSITIVE_INFINITY; // legacy guard; dashboard is now paginated
 const DASHBOARD_STORAGE_KEY = 'vigil.dashboard.v1';
 const DASHBOARD_VIEWS_STORAGE_KEY = 'vigil.dashboard.views.v1';
+
+// ==========================================================
+//  FREEMIUM / ACCOUNT ENTITLEMENTS
+// ==========================================================
+// This is the frontend feature-gating layer. It works immediately in guest mode
+// and is designed to be connected to Supabase Auth + a profiles/entitlements
+// table later. Do not treat this as the only protection for paid features once
+// a backend is added; backend writes and paid APIs must enforce the same limits.
+const PLAN_LIMITS = {
+  guest: {
+    label: 'Guest',
+    canSaveDashboards: false,
+    canUse3D: false,
+    maxDashboardCameras: 2,
+    maxSavedDashboards: 0
+  },
+  free: {
+    label: 'Free',
+    canSaveDashboards: true,
+    canUse3D: false,
+    maxDashboardCameras: 2,
+    maxSavedDashboards: 3
+  },
+  pro: {
+    label: 'Pro',
+    canSaveDashboards: true,
+    canUse3D: true,
+    maxDashboardCameras: 999,
+    maxSavedDashboards: 999
+  }
+};
+
+let currentUser = null;
+let currentPlan = 'guest';
+let authMode = 'login';
+let supabaseClient = null;
+let authInitialised = false;
+
+const SUPABASE_URL = 'https://xqppficzlzhhtoaetuma.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_uZgctoeLTYIz0dmfmhwc_A_NEuFki3c';
+
+function getPlanLimits() {
+  return PLAN_LIMITS[currentPlan] || PLAN_LIMITS.guest;
+}
+
+function initSupabaseClient() {
+  if (supabaseClient) return supabaseClient;
+  if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+    console.warn('Supabase JS SDK was not loaded. Continuing in guest mode.');
+    return null;
+  }
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  });
+  return supabaseClient;
+}
+
+async function initAuth() {
+  const client = initSupabaseClient();
+  if (!client) {
+    currentUser = null;
+    currentPlan = 'guest';
+    updateAuthUI();
+    updatePlanUI();
+    return;
+  }
+
+  try {
+    const { data, error } = await client.auth.getSession();
+    if (error) console.warn('Auth session error:', error.message);
+    await applyAuthSession(data && data.session ? data.session : null);
+
+    client.auth.onAuthStateChange(async (_event, session) => {
+      await applyAuthSession(session || null);
+    });
+
+    authInitialised = true;
+  } catch (err) {
+    console.warn('Auth initialisation failed:', err);
+    currentUser = null;
+    currentPlan = 'guest';
+    updateAuthUI();
+    updatePlanUI();
+  }
+}
+
+async function applyAuthSession(session) {
+  currentUser = session && session.user ? session.user : null;
+
+  if (!currentUser) {
+    currentPlan = 'guest';
+    dashboardState.cameras = enforceDashboardCameraLimit(dashboardState.cameras);
+    updateAuthUI();
+    updatePlanUI();
+    updateDashboardBadge();
+    if (typeof updateDashboardSavedViewButtons === 'function') updateDashboardSavedViewButtons();
+    if (typeof renderDashboard === 'function') renderDashboard();
+    return;
+  }
+
+  await loadUserProfile();
+  dashboardState.cameras = enforceDashboardCameraLimit(dashboardState.cameras);
+  updateAuthUI();
+  updatePlanUI();
+  updateDashboardBadge();
+  if (typeof updateDashboardSavedViewButtons === 'function') updateDashboardSavedViewButtons();
+  if (typeof renderDashboard === 'function') renderDashboard();
+}
+
+async function loadUserProfile() {
+  const client = initSupabaseClient();
+  if (!client || !currentUser) {
+    currentPlan = 'guest';
+    return null;
+  }
+
+  const email = currentUser.email || null;
+  let { data: profile, error } = await client
+    .from('profiles')
+    .select('user_id,email,plan,subscription_status,current_period_end')
+    .eq('user_id', currentUser.id)
+    .maybeSingle();
+
+  if (error) {
+    console.warn('Profile load error:', error.message);
+  }
+
+  if (!profile) {
+    const insertResult = await client
+      .from('profiles')
+      .insert({ user_id: currentUser.id, email, plan: 'free', subscription_status: 'none' })
+      .select('user_id,email,plan,subscription_status,current_period_end')
+      .maybeSingle();
+    profile = insertResult.data || null;
+    if (insertResult.error) console.warn('Profile create error:', insertResult.error.message);
+  }
+
+  const rawPlan = profile && profile.plan ? String(profile.plan).toLowerCase() : 'free';
+  const status = profile && profile.subscription_status ? String(profile.subscription_status).toLowerCase() : 'none';
+  currentPlan = rawPlan === 'pro' && ['active', 'trialing'].includes(status) ? 'pro' : 'free';
+  return profile;
+}
+
+function updateAuthUI() {
+  const status = document.getElementById('authStatus');
+  const loginBtn = document.getElementById('btnAuthLogin');
+  const signupBtn = document.getElementById('btnAuthSignup');
+  const logoutBtn = document.getElementById('btnAuthLogout');
+  const email = currentUser && currentUser.email ? currentUser.email : '';
+
+  if (status) status.textContent = currentUser ? `${email} · ${getPlanLimits().label}` : 'Guest';
+  if (loginBtn) loginBtn.style.display = currentUser ? 'none' : 'inline-flex';
+  if (signupBtn) signupBtn.style.display = currentUser ? 'none' : 'inline-flex';
+  if (logoutBtn) logoutBtn.style.display = currentUser ? 'inline-flex' : 'none';
+}
+
+function openAuthModal(mode) {
+  authMode = mode === 'signup' ? 'signup' : 'login';
+  const modal = document.getElementById('authModal');
+  const title = document.getElementById('authModalTitle');
+  const submit = document.getElementById('authSubmit');
+  const msg = document.getElementById('authMessage');
+  if (title) title.textContent = authMode === 'signup' ? 'Create free account' : 'Log in';
+  if (submit) submit.textContent = authMode === 'signup' ? 'Create account' : 'Log in';
+  if (msg) msg.textContent = '';
+  if (modal) {
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+  }
+  setTimeout(() => {
+    const emailInput = document.getElementById('authEmail');
+    if (emailInput) emailInput.focus();
+  }, 50);
+}
+
+function closeAuthModal() {
+  const modal = document.getElementById('authModal');
+  if (modal) {
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function setAuthMessage(text, isError = false) {
+  const msg = document.getElementById('authMessage');
+  if (!msg) return;
+  msg.style.color = isError ? 'var(--c-danger)' : 'var(--c-text2)';
+  msg.textContent = text || '';
+}
+
+async function submitAuthForm() {
+  const client = initSupabaseClient();
+  if (!client) {
+    setAuthMessage('Supabase could not load. Check your internet connection or CDN blocking.', true);
+    return;
+  }
+
+  const email = (document.getElementById('authEmail')?.value || '').trim();
+  const password = document.getElementById('authPassword')?.value || '';
+  if (!email || !password) {
+    setAuthMessage('Enter an email and password.', true);
+    return;
+  }
+
+  const submit = document.getElementById('authSubmit');
+  if (submit) submit.disabled = true;
+  setAuthMessage(authMode === 'signup' ? 'Creating account…' : 'Logging in…');
+
+  try {
+    const result = authMode === 'signup'
+      ? await client.auth.signUp({ email, password })
+      : await client.auth.signInWithPassword({ email, password });
+
+    if (result.error) {
+      setAuthMessage(result.error.message, true);
+      return;
+    }
+
+    if (authMode === 'signup' && !result.data.session) {
+      setAuthMessage('Account created. Check your email to confirm your account, then log in.');
+      return;
+    }
+
+    await applyAuthSession(result.data.session || null);
+    closeAuthModal();
+  } finally {
+    if (submit) submit.disabled = false;
+  }
+}
+
+async function logoutCurrentUser() {
+  const client = initSupabaseClient();
+  if (client) await client.auth.signOut();
+  await applyAuthSession(null);
+}
+
+function updatePlanUI() {
+  const limits = getPlanLimits();
+  const badge = document.getElementById('planBadge');
+  if (badge) {
+    badge.textContent = limits.label;
+    badge.title = `${limits.label} tier · dashboard cameras: ${limits.maxDashboardCameras >= 999 ? 'unlimited' : limits.maxDashboardCameras} · saved dashboards: ${limits.maxSavedDashboards >= 999 ? 'unlimited' : limits.maxSavedDashboards}`;
+  }
+
+  const saveBtn = document.getElementById('dashSaveView');
+  if (saveBtn) {
+    saveBtn.title = limits.canSaveDashboards ? 'Save this dashboard view' : 'Create a free account to save dashboards';
+  }
+
+  const apply3DBtn = document.getElementById('applyGoogleKey');
+  if (apply3DBtn && !google3DEnabled) {
+    apply3DBtn.title = limits.canUse3D ? 'Load photorealistic 3D tiles' : '3D is a Pro feature';
+  }
+  updateAuthUI();
+}
+
+function showUpgradePrompt(message) {
+  alert(message + '\n\nCurrent tier: ' + getPlanLimits().label + '\n\nFree accounts can save dashboards. Pro billing will be connected with Lemon Squeezy in a later step.');
+}
+
+function requireSaveAccess() {
+  if (!currentUser || !getPlanLimits().canSaveDashboards) {
+    showUpgradePrompt('Create a free account to save dashboard views.');
+    return false;
+  }
+  return true;
+}
+
+function requirePro3D() {
+  if (!getPlanLimits().canUse3D) {
+    showUpgradePrompt('3D photorealistic tiles are available on Pro.');
+    return false;
+  }
+  return true;
+}
+
+function dashboardCameraCapacityRemaining() {
+  const max = getPlanLimits().maxDashboardCameras;
+  if (max >= 999) return Number.POSITIVE_INFINITY;
+  return Math.max(0, max - dashboardState.cameras.length);
+}
+
+function enforceDashboardCameraLimit(ids) {
+  const list = Array.isArray(ids) ? ids.map(String) : [];
+  const max = getPlanLimits().maxDashboardCameras;
+  if (max >= 999 || list.length <= max) return list;
+  return list.slice(0, max);
+}
+
+function canAddDashboardCamera(showMessage = true) {
+  const remaining = dashboardCameraCapacityRemaining();
+  if (remaining > 0) return true;
+  if (showMessage) {
+    showUpgradePrompt('Your current tier allows up to ' + getPlanLimits().maxDashboardCameras + ' dashboard cameras.');
+  }
+  return false;
+}
+
+// Temporary local/dev helper until Supabase Auth is wired in.
+// Example from the browser console: setLocalPlanForTesting('pro')
+function setLocalPlanForTesting(plan) {
+  if (!PLAN_LIMITS[plan]) {
+    console.warn('Unknown plan:', plan);
+    return;
+  }
+  currentPlan = plan;
+  currentUser = plan === 'guest' ? null : { id: 'local-dev-user', email: 'local@example.test' };
+  dashboardState.cameras = enforceDashboardCameraLimit(dashboardState.cameras);
+  saveDashboardState();
+  updatePlanUI();
+  updateDashboardBadge();
+  renderDashboard();
+  console.info('Vigil test plan set to', plan);
+}
+window.setLocalPlanForTesting = setLocalPlanForTesting;
 let activeView = 'globe';
 let dashboardState = {
   cameras: [],
@@ -2848,6 +3302,8 @@ function markCameraFlyCompleteAndWaitForTiles(token) {
 //  GOOGLE 3D TILES
 // ==========================================================
 async function enableGoogle3DTiles(ionToken) {
+  if (!requirePro3D()) return false;
+
   const status = document.getElementById('googleStatus');
   const btn    = document.getElementById('applyGoogleKey');
 
@@ -3784,9 +4240,11 @@ async function initializeMap() {
   document.getElementById('uploadOverlay').style.display = 'none';
   document.body.classList.add('app-ready');
   document.getElementById('topBar').style.display = 'flex';
+  document.body.classList.add('app-ready');
   document.getElementById('statusBar').style.display = 'flex';
   document.getElementById('progressFill').style.width = '90%';
   document.getElementById('cameraCount').textContent   = `${cameras.length.toLocaleString()} cameras`;
+  updatePlanUI();
   loadDashboardState();
   updateDashboardBadge();
   toggleDashboardMap(dashboardState.mapVisible);
@@ -4088,6 +4546,9 @@ function loadDashboardState() {
       pageSize: DASHBOARD_PAGE_SIZE,
       mediaFit: saved.mediaFit === 'cover' ? 'cover' : 'contain'
     };
+    dashboardState.cameras = enforceDashboardCameraLimit(dashboardState.cameras);
+    if (dashboardState.focusCameraId && !dashboardState.cameras.includes(String(dashboardState.focusCameraId))) dashboardState.focusCameraId = dashboardState.cameras[0] || null;
+    if (dashboardState.selectedCameraId && !dashboardState.cameras.includes(String(dashboardState.selectedCameraId))) dashboardState.selectedCameraId = dashboardState.focusCameraId || null;
   } catch (_) {}
 }
 
@@ -4195,6 +4656,8 @@ function addCameraToDashboard(cam, options = {}) {
     if (activeView === 'dashboard') setTimeout(() => fitDashboardMap(), 80);
     return false;
   }
+
+  if (!canAddDashboardCamera(true)) return false;
 
   dashboardState.cameras.push(id);
   dashboardState.page = dashboardPageIndexForId(id);
@@ -5629,7 +6092,12 @@ function replaceDashboardWithAreaSelection() {
   dashboardHls.clear();
   dashboardLastRefresh.clear();
   dashboardErrorCounts.clear();
-  dashboardState.cameras = [...new Set(areaSelection.matchedIds)];
+  const requestedIds = [...new Set(areaSelection.matchedIds.map(String))];
+  const limitedIds = enforceDashboardCameraLimit(requestedIds);
+  if (limitedIds.length < requestedIds.length) {
+    showUpgradePrompt('Your current tier allows up to ' + getPlanLimits().maxDashboardCameras + ' dashboard cameras. Only the first ' + limitedIds.length + ' camera(s) were added.');
+  }
+  dashboardState.cameras = limitedIds;
   dashboardState.page = 0;
   dashboardState.focusCameraId = dashboardState.cameras[0] || null;
   dashboardState.selectedCameraId = dashboardState.focusCameraId;
@@ -5644,11 +6112,20 @@ function replaceDashboardWithAreaSelection() {
 function addAreaSelectionToDashboard() {
   if (!areaSelection.matchedIds.length) return;
   const existing = new Set(dashboardState.cameras.map(String));
-  const additions = areaSelection.matchedIds.filter(id => !existing.has(String(id)));
-  dashboardState.cameras.push(...additions);
+  const additions = areaSelection.matchedIds.map(String).filter(id => !existing.has(String(id)));
+  const remaining = dashboardCameraCapacityRemaining();
+  if (remaining <= 0) {
+    canAddDashboardCamera(true);
+    return;
+  }
+  const limitedAdditions = Number.isFinite(remaining) ? additions.slice(0, remaining) : additions;
+  if (limitedAdditions.length < additions.length) {
+    showUpgradePrompt('Your current tier allows up to ' + getPlanLimits().maxDashboardCameras + ' dashboard cameras. Only ' + limitedAdditions.length + ' new camera(s) were added.');
+  }
+  dashboardState.cameras.push(...limitedAdditions);
   if (!dashboardState.focusCameraId && dashboardState.cameras.length) dashboardState.focusCameraId = dashboardState.cameras[0];
   if (!dashboardState.selectedCameraId && dashboardState.focusCameraId) dashboardState.selectedCameraId = dashboardState.focusCameraId;
-  if (additions.length) dashboardState.page = dashboardPageIndexForId(additions[0]);
+  if (limitedAdditions.length) dashboardState.page = dashboardPageIndexForId(limitedAdditions[0]);
   dashboardState._fitPending = true;
   saveDashboardState();
   updateDashboardBadge();
@@ -5714,6 +6191,8 @@ function dashboardStateForPreset() {
 }
 
 function saveCurrentDashboardView() {
+  if (!requireSaveAccess()) return;
+
   if (!dashboardState.cameras.length) {
     if (!confirm('This dashboard is empty. Save it anyway?')) return;
   }
@@ -5727,6 +6206,11 @@ function saveCurrentDashboardView() {
   const now = Date.now();
   const existingIndex = views.findIndex(v => String(v.name || '').toLowerCase() === cleanName.toLowerCase());
   const previous = existingIndex >= 0 ? views[existingIndex] : null;
+  const maxSaved = getPlanLimits().maxSavedDashboards;
+  if (!previous && maxSaved < 999 && views.length >= maxSaved) {
+    showUpgradePrompt('Your current tier allows up to ' + maxSaved + ' saved dashboard views.');
+    return;
+  }
 
   const savedView = {
     id: previous ? previous.id : 'view-' + now,
@@ -5814,16 +6298,42 @@ function deleteSavedDashboardView() {
 
 function updateDashboardSavedViewButtons() {
   const loadBtn = document.getElementById('dashLoadView');
-  if (!loadBtn) return;
+  const saveBtn = document.getElementById('dashSaveView');
   const count = getSavedDashboardViews().length;
-  loadBtn.textContent = count ? 'Load view (' + count + ')' : 'Load view';
-  loadBtn.disabled = false;
+  if (loadBtn) {
+    loadBtn.textContent = count ? 'Load view (' + count + ')' : 'Load view';
+    loadBtn.disabled = false;
+  }
+  if (saveBtn) {
+    saveBtn.disabled = !getPlanLimits().canSaveDashboards || !currentUser;
+    saveBtn.title = saveBtn.disabled ? 'Create a free account to save dashboards' : 'Save this dashboard view';
+  }
 }
 
 // ==========================================================
 //  UI WIRING
 // ==========================================================
 document.addEventListener('DOMContentLoaded', () => {
+  initAuth();
+  updatePlanUI();
+
+  const btnAuthLogin = document.getElementById('btnAuthLogin');
+  const btnAuthSignup = document.getElementById('btnAuthSignup');
+  const btnAuthLogout = document.getElementById('btnAuthLogout');
+  const authModalClose = document.getElementById('authModalClose');
+  const authSubmit = document.getElementById('authSubmit');
+  const authModal = document.getElementById('authModal');
+  if (btnAuthLogin) btnAuthLogin.onclick = () => openAuthModal('login');
+  if (btnAuthSignup) btnAuthSignup.onclick = () => openAuthModal('signup');
+  if (btnAuthLogout) btnAuthLogout.onclick = logoutCurrentUser;
+  if (authModalClose) authModalClose.onclick = closeAuthModal;
+  if (authSubmit) authSubmit.onclick = submitAuthForm;
+  if (authModal) authModal.addEventListener('click', e => { if (e.target === authModal) closeAuthModal(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeAuthModal();
+    if (e.key === 'Enter' && document.getElementById('authModal')?.classList.contains('open')) submitAuthForm();
+  });
+
   const dropZone  = document.getElementById('dropZone');
   const fileInput = document.getElementById('fileInput');
 
@@ -5875,6 +6385,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const key = document.getElementById('googleKeyInput').value.trim();
     if (!key || !viewer) return;
     const btn = document.getElementById('applyGoogleKey');
+    if (!requirePro3D()) {
+      btn.textContent = 'Load photorealistic 3D tiles';
+      return;
+    }
     btn.textContent = 'Loading…';
     await enableGoogle3DTiles(key);
   };
@@ -5947,216 +6461,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('dashMapUploadLayer').onclick = () => document.getElementById('layerUploadInput').click();
   document.getElementById('dashZoomIn')?.addEventListener('click', () => { if (dashboardMap) dashboardMap.zoomIn(); });
   document.getElementById('dashZoomOut')?.addEventListener('click', () => { if (dashboardMap) dashboardMap.zoomOut(); });
-
-  document.getElementById('areaFinishBtn').onclick = finishAreaSelection;
-  document.getElementById('areaReplaceBtn').onclick = replaceDashboardWithAreaSelection;
-  document.getElementById('areaAddBtn').onclick = addAreaSelectionToDashboard;
-  document.getElementById('areaClearBtn').onclick = clearAreaSelection;
-  document.getElementById('areaPanelClose').onclick = () => {
-    if (areaSelection.active || areaSelection.points.length) clearAreaSelection();
-    else document.getElementById('areaSelectionPanel').classList.remove('open');
-  };
-
-  document.getElementById('dashboardSearchClose').onclick = closeDashboardAddPanel;
-  document.getElementById('dashboardSearchRun').onclick = runDashboardSearch;
-  document.getElementById('dashboardSearchInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') runDashboardSearch();
-    if (e.key === 'Escape') closeDashboardAddPanel();
-  });
-  document.getElementById('dashboardSearchInput').addEventListener('input', e => {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(runDashboardSearch, 350);
-  });
-  setupDashboardResize();
-
-  // Dark mode
-  document.getElementById('btnTheme').onclick = () => {
-    const html = document.documentElement;
-    const dark = html.getAttribute('data-theme') === 'dark';
-    html.setAttribute('data-theme', dark ? 'light' : 'dark');
-    document.getElementById('iconLight').style.display = dark ? 'block' : 'none';
-    document.getElementById('iconDark').style.display  = dark ? 'none'  : 'block';
-  };
-
-  initCesium();
-});
-</script>
-</body>
-</html>
-function highlightAreaMatches() {
-  if (viewer) areaSelection.cesiumHighlightEntities.forEach(e => viewer.entities.remove(e));
-  areaSelection.cesiumHighlightEntities = [];
-  if (dashboardMap && areaSelection.leafletHighlightLayer) dashboardMap.removeLayer(areaSelection.leafletHighlightLayer);
-  areaSelection.leafletHighlightLayer = null;
-
-  const matched = areaSelection.matchedIds.map(id => cameraMap.get(id)).filter(Boolean);
-  if (viewer) {
-    areaSelection.cesiumHighlightEntities = matched.slice(0, 5000).map(cam => viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, 0),
-      point: {
-        pixelSize: 10,
-        color: Cesium.Color.fromCssColorString('#f59e0b'),
-        outlineColor: Cesium.Color.WHITE,
-        outlineWidth: 2,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY
-      },
-      label: {
-        text: '',
-        show: false
-      }
-    }));
-  }
-  if (dashboardMap && matched.length) {
-    areaSelection.leafletHighlightLayer = L.layerGroup(matched.slice(0, 2500).map(cam => L.circleMarker([cam.lat, cam.lng], {
-      radius: 6, color: '#0f172a', weight: 2, fillColor: '#f59e0b', fillOpacity: 0.95
-    }).bindTooltip(cameraTitle(cam), { direction: 'top' }))).addTo(dashboardMap);
-  }
-}
-
-function replaceDashboardWithAreaSelection() {
-  if (!areaSelection.matchedIds.length) return;
-  dashboardRefreshTimers.forEach(t => clearTimeout(t));
-  dashboardRefreshTimers.clear();
-  dashboardHls.forEach(h => h.destroy());
-  dashboardHls.clear();
-  dashboardLastRefresh.clear();
-  dashboardErrorCounts.clear();
-  dashboardState.cameras = [...new Set(areaSelection.matchedIds)];
-  dashboardState.page = 0;
-  dashboardState.focusCameraId = dashboardState.cameras[0] || null;
-  dashboardState.selectedCameraId = dashboardState.focusCameraId;
-  dashboardState._fitPending = true;
-  saveDashboardState();
-  updateDashboardBadge();
-  switchView('dashboard');
-  renderDashboard();
-  setTimeout(() => { if (dashboardMap) { dashboardMap.invalidateSize(); fitDashboardMap(); } }, 100);
-}
-
-function addAreaSelectionToDashboard() {
-  if (!areaSelection.matchedIds.length) return;
-  const existing = new Set(dashboardState.cameras.map(String));
-  const additions = areaSelection.matchedIds.filter(id => !existing.has(String(id)));
-  dashboardState.cameras.push(...additions);
-  if (!dashboardState.focusCameraId && dashboardState.cameras.length) dashboardState.focusCameraId = dashboardState.cameras[0];
-  if (!dashboardState.selectedCameraId && dashboardState.focusCameraId) dashboardState.selectedCameraId = dashboardState.focusCameraId;
-  if (additions.length) dashboardState.page = dashboardPageIndexForId(additions[0]);
-  dashboardState._fitPending = true;
-  saveDashboardState();
-  updateDashboardBadge();
-  switchView('dashboard');
-  renderDashboard();
-  setTimeout(() => { if (dashboardMap) { dashboardMap.invalidateSize(); fitDashboardMap(); } }, 100);
-}
-
-// ==========================================================
-//  UI WIRING
-// ==========================================================
-document.addEventListener('DOMContentLoaded', () => {
-  const dropZone  = document.getElementById('dropZone');
-  const fileInput = document.getElementById('fileInput');
-
-  dropZone.onclick    = () => fileInput.click();
-  dropZone.ondragover = e => { e.preventDefault(); dropZone.classList.add('dragover'); };
-  dropZone.ondragleave = () => dropZone.classList.remove('dragover');
-  dropZone.ondrop     = e => {
-    e.preventDefault();
-    dropZone.classList.remove('dragover');
-    const f = e.dataTransfer.files[0];
-    if (f) loadFile(f);
-  };
-  fileInput.onchange = e => { if (e.target.files[0]) loadFile(e.target.files[0]); };
-
-  // Field of view toggle
-  document.getElementById('btnFrustums').onclick = function () {
-    frustumsEnabled = !frustumsEnabled;
-    this.classList.toggle('active', frustumsEnabled);
-    if (!frustumsEnabled) removeFrustum();
-    else if (selectedCamera) showFrustum(selectedCamera);
-  };
-
-  // Legend
-  document.getElementById('btnLegend').onclick = function () {
-    legendOpen = !legendOpen;
-    this.classList.toggle('active', legendOpen);
-    document.getElementById('legend').style.display = legendOpen ? 'block' : 'none';
-    if (legendOpen) {
-      document.getElementById('settingsPanel').style.display = 'none';
-      document.getElementById('btnSettings').classList.remove('active');
-      settingsPanelOpen = false;
-    }
-  };
-
-  // Settings
-  document.getElementById('btnSettings').onclick = function () {
-    settingsPanelOpen = !settingsPanelOpen;
-    this.classList.toggle('active', settingsPanelOpen);
-    document.getElementById('settingsPanel').style.display = settingsPanelOpen ? 'block' : 'none';
-    if (settingsPanelOpen) {
-      document.getElementById('legend').style.display = 'none';
-      document.getElementById('btnLegend').classList.remove('active');
-      legendOpen = false;
-    }
-  };
-
-  // Load 3D tiles
-  document.getElementById('applyGoogleKey').onclick = async () => {
-    const key = document.getElementById('googleKeyInput').value.trim();
-    if (!key || !viewer) return;
-    const btn = document.getElementById('applyGoogleKey');
-    btn.textContent = 'Loading…';
-    await enableGoogle3DTiles(key);
-  };
-
-  // Fit
-  document.getElementById('btnFit').onclick = fitToData;
-  document.getElementById('btnDrawArea').onclick = () => startAreaSelection('globe');
-
-  // Location search — fires on Enter or after 600ms pause
-  const searchBox = document.getElementById('searchBox');
-  searchBox.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { clearTimeout(searchTimer); runLocationSearch(e.target.value); }
-    if (e.key === 'Escape') { e.target.value = ''; clearSearchResults(); }
-  });
-  searchBox.oninput = e => {
-    if (!e.target.value.trim()) { clearTimeout(searchTimer); clearSearchResults(); return; }
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => runLocationSearch(e.target.value), 600);
-  };
-
-  // Close panel
-  document.getElementById('closeSide').onclick = deselect;
-
-  // View switching
-  document.getElementById('btnGlobeView').onclick = () => switchView('globe');
-  document.getElementById('btnDashboardView').onclick = () => switchView('dashboard');
-
-  // Add selected camera to dashboard from the globe side panel
-  document.getElementById('addSelectedToDashboard').onclick = () => {
-    if (selectedCamera && addCameraToDashboard(selectedCamera)) {
-      updateDashboardBadge();
-    }
-  };
-  document.getElementById('openDashboardFromSide').onclick = () => switchView('dashboard');
-
-  // Dashboard controls
-  document.querySelectorAll('#dashboardBar [data-mode]').forEach(btn => {
-    btn.onclick = () => setDashboardLayout(btn.dataset.mode);
-  });
-  document.querySelectorAll('#dashboardBar [data-grid]').forEach(btn => {
-    btn.onclick = () => setDashboardGrid(btn.dataset.grid);
-  });
-  document.getElementById('dashRefreshAll').onclick = refreshDashboardAll;
-  document.getElementById('dashMediaFitToggle').onclick = toggleDashboardMediaFit;
-  document.getElementById('dashAddCamera').onclick = openDashboardAddPanel;
-  document.getElementById('dashFitMap').onclick = fitDashboardMap;
-  document.getElementById('dashMapFitHeader').onclick = fitDashboardMap;
-  document.getElementById('dashToggleMap').onclick = () => toggleDashboardMap();
-  document.getElementById('dashMapCollapseHeader').onclick = () => toggleDashboardMap(false);
-  document.getElementById('dashClearAll').onclick = clearDashboard;
-  document.getElementById('dashPrevPage').onclick = () => setDashboardPage((dashboardState.page || 0) - 1);
-  document.getElementById('dashNextPage').onclick = () => setDashboardPage((dashboardState.page || 0) + 1);
-  document.getElementById('dashMapDrawArea').onclick = () => startAreaSelection('dashboard');
 
   document.getElementById('areaFinishBtn').onclick = finishAreaSelection;
   document.getElementById('areaReplaceBtn').onclick = replaceDashboardWithAreaSelection;
