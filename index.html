@@ -8934,5 +8934,292 @@ window.startBillingPortal = startBillingPortal;
 })();
 </script>
 
+
+<script>
+/* ==========================================================
+   PATCH: API CAMERA CLUSTERS FOR LOW-ZOOM GLOBAL VIEW
+   ----------------------------------------------------------
+   Purpose:
+   - Keep the anti-scrape API loading model.
+   - Show global/continent coverage using safe aggregate clusters.
+   - Avoid creating 140k Cesium entities at low zoom.
+   Requires Supabase RPC: get_camera_clusters_bbox
+   ========================================================== */
+(function patchApiCameraClusters() {
+  'use strict';
+
+  const CLUSTER_API = {
+    enabled: true,
+    rpc: 'get_camera_clusters_bbox',
+    debounceMs: 650,
+    minReloadMs: 1200,
+    maxClusters: 420,
+    showAboveHeight: 2500000,
+  };
+
+  const clusterState = {
+    dataSource: null,
+    loading: false,
+    lastLoadAt: 0,
+    lastKey: '',
+    timer: null,
+    installedClickWrap: false,
+  };
+
+  window.VIGIL_CAMERA_CLUSTER_API = CLUSTER_API;
+  window.VIGIL_CAMERA_CLUSTER_STATE = clusterState;
+
+  function apiClientForClusters() {
+    if (typeof initSupabaseClient === 'function') {
+      const client = initSupabaseClient();
+      if (client) return client;
+    }
+    if (!window.supabase || typeof window.supabase.createClient !== 'function') return null;
+    const cameraApi = window.VIGIL_CAMERA_API || {};
+    return window.supabase.createClient(
+      cameraApi.projectUrl || 'https://xqppficzlzhhtoaetuma.supabase.co',
+      cameraApi.anonKey || 'sb_publishable_uZgctoeLTYIz0dmfmhwc_A_NEuFki3c',
+      { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }
+    );
+  }
+
+  function toNumber(v, fallback = null) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function getCameraHeight() {
+    try { return viewer?.camera?.positionCartographic?.height || 0; }
+    catch (_) { return 0; }
+  }
+
+  function shouldShowClusters() {
+    const apiState = window.VIGIL_CAMERA_API_STATE;
+    return !!(CLUSTER_API.enabled && apiState?.mode === 'api' && getCameraHeight() >= CLUSTER_API.showAboveHeight);
+  }
+
+  function currentViewBoundsForClusters() {
+    if (!viewer || !viewer.camera || !Cesium) return { west: -180, south: -85, east: 180, north: 85 };
+    let rect = null;
+    try { rect = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid); } catch (_) {}
+    if (!rect) return { west: -180, south: -85, east: 180, north: 85 };
+
+    let west = Cesium.Math.toDegrees(rect.west);
+    let south = Cesium.Math.toDegrees(rect.south);
+    let east = Cesium.Math.toDegrees(rect.east);
+    let north = Cesium.Math.toDegrees(rect.north);
+
+    west = Math.max(-180, Math.min(180, west));
+    east = Math.max(-180, Math.min(180, east));
+    south = Math.max(-85, Math.min(85, south));
+    north = Math.max(-85, Math.min(85, north));
+    if (east < west) return { west: -180, south, east: 180, north };
+    return { west, south, east, north };
+  }
+
+  function gridDegreesForView(bounds) {
+    const width = Math.max(1, Math.abs(bounds.east - bounds.west));
+    const height = Math.max(1, Math.abs(bounds.north - bounds.south));
+    const span = Math.max(width, height);
+    const cameraHeight = getCameraHeight();
+
+    if (span > 250 || cameraHeight > 25000000) return 8;
+    if (span > 150 || cameraHeight > 14000000) return 5;
+    if (span > 80 || cameraHeight > 8000000) return 3;
+    if (span > 35 || cameraHeight > 4500000) return 1.5;
+    return 0.75;
+  }
+
+  function clustersKey(bounds, grid) {
+    return [bounds.west, bounds.south, bounds.east, bounds.north, grid]
+      .map(v => Number(v).toFixed(2))
+      .join(',');
+  }
+
+  function ensureClusterDataSource() {
+    if (clusterState.dataSource) return clusterState.dataSource;
+    if (!viewer || !Cesium) return null;
+    const ds = new Cesium.CustomDataSource('camera-clusters');
+    clusterState.dataSource = ds;
+    viewer.dataSources.add(ds);
+    return ds;
+  }
+
+  function clearClusters() {
+    if (clusterState.dataSource) clusterState.dataSource.entities.removeAll();
+  }
+
+  function clusterColor(count) {
+    if (count >= 5000) return '#dc2626';
+    if (count >= 1000) return '#f97316';
+    if (count >= 250) return '#2563eb';
+    return '#64748b';
+  }
+
+  function addClusterEntity(cluster) {
+    const ds = ensureClusterDataSource();
+    if (!ds || !cluster) return;
+    const count = toNumber(cluster.camera_count ?? cluster.count, 0);
+    const lat = toNumber(cluster.latitude ?? cluster.lat);
+    const lng = toNumber(cluster.longitude ?? cluster.lng);
+    if (!count || lat === null || lng === null) return;
+
+    const radius = Math.max(22, Math.min(58, 18 + Math.log10(count + 1) * 13));
+    const id = `camera-cluster-${cluster.cluster_id || `${lng.toFixed(2)}-${lat.toFixed(2)}`}`;
+    const color = Cesium.Color.fromCssColorString(clusterColor(count)).withAlpha(0.88);
+
+    const labelText = count >= 1000
+      ? `${(count / 1000).toFixed(count >= 10000 ? 0 : 1)}k`
+      : String(count);
+
+    const entity = ds.entities.add({
+      id,
+      position: Cesium.Cartesian3.fromDegrees(lng, lat, 0),
+      point: {
+        pixelSize: radius,
+        color,
+        outlineColor: Cesium.Color.WHITE.withAlpha(0.9),
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        scaleByDistance: new Cesium.NearFarScalar(500000, 1.0, 50000000, 0.78),
+      },
+      label: {
+        text: labelText,
+        font: '700 13px Inter, system-ui, sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.fromCssColorString('#0f172a'),
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.CENTER,
+        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      }
+    });
+
+    entity._isCameraCluster = true;
+    entity._clusterInfo = {
+      count,
+      lat,
+      lng,
+      west: toNumber(cluster.west, lng - 1),
+      south: toNumber(cluster.south, lat - 1),
+      east: toNumber(cluster.east, lng + 1),
+      north: toNumber(cluster.north, lat + 1),
+      grid: toNumber(cluster.grid_degrees, 1),
+    };
+  }
+
+  async function loadCameraClusters(reason = 'view') {
+    if (!shouldShowClusters()) {
+      clearClusters();
+      return;
+    }
+    if (!viewer || !Cesium) return;
+
+    const now = Date.now();
+    if (clusterState.loading || now - clusterState.lastLoadAt < CLUSTER_API.minReloadMs) return;
+
+    const bounds = currentViewBoundsForClusters();
+    const grid = gridDegreesForView(bounds);
+    const key = clustersKey(bounds, grid);
+    if (key === clusterState.lastKey && reason !== 'force') return;
+
+    const client = apiClientForClusters();
+    if (!client) return;
+
+    clusterState.loading = true;
+    clusterState.lastLoadAt = now;
+    clusterState.lastKey = key;
+
+    try {
+      const { data, error } = await client.rpc(CLUSTER_API.rpc, {
+        west: bounds.west,
+        south: bounds.south,
+        east: bounds.east,
+        north: bounds.north,
+        grid_degrees: grid,
+        max_clusters: CLUSTER_API.maxClusters,
+      });
+      if (error) throw error;
+
+      clearClusters();
+      for (const cluster of data || []) addClusterEntity(cluster);
+
+      const total = (data || []).reduce((sum, c) => sum + toNumber(c.camera_count ?? c.count, 0), 0);
+      const countEl = document.getElementById('cameraCount');
+      if (countEl) countEl.textContent = `${total.toLocaleString()} indexed`;
+      const status = document.getElementById('statusCameras');
+      if (status) status.textContent = `${(data || []).length.toLocaleString()} clusters · ${total.toLocaleString()} cameras`;
+      if (typeof trackEvent === 'function') {
+        trackEvent('camera_api_clusters_loaded', { reason, clusters: (data || []).length, total, grid });
+      }
+    } catch (err) {
+      console.warn('Camera cluster API load failed:', err);
+    } finally {
+      clusterState.loading = false;
+    }
+  }
+
+  function scheduleClusterLoad(reason = 'view') {
+    clearTimeout(clusterState.timer);
+    clusterState.timer = setTimeout(() => loadCameraClusters(reason), CLUSTER_API.debounceMs);
+  }
+
+  function installClusterClickHandler() {
+    if (clusterState.installedClickWrap || !viewer?.screenSpaceEventHandler || !Cesium) return;
+    const handler = viewer.screenSpaceEventHandler;
+    const original = typeof handler.getInputAction === 'function'
+      ? handler.getInputAction(Cesium.ScreenSpaceEventType.LEFT_CLICK)
+      : null;
+
+    handler.setInputAction(click => {
+      const picked = viewer.scene.pick(click.position);
+      const entity = picked && picked.id;
+      if (entity && entity._isCameraCluster && entity._clusterInfo) {
+        const info = entity._clusterInfo;
+        const nextHeight = Math.max(300000, getCameraHeight() * 0.38);
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(info.lng, info.lat, nextHeight),
+          duration: 0.8,
+        });
+        window.setTimeout(() => {
+          if (typeof window.loadVisibleCamerasFromApi === 'function') window.loadVisibleCamerasFromApi('cluster_click');
+          scheduleClusterLoad('cluster_click');
+        }, 950);
+        return;
+      }
+      if (typeof original === 'function') return original(click);
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+    clusterState.installedClickWrap = true;
+  }
+
+  function installClusterLoader() {
+    if (!viewer || !Cesium) {
+      window.setTimeout(installClusterLoader, 500);
+      return;
+    }
+    ensureClusterDataSource();
+    installClusterClickHandler();
+
+    if (viewer.camera?.moveEnd && typeof viewer.camera.moveEnd.addEventListener === 'function') {
+      viewer.camera.moveEnd.addEventListener(() => scheduleClusterLoad('globe_move'));
+    }
+
+    window.setTimeout(() => loadCameraClusters('initial'), 1100);
+    window.setTimeout(() => loadCameraClusters('initial_retry'), 3200);
+  }
+
+  window.loadCameraClustersFromApi = loadCameraClusters;
+  window.clearCameraClusters = clearClusters;
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', installClusterLoader, { once: true });
+  } else {
+    installClusterLoader();
+  }
+})();
+</script>
+
 </body>
 </html>
