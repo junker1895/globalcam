@@ -6543,20 +6543,48 @@ function updateDashboardSavedViewButtons(shouldRefresh = true) {
 
   if (loadBtn) {
     loadBtn.textContent = savedDashboardViewsLoading ? 'Loading…' : (count ? 'My dashboards (' + count + ')' : 'My dashboards');
-    loadBtn.disabled = !currentUser || savedDashboardViewsLoading;
-    loadBtn.title = currentUser ? 'Load a cloud-saved dashboard. Right-click to delete one.' : 'Log in to load saved dashboards';
+    // Do not disable this button. Disabled buttons swallow clicks, which makes
+    // auth/profile timing bugs look like the button is broken. The click handler
+    // handles guest/loading states and shows the correct message.
+    loadBtn.disabled = false;
+    loadBtn.title = currentUser ? 'Open your cloud-saved dashboards.' : 'Log in to load saved dashboards';
   }
 
   if (saveBtn) {
     saveBtn.textContent = 'Save dashboard';
-    saveBtn.disabled = !getPlanLimits().canSaveDashboards || !currentUser;
-    saveBtn.title = saveBtn.disabled ? 'Create a free account to save dashboards' : 'Save this dashboard to your account';
+    // Same principle: keep the button clickable and let requireSaveAccess() show
+    // the correct account/plan message.
+    saveBtn.disabled = false;
+    saveBtn.title = currentUser && getPlanLimits().canSaveDashboards ? 'Save this dashboard to your account' : 'Create a free account to save dashboards';
   }
 
   if (shouldRefresh && currentUser && !savedDashboardViewsLoading) {
     getSavedDashboardViews(true).catch(err => console.warn('Saved dashboard count refresh failed:', err));
   }
 }
+
+
+// Robust delegated handlers for cloud dashboard controls. These survive any
+// re-rendering and prevent duplicate/overwritten onclick issues.
+let cloudDashboardButtonBusy = false;
+document.addEventListener('click', async function handleCloudDashboardButtonClick(e) {
+  const saveBtn = e.target && e.target.closest ? e.target.closest('#dashSaveView') : null;
+  const loadBtn = e.target && e.target.closest ? e.target.closest('#dashLoadView') : null;
+  if (!saveBtn && !loadBtn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (cloudDashboardButtonBusy) return;
+  cloudDashboardButtonBusy = true;
+  try {
+    if (saveBtn) await saveCurrentDashboardView();
+    if (loadBtn) await openSavedDashboardsPanel();
+  } catch (err) {
+    console.warn('Cloud dashboard button action failed:', err);
+    alert('Dashboard action failed: ' + (err && err.message ? err.message : err));
+  } finally {
+    cloudDashboardButtonBusy = false;
+  }
+}, true);
 
 // ==========================================================
 //  UI WIRING
