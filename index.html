@@ -56,7 +56,7 @@
 }
 
 
-/* ─── AUTH UI ─── */
+/* ─── ACCOUNT / AUTH UI ─── */
 #authDock {
   position: fixed;
   top: 10px;
@@ -95,10 +95,158 @@ body.app-ready #authDock { top: 8px; }
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 .auth-btn.primary { background: var(--c-accent); color: #fff; border-color: var(--c-accent); }
 .auth-btn:hover { background: var(--c-surface2); color: var(--c-text); }
 .auth-btn.primary:hover { background: var(--c-accent); color:#fff; opacity:0.9; }
+.account-btn {
+  min-width: 138px;
+  justify-content: space-between;
+  background: var(--c-surface);
+}
+.account-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.account-label {
+  min-width: 0;
+  max-width: 132px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.account-chevron { color: var(--c-text3); font-size: 11px; }
+#accountMenu {
+  position: fixed;
+  top: 54px;
+  right: 12px;
+  z-index: 700;
+  width: 286px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  box-shadow: var(--c-shadow-md);
+  overflow: hidden;
+  display: none;
+}
+#accountMenu.open { display: block; }
+.account-menu-head {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--c-border);
+}
+.account-menu-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--c-text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.account-menu-sub {
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--c-text3);
+}
+.account-plan-card {
+  margin: 12px;
+  padding: 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-surface2);
+}
+.account-plan-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.account-plan-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.account-plan-note {
+  margin-top: 7px;
+  font-size: 11px;
+  color: var(--c-text2);
+  line-height: 1.45;
+}
+.account-menu-actions { padding: 0 12px 12px; display: grid; gap: 7px; }
+.account-menu-btn {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text2);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+}
+.account-menu-btn:hover { background: var(--c-surface2); color: var(--c-text); }
+.account-menu-btn.primary { text-align:center; background: var(--c-accent); border-color: var(--c-accent); color: #fff; }
+.account-menu-btn.danger { color: var(--c-danger); }
+#appMessageModal {
+  position: fixed;
+  inset: 0;
+  z-index: 1250;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15,23,42,0.42);
+  backdrop-filter: blur(4px);
+}
+#appMessageModal.open { display: flex; }
+.app-message-card {
+  width: 390px;
+  max-width: calc(100vw - 28px);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  box-shadow: 0 22px 70px rgba(15,23,42,0.34);
+  overflow: hidden;
+}
+.app-message-head {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--c-border);
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+}
+.app-message-title { font-size:15px; font-weight:800; color:var(--c-text); }
+.app-message-x { background:none; border:none; color:var(--c-text3); font-size:22px; cursor:pointer; line-height:1; }
+.app-message-body { padding: 15px 16px; color: var(--c-text2); font-size: 13px; line-height: 1.55; white-space: pre-line; }
+.app-message-actions { padding: 0 16px 16px; display:flex; justify-content:flex-end; gap:8px; }
+.app-message-btn {
+  height: 32px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--c-border);
+  background:var(--c-surface); color:var(--c-text2); font-family:var(--font); font-size:12px; font-weight:700; cursor:pointer;
+}
+.app-message-btn.primary { background: var(--c-accent); border-color: var(--c-accent); color:#fff; }
+.app-message-btn.danger { background: var(--c-danger); border-color: var(--c-danger); color:#fff; }
 #authModal {
   position: fixed;
   inset: 0;
@@ -1812,16 +1960,106 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
 .layer-feature-tooltip { font-family: var(--mono); font-size: 11px; }
 .area-panel-source.layer-active { color: var(--c-success); }
 
+/* ─── PATCH: account dock should not sit over top-bar controls ─── */
+#topBar {
+  padding-right: 320px;
+}
+#authDock {
+  max-width: 310px;
+  height: 40px;
+}
+.account-btn {
+  max-width: 168px;
+  min-width: 0;
+}
+.account-label {
+  max-width: 104px;
+}
+.auth-status {
+  max-width: 54px;
+}
+@media (max-width: 1100px) {
+  #topBar { padding-right: 12px; }
+  #authDock {
+    top: calc(var(--top-h) + 8px);
+    right: 8px;
+  }
+}
+
+/* ─── PATCH: dashboard map header wraps cleanly instead of crushing title text ─── */
+#dashboardMapHeader {
+  height: auto;
+  min-height: 40px;
+  padding: 6px 8px;
+  flex-wrap: wrap;
+  align-content: center;
+  row-gap: 6px;
+}
+#dashboardMapHeader > span:first-child {
+  flex: 1 0 100%;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#dashboardMapHeader .spacer {
+  display: none;
+}
+#dashboardMapHeader .dash-small-btn,
+#dashboardMapHeader .dash-zoom {
+  flex: 0 0 auto;
+}
+
 </style>
 </head>
 <body>
 
-<!-- ─── AUTH DOCK ─── -->
+<!-- ─── AUTH / ACCOUNT DOCK ─── -->
 <div id="authDock">
+  <button class="auth-btn account-btn" id="btnAccountMenu" type="button" style="display:none" aria-expanded="false">
+    <span class="account-avatar" id="accountAvatar">?</span>
+    <span class="account-label" id="accountButtonLabel">Account</span>
+    <span class="account-chevron">▾</span>
+  </button>
   <div class="auth-status" id="authStatus">Guest</div>
   <button class="auth-btn" id="btnAuthLogin" type="button">Log in</button>
   <button class="auth-btn primary" id="btnAuthSignup" type="button">Sign up</button>
   <button class="auth-btn" id="btnAuthLogout" type="button" style="display:none">Log out</button>
+</div>
+
+<!-- ─── ACCOUNT MENU ─── -->
+<div id="accountMenu" aria-hidden="true">
+  <div class="account-menu-head">
+    <div class="account-menu-title" id="accountMenuEmail">Guest</div>
+    <div class="account-menu-sub" id="accountMenuSub">Not signed in</div>
+  </div>
+  <div class="account-plan-card">
+    <div class="account-plan-row">
+      <div style="font-weight:700;color:var(--c-text);font-size:13px;">Current plan</div>
+      <div class="account-plan-badge" id="accountPlanBadge">Guest</div>
+    </div>
+    <div class="account-plan-note" id="accountPlanNote">Guest mode allows a basic map and up to 2 dashboard cameras. Create a free account to save dashboards.</div>
+  </div>
+  <div class="account-menu-actions">
+    <button class="account-menu-btn primary" id="btnAccountUpgrade" type="button">Upgrade to Pro</button>
+    <button class="account-menu-btn" id="btnAccountDashboards" type="button">My dashboards</button>
+    <button class="account-menu-btn danger" id="btnAccountLogout" type="button">Log out</button>
+  </div>
+</div>
+
+<!-- ─── APP MESSAGE / CONFIRM MODAL ─── -->
+<div id="appMessageModal" aria-hidden="true">
+  <div class="app-message-card" role="dialog" aria-modal="true" aria-labelledby="appMessageTitle">
+    <div class="app-message-head">
+      <div class="app-message-title" id="appMessageTitle">Notice</div>
+      <button class="app-message-x" id="appMessageClose" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="app-message-body" id="appMessageBody"></div>
+    <div class="app-message-actions">
+      <button class="app-message-btn" id="appMessageCancel" type="button" style="display:none">Cancel</button>
+      <button class="app-message-btn primary" id="appMessageOk" type="button">OK</button>
+    </div>
+  </div>
 </div>
 
 <!-- ─── AUTH MODAL ─── -->
@@ -2419,17 +2657,99 @@ async function loadUserProfile() {
   return profile;
 }
 
+
+function showAppMessage(opts = {}) {
+  const modal = document.getElementById('appMessageModal');
+  const title = document.getElementById('appMessageTitle');
+  const body = document.getElementById('appMessageBody');
+  const okBtn = document.getElementById('appMessageOk');
+  const cancelBtn = document.getElementById('appMessageCancel');
+  const closeBtn = document.getElementById('appMessageClose');
+  if (!modal || !okBtn || !body || !title) {
+    if (typeof showVigilToast === 'function') showVigilToast(opts.title || 'Notice', opts.message || '', opts.type || 'ok');
+    return Promise.resolve(true);
+  }
+  title.textContent = opts.title || 'Notice';
+  body.textContent = opts.message || '';
+  okBtn.textContent = opts.okText || 'OK';
+  okBtn.className = 'app-message-btn ' + (opts.danger ? 'danger' : 'primary');
+  cancelBtn.style.display = opts.confirm ? 'inline-flex' : 'none';
+  cancelBtn.textContent = opts.cancelText || 'Cancel';
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  return new Promise(resolve => {
+    const cleanup = value => {
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      closeBtn.onclick = null;
+      modal.onclick = null;
+      modal.classList.remove('open');
+      modal.setAttribute('aria-hidden', 'true');
+      resolve(value);
+    };
+    okBtn.onclick = () => cleanup(true);
+    cancelBtn.onclick = () => cleanup(false);
+    closeBtn.onclick = () => cleanup(false);
+    modal.onclick = e => { if (e.target === modal) cleanup(false); };
+  });
+}
+
+function confirmAppAction(title, message, okText = 'Confirm', danger = false) {
+  return showAppMessage({ title, message, okText, cancelText: 'Cancel', confirm: true, danger });
+}
+
+function notifyApp(title, message = '', type = 'ok') {
+  if (typeof showVigilToast === 'function') showVigilToast(title, message, type);
+  else showAppMessage({ title, message, type });
+}
 function updateAuthUI() {
   const status = document.getElementById('authStatus');
   const loginBtn = document.getElementById('btnAuthLogin');
   const signupBtn = document.getElementById('btnAuthSignup');
   const logoutBtn = document.getElementById('btnAuthLogout');
+  const accountBtn = document.getElementById('btnAccountMenu');
+  const accountLabel = document.getElementById('accountButtonLabel');
+  const avatar = document.getElementById('accountAvatar');
+  const menuEmail = document.getElementById('accountMenuEmail');
+  const menuSub = document.getElementById('accountMenuSub');
+  const planBadge = document.getElementById('accountPlanBadge');
+  const planNote = document.getElementById('accountPlanNote');
+  const upgradeBtn = document.getElementById('btnAccountUpgrade');
   const email = currentUser && currentUser.email ? currentUser.email : '';
+  const limits = getPlanLimits();
+  const planName = limits.label || currentPlan || 'Guest';
 
-  if (status) status.textContent = currentUser ? `${email} · ${getPlanLimits().label}` : 'Guest';
+  if (status) {
+    status.textContent = currentUser ? planName : 'Guest';
+    status.title = currentUser ? email : 'Guest mode';
+  }
   if (loginBtn) loginBtn.style.display = currentUser ? 'none' : 'inline-flex';
   if (signupBtn) signupBtn.style.display = currentUser ? 'none' : 'inline-flex';
-  if (logoutBtn) logoutBtn.style.display = currentUser ? 'inline-flex' : 'none';
+  if (logoutBtn) logoutBtn.style.display = 'none';
+  if (accountBtn) accountBtn.style.display = currentUser ? 'inline-flex' : 'none';
+  if (accountLabel) accountLabel.textContent = email || 'Account';
+  if (avatar) avatar.textContent = email ? email[0].toUpperCase() : '?';
+  if (menuEmail) menuEmail.textContent = email || 'Guest';
+  if (menuSub) menuSub.textContent = currentUser ? 'Signed in with Supabase Auth' : 'Not signed in';
+  if (planBadge) planBadge.textContent = planName;
+  if (planNote) {
+    const dashLimit = limits.maxSavedDashboards >= 999 ? 'unlimited saved dashboards' : limits.maxSavedDashboards + ' saved dashboards';
+    const camLimit = limits.maxDashboardCameras >= 999 ? 'unlimited dashboard cameras' : limits.maxDashboardCameras + ' dashboard cameras';
+    planNote.textContent = currentUser
+      ? planName + ' includes ' + camLimit + ', ' + dashLimit + (limits.canUse3D ? ', and 3D access.' : '. 3D unlocks with Pro.')
+      : 'Guest mode allows a basic map and up to 2 dashboard cameras. Create a free account to save dashboards.';
+  }
+  if (upgradeBtn) upgradeBtn.style.display = currentPlan === 'pro' ? 'none' : 'block';
+}
+
+function toggleAccountMenu(force) {
+  const menu = document.getElementById('accountMenu');
+  const btn = document.getElementById('btnAccountMenu');
+  if (!menu) return;
+  const open = typeof force === 'boolean' ? force : !menu.classList.contains('open');
+  menu.classList.toggle('open', open);
+  menu.setAttribute('aria-hidden', open ? 'false' : 'true');
+  if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 
 function openAuthModal(mode) {
@@ -2533,7 +2853,15 @@ function updatePlanUI() {
 }
 
 function showUpgradePrompt(message) {
-  alert(message + '\n\nCurrent tier: ' + getPlanLimits().label + '\n\nFree accounts can save dashboards. Pro billing will be connected with Lemon Squeezy in a later step.');
+  const limits = getPlanLimits();
+  const body = (message || 'This feature is not available on your current plan.') + '\n\nCurrent tier: ' + limits.label + '\n\nFree accounts can save dashboards. Pro unlocks 3D, higher limits, and the full commercial feature set once Lemon Squeezy is connected.';
+  if (typeof showAppMessage === 'function') {
+    showAppMessage({ title: 'Feature locked', message: body, okText: currentUser ? 'Got it' : 'Create account', primary: true }).then(() => {
+      if (!currentUser) openAuthModal('signup');
+    });
+  } else if (typeof showVigilToast === 'function') {
+    showVigilToast('Feature locked', message, 'warn', 5200);
+  }
 }
 
 function requireSaveAccess() {
@@ -5611,7 +5939,7 @@ async function uploadAreaFromFile(file) {
     if (activeView === 'dashboard') initDashboardMap();
     setTimeout(() => fitAreaSelectionView(), 100);
   } catch (err) {
-    alert('Could not upload area: ' + (err.message || err));
+    notifyApp('Could not upload area', (err.message || String(err)), 'err');
   }
 }
 
@@ -5631,7 +5959,7 @@ async function uploadLayerFromFile(file) {
     updateAreaPanelForLayerUpload();
     setTimeout(() => fitUploadedLayerView(), 120);
   } catch (err) {
-    alert('Could not upload layer: ' + (err.message || err));
+    notifyApp('Could not upload layer', (err.message || String(err)), 'err');
   }
 }
 
@@ -6199,7 +6527,7 @@ async function getSavedDashboardViews(forceRefresh = false) {
 
   const client = initSupabaseClient();
   if (!client) {
-    alert('Supabase is not available. Could not load cloud dashboards.');
+    notifyApp('Supabase unavailable', 'Could not load cloud dashboards.', 'err');
     return [];
   }
 
@@ -6216,7 +6544,7 @@ async function getSavedDashboardViews(forceRefresh = false) {
     return savedDashboardViewsCache.slice();
   } catch (err) {
     console.warn('Cloud dashboard load failed:', err);
-    alert('Could not load saved dashboards: ' + (err && err.message ? err.message : err));
+    notifyApp('Could not load saved dashboards', (err && err.message ? err.message : String(err)), 'err');
     return [];
   } finally {
     savedDashboardViewsLoading = false;
@@ -6224,22 +6552,27 @@ async function getSavedDashboardViews(forceRefresh = false) {
   }
 }
 
+
+async function requestSimpleTextInput(title, note, value = '', okText = 'OK') {
+  if (typeof requestDashboardName === 'function') return requestDashboardName({ title, note, value, okText });
+  return showAppMessage({ title, message: note || '', okText, confirm: false }).then(() => '');
+}
 async function saveCurrentDashboardView() {
   if (!requireSaveAccess()) return;
 
   if (!dashboardState.cameras.length) {
-    if (!confirm('This dashboard is empty. Save it anyway?')) return;
+    if (!(await confirmAppAction('Save empty dashboard?', 'This dashboard currently has no cameras. Save it anyway?', 'Save empty', false))) return;
   }
 
   const client = initSupabaseClient();
   if (!client || !currentUser) {
-    alert('You need to be logged in to save dashboards.');
+    notifyApp('Login required', 'You need to be logged in to save dashboards.', 'warn');
     return;
   }
 
   const views = await getSavedDashboardViews(true);
   const existingNames = views.map(v => v.name).filter(Boolean).join('\n');
-  const name = prompt(existingNames ? 'Dashboard name:\n\nExisting dashboards:\n' + existingNames : 'Dashboard name:');
+  const name = await requestSimpleTextInput('Save dashboard', existingNames ? 'Existing dashboards:\n' + existingNames : 'Name this dashboard.', 'Dashboard name', 'Save');
   if (!name || !name.trim()) return;
 
   const cleanName = name.trim();
@@ -6280,10 +6613,10 @@ async function saveCurrentDashboardView() {
     if (result.error) throw result.error;
     await getSavedDashboardViews(true);
     updateDashboardSavedViewButtons(false);
-    alert((existing ? 'Updated' : 'Saved') + ' dashboard: ' + cleanName);
+    notifyApp(existing ? 'Dashboard updated' : 'Dashboard saved', cleanName, 'ok');
   } catch (err) {
     console.warn('Cloud dashboard save failed:', err);
-    alert('Could not save dashboard: ' + (err && err.message ? err.message : err));
+    notifyApp('Could not save dashboard', (err && err.message ? err.message : String(err)), 'err');
   }
 }
 
@@ -6295,7 +6628,7 @@ async function chooseSavedDashboardView(actionText) {
 
   const views = await getSavedDashboardViews(true);
   if (!views.length) {
-    alert('No saved dashboards yet.');
+    notifyApp('No saved dashboards yet', 'Build a dashboard, then save it to your account.', 'warn');
     return null;
   }
 
@@ -6305,7 +6638,10 @@ async function chooseSavedDashboardView(actionText) {
     return String(i + 1) + '. ' + v.name + ' (' + count + ' cameras · ' + updated + ')';
   }).join('\n');
 
-  const choice = prompt((actionText || 'Choose dashboard') + ':\n\n' + list + '\n\nEnter number or exact name:');
+  notifyApp('Use My dashboards', 'The dashboard manager panel replaces the old number prompt.', 'warn');
+  if (typeof openSavedDashboardsPanel === 'function') openSavedDashboardsPanel();
+  return null;
+  const choice = '';
   if (!choice || !choice.trim()) return null;
 
   const trimmed = choice.trim();
@@ -6313,7 +6649,7 @@ async function chooseSavedDashboardView(actionText) {
   if (Number.isInteger(num) && num >= 1 && num <= views.length) return views[num - 1];
 
   const byName = views.find(v => String(v.name || '').toLowerCase() === trimmed.toLowerCase());
-  if (!byName) alert('No saved dashboard matched: ' + trimmed);
+  if (!byName) notifyApp('No saved dashboard matched', trimmed, 'warn');
   return byName || null;
 }
 
@@ -6324,7 +6660,7 @@ async function loadSavedDashboardView() {
   const requestedCameraCount = Array.isArray(view.state && view.state.cameras) ? view.state.cameras.length : 0;
   const restored = normaliseSavedDashboardState(view.state);
   if (restored.cameras.length !== requestedCameraCount) {
-    alert('Loaded dashboard, but ' + (requestedCameraCount - restored.cameras.length) + ' camera(s) were not found in the currently loaded camera source.');
+    notifyApp('Dashboard partly loaded', (requestedCameraCount - restored.cameras.length) + ' camera(s) were not found in the currently loaded camera source.', 'warn');
   }
 
   dashboardState = {
@@ -6358,11 +6694,11 @@ async function deleteSavedDashboardView() {
 
   const view = await chooseSavedDashboardView('Delete saved dashboard');
   if (!view) return;
-  if (!confirm('Delete saved dashboard "' + view.name + '"?')) return;
+  if (!(await confirmAppAction('Delete dashboard?', 'Delete saved dashboard "' + view.name + '"? This cannot be undone.', 'Delete', true))) return;
 
   const client = initSupabaseClient();
   if (!client) {
-    alert('Supabase is not available. Could not delete dashboard.');
+    notifyApp('Supabase unavailable', 'Could not delete dashboard.', 'err');
     return;
   }
 
@@ -6376,10 +6712,10 @@ async function deleteSavedDashboardView() {
     if (error) throw error;
     await getSavedDashboardViews(true);
     updateDashboardSavedViewButtons(false);
-    alert('Deleted dashboard: ' + view.name);
+    notifyApp('Dashboard deleted', view.name, 'ok');
   } catch (err) {
     console.warn('Cloud dashboard delete failed:', err);
-    alert('Could not delete dashboard: ' + (err && err.message ? err.message : err));
+    notifyApp('Could not delete dashboard', (err && err.message ? err.message : String(err)), 'err');
   }
 }
 
@@ -6480,7 +6816,7 @@ async function loadSavedDashboardViewObject(view) {
   const requestedCameraCount = Array.isArray(view.state && view.state.cameras) ? view.state.cameras.length : 0;
   const restored = normaliseSavedDashboardState(view.state);
   if (restored.cameras.length !== requestedCameraCount) {
-    alert('Loaded dashboard, but ' + (requestedCameraCount - restored.cameras.length) + ' camera(s) were not found in the currently loaded camera source.');
+    notifyApp('Dashboard partly loaded', (requestedCameraCount - restored.cameras.length) + ' camera(s) were not found in the currently loaded camera source.', 'warn');
   }
 
   dashboardState = {
@@ -6512,11 +6848,11 @@ async function deleteSavedDashboardViewObject(view) {
     showUpgradePrompt('Log in to delete saved dashboards.');
     return;
   }
-  if (!confirm('Delete saved dashboard "' + view.name + '"?')) return;
+  if (!(await confirmAppAction('Delete dashboard?', 'Delete saved dashboard "' + view.name + '"? This cannot be undone.', 'Delete', true))) return;
 
   const client = initSupabaseClient();
   if (!client) {
-    alert('Supabase is not available. Could not delete dashboard.');
+    notifyApp('Supabase unavailable', 'Could not delete dashboard.', 'err');
     return;
   }
 
@@ -6532,7 +6868,7 @@ async function deleteSavedDashboardViewObject(view) {
     updateDashboardSavedViewButtons(false);
   } catch (err) {
     console.warn('Cloud dashboard delete failed:', err);
-    alert('Could not delete dashboard: ' + (err && err.message ? err.message : err));
+    notifyApp('Could not delete dashboard', (err && err.message ? err.message : String(err)), 'err');
   }
 }
 
@@ -6580,7 +6916,7 @@ document.addEventListener('click', async function handleCloudDashboardButtonClic
     if (loadBtn) await openSavedDashboardsPanel();
   } catch (err) {
     console.warn('Cloud dashboard button action failed:', err);
-    alert('Dashboard action failed: ' + (err && err.message ? err.message : err));
+    notifyApp('Dashboard action failed', (err && err.message ? err.message : String(err)), 'err');
   } finally {
     cloudDashboardButtonBusy = false;
   }
@@ -6596,17 +6932,84 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnAuthLogin = document.getElementById('btnAuthLogin');
   const btnAuthSignup = document.getElementById('btnAuthSignup');
   const btnAuthLogout = document.getElementById('btnAuthLogout');
+  const btnAccountMenu = document.getElementById('btnAccountMenu');
+  const btnAccountLogout = document.getElementById('btnAccountLogout');
+
+async function startProCheckout() {
+  try {
+    if (!currentUser) {
+      toggleAccountMenu(false);
+      openAuthModal('login');
+      showToast('Please log in before upgrading.', 'warn');
+      return;
+    }
+
+    const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+
+    if (sessionError || !accessToken) {
+      showToast('Your login session could not be verified. Please log out and log back in.', 'error');
+      return;
+    }
+
+    showToast('Preparing secure checkout…');
+
+    const response = await fetch('https://vigil-billing-worker.luke-gowlett.workers.dev/create-checkout', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
+      },
+      body: JSON.stringify({ email: currentUser.email })
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      console.error('Checkout creation failed:', response.status, text);
+      showAppMessage(
+        'Checkout unavailable',
+        'The secure checkout could not be created. Check the Cloudflare Worker logs and Lemon Squeezy API settings, then try again.',
+        { primaryLabel: 'OK' }
+      );
+      return;
+    }
+
+    const data = await response.json();
+    if (!data?.url) {
+      console.error('Invalid checkout response:', data);
+      showToast('Checkout response did not include a URL.', 'error');
+      return;
+    }
+
+    window.location.href = data.url;
+  } catch (err) {
+    console.error('Unable to start Pro checkout:', err);
+    showToast('Unable to start checkout.', 'error');
+  }
+}
+
+  const btnAccountUpgrade = document.getElementById('btnAccountUpgrade');
+  const btnAccountDashboards = document.getElementById('btnAccountDashboards');
   const authModalClose = document.getElementById('authModalClose');
   const authSubmit = document.getElementById('authSubmit');
   const authModal = document.getElementById('authModal');
   if (btnAuthLogin) btnAuthLogin.onclick = () => openAuthModal('login');
   if (btnAuthSignup) btnAuthSignup.onclick = () => openAuthModal('signup');
   if (btnAuthLogout) btnAuthLogout.onclick = logoutCurrentUser;
+  if (btnAccountMenu) btnAccountMenu.onclick = e => { e.stopPropagation(); toggleAccountMenu(); };
+  if (btnAccountLogout) btnAccountLogout.onclick = async () => { toggleAccountMenu(false); await logoutCurrentUser(); notifyApp('Logged out', 'You are back in guest mode.', 'ok'); };
+  if (btnAccountUpgrade) btnAccountUpgrade.onclick = () => { toggleAccountMenu(false); startProCheckout(); };
+  if (btnAccountDashboards) btnAccountDashboards.onclick = () => { toggleAccountMenu(false); if (typeof openSavedDashboardsPanel === 'function') openSavedDashboardsPanel(); };
   if (authModalClose) authModalClose.onclick = closeAuthModal;
   if (authSubmit) authSubmit.onclick = submitAuthForm;
   if (authModal) authModal.addEventListener('click', e => { if (e.target === authModal) closeAuthModal(); });
+  document.addEventListener('click', e => {
+    const menu = document.getElementById('accountMenu');
+    const btn = document.getElementById('btnAccountMenu');
+    if (menu && menu.classList.contains('open') && !menu.contains(e.target) && !btn?.contains(e.target)) toggleAccountMenu(false);
+  });
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeAuthModal();
+    if (e.key === 'Escape') { closeAuthModal(); toggleAccountMenu(false); }
     if (e.key === 'Enter' && document.getElementById('authModal')?.classList.contains('open')) submitAuthForm();
   });
 
@@ -7335,7 +7738,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     let ok;
     if (opts && opts.useModal) ok = await confirmDashboardAction('Delete dashboard?', 'Delete "' + view.name + '"? This cannot be undone.', 'Delete', true);
-    else ok = confirm('Delete saved dashboard "' + view.name + '"?');
+    else ok = await confirmAppAction('Delete dashboard?', 'Delete saved dashboard "' + view.name + '"? This cannot be undone.', 'Delete', true);
     if (!ok) return;
     const client = initSupabaseClient();
     if (!client) throw new Error('Supabase is not available.');
