@@ -6383,6 +6383,159 @@ async function deleteSavedDashboardView() {
   }
 }
 
+
+
+// Robust saved-dashboard browser. This replaces the prompt-only flow so the
+// "My dashboards" button can always be reopened after loading a dashboard.
+function ensureSavedDashboardsPanel() {
+  let panel = document.getElementById('savedDashboardsPanel');
+  if (panel) return panel;
+
+  panel = document.createElement('div');
+  panel.id = 'savedDashboardsPanel';
+  panel.style.cssText = 'position:fixed;top:calc(var(--top-h) + 10px);left:50%;transform:translateX(-50%);width:430px;max-width:calc(100vw - 24px);z-index:280;background:var(--c-surface);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-md);display:none;overflow:hidden;';
+  panel.innerHTML = `
+    <div style="padding:11px 13px;border-bottom:1px solid var(--c-border);display:flex;align-items:center;gap:8px;">
+      <div style="font-size:13px;font-weight:700;color:var(--c-text);flex:1;">My dashboards</div>
+      <button id="savedDashboardsRefresh" class="dash-small-btn" type="button">Refresh</button>
+      <button id="savedDashboardsClose" type="button" style="width:28px;height:28px;border:0;background:transparent;color:var(--c-text3);font-size:20px;line-height:1;cursor:pointer;">×</button>
+    </div>
+    <div id="savedDashboardsList" style="max-height:420px;overflow:auto;"></div>
+  `;
+  document.body.appendChild(panel);
+
+  panel.querySelector('#savedDashboardsClose').onclick = () => closeSavedDashboardsPanel();
+  panel.querySelector('#savedDashboardsRefresh').onclick = () => renderSavedDashboardsPanel(true);
+  return panel;
+}
+
+function closeSavedDashboardsPanel() {
+  const panel = document.getElementById('savedDashboardsPanel');
+  if (panel) panel.style.display = 'none';
+}
+
+async function openSavedDashboardsPanel() {
+  if (!currentUser) {
+    showUpgradePrompt('Log in to use saved dashboards.');
+    return;
+  }
+  const panel = ensureSavedDashboardsPanel();
+  panel.style.display = 'block';
+  await renderSavedDashboardsPanel(true);
+}
+
+async function renderSavedDashboardsPanel(forceRefresh = false) {
+  const panel = ensureSavedDashboardsPanel();
+  const list = panel.querySelector('#savedDashboardsList');
+  if (!list) return;
+
+  list.innerHTML = '<div style="padding:16px;color:var(--c-text3);font-family:var(--mono);font-size:11px;">Loading saved dashboards…</div>';
+  const views = await getSavedDashboardViews(forceRefresh);
+
+  if (!views.length) {
+    list.innerHTML = '<div style="padding:18px;color:var(--c-text3);font-size:12px;line-height:1.5;">No saved dashboards yet.<br>Build a dashboard, then click <strong>Save dashboard</strong>.</div>';
+    return;
+  }
+
+  list.innerHTML = views.map(v => {
+    const count = v.state && Array.isArray(v.state.cameras) ? v.state.cameras.length : v.cameraCount || 0;
+    const updated = v.updatedAt ? new Date(v.updatedAt).toLocaleString() : 'unknown date';
+    return `
+      <div class="saved-dash-row" data-id="${escapeHtml(v.id)}" style="padding:11px 13px;border-bottom:1px solid var(--c-border);display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:5px 7px;align-items:center;">
+        <div style="min-width:0;">
+          <div style="font-size:13px;font-weight:650;color:var(--c-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(v.name)}</div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--c-text3);margin-top:2px;">${count} camera${count === 1 ? '' : 's'} · ${escapeHtml(updated)}</div>
+        </div>
+        <button class="dash-small-btn saved-dash-load" type="button">Load</button>
+        <button class="dash-small-btn saved-dash-delete" type="button" style="color:var(--c-danger);">Delete</button>
+      </div>`;
+  }).join('');
+
+  list.querySelectorAll('.saved-dash-load').forEach(btn => {
+    btn.onclick = async () => {
+      const row = btn.closest('.saved-dash-row');
+      const id = row ? row.dataset.id : '';
+      const view = views.find(v => String(v.id) === String(id));
+      if (!view) return;
+      closeSavedDashboardsPanel();
+      await loadSavedDashboardViewObject(view);
+    };
+  });
+
+  list.querySelectorAll('.saved-dash-delete').forEach(btn => {
+    btn.onclick = async () => {
+      const row = btn.closest('.saved-dash-row');
+      const id = row ? row.dataset.id : '';
+      const view = views.find(v => String(v.id) === String(id));
+      if (!view) return;
+      await deleteSavedDashboardViewObject(view);
+      await renderSavedDashboardsPanel(true);
+    };
+  });
+}
+
+async function loadSavedDashboardViewObject(view) {
+  if (!view) return;
+
+  const requestedCameraCount = Array.isArray(view.state && view.state.cameras) ? view.state.cameras.length : 0;
+  const restored = normaliseSavedDashboardState(view.state);
+  if (restored.cameras.length !== requestedCameraCount) {
+    alert('Loaded dashboard, but ' + (requestedCameraCount - restored.cameras.length) + ' camera(s) were not found in the currently loaded camera source.');
+  }
+
+  dashboardState = {
+    ...dashboardState,
+    ...restored
+  };
+
+  const maxPage = Math.max(0, Math.ceil(dashboardState.cameras.length / DASHBOARD_PAGE_SIZE) - 1);
+  dashboardState.page = Math.min(dashboardState.page || 0, maxPage);
+  if (!dashboardState.focusCameraId && dashboardState.cameras.length) dashboardState.focusCameraId = dashboardState.cameras[0];
+  if (!dashboardState.selectedCameraId && dashboardState.focusCameraId) dashboardState.selectedCameraId = dashboardState.focusCameraId;
+
+  saveDashboardState();
+  updateDashboardBadge();
+  switchView('dashboard');
+  renderDashboard();
+  updateDashboardSavedViewButtons(false);
+  updateDashboardMapPresentation();
+  setTimeout(() => {
+    if (dashboardMap) {
+      dashboardMap.invalidateSize();
+      if (dashboardState.mapVisible) fitDashboardMap();
+    }
+  }, 100);
+}
+
+async function deleteSavedDashboardViewObject(view) {
+  if (!currentUser || !view) {
+    showUpgradePrompt('Log in to delete saved dashboards.');
+    return;
+  }
+  if (!confirm('Delete saved dashboard "' + view.name + '"?')) return;
+
+  const client = initSupabaseClient();
+  if (!client) {
+    alert('Supabase is not available. Could not delete dashboard.');
+    return;
+  }
+
+  try {
+    const { error } = await client
+      .from('dashboards')
+      .delete()
+      .eq('id', view.id)
+      .eq('user_id', currentUser.id);
+
+    if (error) throw error;
+    await getSavedDashboardViews(true);
+    updateDashboardSavedViewButtons(false);
+  } catch (err) {
+    console.warn('Cloud dashboard delete failed:', err);
+    alert('Could not delete dashboard: ' + (err && err.message ? err.message : err));
+  }
+}
+
 function updateDashboardSavedViewButtons(shouldRefresh = true) {
   const loadBtn = document.getElementById('dashLoadView');
   const saveBtn = document.getElementById('dashSaveView');
@@ -6546,7 +6699,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('dashMapCollapseHeader').onclick = () => toggleDashboardMap(false);
   document.getElementById('dashClearAll').onclick = clearDashboard;
   document.getElementById('dashSaveView').onclick = saveCurrentDashboardView;
-  document.getElementById('dashLoadView').onclick = loadSavedDashboardView;
+  document.getElementById('dashLoadView').onclick = openSavedDashboardsPanel;
   document.getElementById('dashLoadView').addEventListener('contextmenu', e => { e.preventDefault(); deleteSavedDashboardView(); });
   updateDashboardSavedViewButtons();
   document.getElementById('dashPrevPage').onclick = () => setDashboardPage((dashboardState.page || 0) - 1);
