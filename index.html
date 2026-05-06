@@ -8082,12 +8082,16 @@ window.startBillingPortal = startBillingPortal;
   }
 
   function hasDashboardContent() {
-    return !!(window.dashboardState && Array.isArray(dashboardState.cameras) && dashboardState.cameras.length);
+    try {
+      return !!(typeof dashboardState !== 'undefined' && dashboardState && Array.isArray(dashboardState.cameras) && dashboardState.cameras.length);
+    } catch (_) {
+      return false;
+    }
   }
 
   function canAutosaveDashboard() {
     try {
-      if (!currentUser) return { ok: false, reason: 'Log in to autosave' };
+      if (typeof currentUser === 'undefined' || !currentUser) return { ok: false, reason: 'Log in to autosave' };
       if (typeof getPlanLimits === 'function') {
         const limits = getPlanLimits();
         if (!limits || !limits.canSaveDashboards) return { ok: false, reason: 'Create a free account to autosave' };
@@ -8273,6 +8277,24 @@ window.startBillingPortal = startBillingPortal;
     else updateAutosaveIdleStatus();
   }
 
+  function scheduleInitialAutosave(reason = 'initial_dashboard_content', attempt = 0) {
+    window.setTimeout(() => {
+      const gate = canAutosaveDashboard();
+      if (gate.ok && hasDashboardContent() && !autosaveLastSavedAt && !autosaveDirty && !autosaveInFlight) {
+        markDashboardDirty(reason);
+        return;
+      }
+
+      // Supabase session restore and dashboard hydration can complete after this
+      // patch initialises, so retry briefly instead of leaving the footer stale.
+      if (!autosaveLastSavedAt && hasDashboardContent() && attempt < 12) {
+        scheduleInitialAutosave(reason, attempt + 1);
+      } else {
+        updateAutosaveIdleStatus();
+      }
+    }, attempt === 0 ? 1200 : 2500);
+  }
+
   function patchDashboardAutosave() {
     if (autosavePatched) return;
     autosavePatched = true;
@@ -8365,6 +8387,21 @@ window.startBillingPortal = startBillingPortal;
     }, AUTOSAVE_PERIODIC_MS);
 
     updateAutosaveIdleStatus();
+    scheduleInitialAutosave('initial_dashboard_content');
+
+    try {
+      const client = typeof initSupabaseClient === 'function' ? initSupabaseClient() : null;
+      if (client && client.auth && typeof client.auth.onAuthStateChange === 'function') {
+        client.auth.onAuthStateChange(() => {
+          window.setTimeout(() => {
+            updateAutosaveIdleStatus();
+            scheduleInitialAutosave('auth_session_ready');
+          }, 350);
+        });
+      }
+    } catch (err) {
+      console.warn('Could not attach autosave auth listener:', err);
+    }
   }
 
   if (document.readyState === 'loading') {
