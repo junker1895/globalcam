@@ -6771,5 +6771,589 @@ document.addEventListener('DOMContentLoaded', () => {
   initCesium();
 });
 </script>
+
+
+<style>
+/* ─── SAAS DASHBOARD MANAGER POLISH ─── */
+#vigilToastWrap {
+  position: fixed;
+  right: 14px;
+  bottom: calc(var(--bar-h) + 14px);
+  z-index: 1400;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.vigil-toast {
+  min-width: 260px;
+  max-width: 380px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  color: var(--c-text);
+  box-shadow: var(--c-shadow-md);
+  font-size: 12px;
+  line-height: 1.45;
+  pointer-events: auto;
+  animation: pipFadeIn 0.16s ease;
+}
+.vigil-toast strong { display:block; font-size:12px; margin-bottom:2px; }
+.vigil-toast.ok { border-left: 3px solid var(--c-success); }
+.vigil-toast.warn { border-left: 3px solid var(--c-warn); }
+.vigil-toast.err { border-left: 3px solid var(--c-danger); }
+
+#dashboardNameModal {
+  position: fixed;
+  inset: 0;
+  z-index: 1450;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15,23,42,0.42);
+  backdrop-filter: blur(4px);
+}
+#dashboardNameModal.open { display: flex; }
+.dashboard-modal-card {
+  width: min(420px, calc(100vw - 28px));
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  box-shadow: 0 22px 72px rgba(15,23,42,0.32);
+  overflow: hidden;
+}
+.dashboard-modal-head {
+  padding: 13px 15px;
+  border-bottom: 1px solid var(--c-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.dashboard-modal-title { font-size: 14px; font-weight: 750; color: var(--c-text); }
+.dashboard-modal-body { padding: 14px 15px; }
+.dashboard-modal-note { font-size: 12px; color: var(--c-text2); line-height: 1.5; margin-bottom: 10px; }
+.dashboard-modal-input {
+  width: 100%; height: 36px; border: 1px solid var(--c-border); border-radius: var(--radius);
+  background: var(--c-surface2); color: var(--c-text); padding: 0 10px; outline: none; font-family: var(--font);
+}
+.dashboard-modal-input:focus { border-color: var(--c-accent); box-shadow: 0 0 0 3px rgba(37,99,235,0.12); background: var(--c-surface); }
+.dashboard-modal-actions { padding: 12px 15px; border-top: 1px solid var(--c-border); display:flex; justify-content:flex-end; gap:8px; }
+.dashboard-modal-btn {
+  height: 32px; padding: 0 12px; border-radius: var(--radius); border: 1px solid var(--c-border);
+  background: var(--c-surface); color: var(--c-text2); font-weight: 650; font-size: 12px; cursor:pointer;
+}
+.dashboard-modal-btn.primary { background: var(--c-accent); border-color: var(--c-accent); color: #fff; }
+.dashboard-modal-btn.danger { color: var(--c-danger); }
+.dashboard-modal-btn:hover { background: var(--c-surface2); color: var(--c-text); }
+.dashboard-modal-btn.primary:hover { background: var(--c-accent); color:#fff; opacity:.9; }
+
+#savedDashboardsPanel.pro-manager {
+  width: min(560px, calc(100vw - 24px)) !important;
+  max-height: min(620px, calc(100vh - var(--top-h) - 34px));
+}
+.saved-dash-toolbar {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-border);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+#savedDashboardsSearch {
+  height: 32px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface2);
+  border-radius: var(--radius);
+  padding: 0 10px;
+  font-family: var(--font);
+  color: var(--c-text);
+  outline: none;
+}
+#savedDashboardsSearch:focus { border-color: var(--c-accent); box-shadow: 0 0 0 3px rgba(37,99,235,0.12); background: var(--c-surface); }
+.saved-dash-row2 {
+  padding: 12px 13px;
+  border-bottom: 1px solid var(--c-border);
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  gap: 8px 10px;
+  align-items: start;
+}
+.saved-dash-row2:hover { background: var(--c-surface2); }
+.saved-dash-name { font-size: 13px; font-weight: 750; color: var(--c-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.saved-dash-meta { margin-top: 3px; font-family: var(--mono); font-size: 10px; color: var(--c-text3); line-height:1.5; }
+.saved-dash-actions2 { display:flex; flex-wrap:wrap; gap:5px; justify-content:flex-end; max-width: 250px; }
+.saved-dash-action { height: 27px; padding:0 8px; border:1px solid var(--c-border); border-radius:5px; background:var(--c-surface); color:var(--c-text2); font-size:11px; font-weight:650; cursor:pointer; }
+.saved-dash-action:hover { background:var(--c-accent-bg); color:var(--c-accent); border-color:rgba(37,99,235,0.25); }
+.saved-dash-action.danger { color: var(--c-danger); }
+.saved-dash-action.danger:hover { background: rgba(220,38,38,0.08); border-color: rgba(220,38,38,0.25); }
+.saved-dash-empty { padding: 22px 16px; color: var(--c-text3); font-size:12px; line-height:1.55; }
+.saved-dash-count-pill { font-family:var(--mono); font-size:10px; color:var(--c-text3); border:1px solid var(--c-border); background:var(--c-surface2); border-radius:999px; padding:3px 7px; }
+</style>
+
+<script>
+// ==========================================================
+//  DASHBOARD MANAGER UX PATCH
+//  Adds a proper manager panel: load, overwrite, rename, duplicate, delete,
+//  timestamps/search, and toast-style status messages. This intentionally
+//  saves only dashboard references/state; it does NOT save camera JSON.
+// ==========================================================
+(function installDashboardManagerUxPatch(){
+  function ensureToastWrap() {
+    let wrap = document.getElementById('vigilToastWrap');
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.id = 'vigilToastWrap';
+      document.body.appendChild(wrap);
+    }
+    return wrap;
+  }
+
+  window.showVigilToast = function showVigilToast(title, message, type = 'ok', timeout = 3600) {
+    const wrap = ensureToastWrap();
+    const toast = document.createElement('div');
+    toast.className = 'vigil-toast ' + (type || 'ok');
+    toast.innerHTML = '<strong>' + escapeHtml(title || 'Notice') + '</strong>' + (message ? '<div>' + escapeHtml(message) + '</div>' : '');
+    wrap.appendChild(toast);
+    window.setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(6px)';
+      toast.style.transition = 'opacity .18s ease, transform .18s ease';
+      window.setTimeout(() => toast.remove(), 220);
+    }, timeout);
+    return toast;
+  };
+
+  function ensureDashboardNameModal() {
+    let modal = document.getElementById('dashboardNameModal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'dashboardNameModal';
+    modal.innerHTML = `
+      <div class="dashboard-modal-card" role="dialog" aria-modal="true" aria-labelledby="dashboardNameModalTitle">
+        <div class="dashboard-modal-head">
+          <div class="dashboard-modal-title" id="dashboardNameModalTitle">Dashboard</div>
+          <button class="dashboard-modal-btn" id="dashboardNameModalX" type="button">×</button>
+        </div>
+        <div class="dashboard-modal-body">
+          <div class="dashboard-modal-note" id="dashboardNameModalNote"></div>
+          <input class="dashboard-modal-input" id="dashboardNameModalInput" type="text" autocomplete="off" maxlength="90">
+        </div>
+        <div class="dashboard-modal-actions">
+          <button class="dashboard-modal-btn" id="dashboardNameModalCancel" type="button">Cancel</button>
+          <button class="dashboard-modal-btn primary" id="dashboardNameModalOk" type="button">Save</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    return modal;
+  }
+
+  function requestDashboardName(opts = {}) {
+    return new Promise(resolve => {
+      const modal = ensureDashboardNameModal();
+      const title = modal.querySelector('#dashboardNameModalTitle');
+      const note = modal.querySelector('#dashboardNameModalNote');
+      const input = modal.querySelector('#dashboardNameModalInput');
+      const ok = modal.querySelector('#dashboardNameModalOk');
+      const cancel = modal.querySelector('#dashboardNameModalCancel');
+      const x = modal.querySelector('#dashboardNameModalX');
+
+      title.textContent = opts.title || 'Dashboard name';
+      note.textContent = opts.note || 'Give this dashboard a clear operational name.';
+      input.value = opts.value || '';
+      input.placeholder = opts.placeholder || 'e.g. Brisbane river watch';
+      ok.textContent = opts.okText || 'Save';
+
+      let finished = false;
+      function done(value) {
+        if (finished) return;
+        finished = true;
+        modal.classList.remove('open');
+        ok.onclick = cancel.onclick = x.onclick = input.onkeydown = null;
+        resolve(value);
+      }
+      ok.onclick = () => {
+        const value = (input.value || '').trim();
+        if (!value) {
+          input.focus();
+          input.style.borderColor = 'var(--c-danger)';
+          return;
+        }
+        done(value);
+      };
+      cancel.onclick = () => done(null);
+      x.onclick = () => done(null);
+      input.onkeydown = ev => {
+        if (ev.key === 'Enter') ok.click();
+        if (ev.key === 'Escape') done(null);
+      };
+      modal.onclick = ev => { if (ev.target === modal) done(null); };
+      modal.classList.add('open');
+      window.setTimeout(() => { input.focus(); input.select(); input.style.borderColor = ''; }, 30);
+    });
+  }
+
+  async function confirmDashboardAction(title, message, okText = 'Confirm', danger = false) {
+    return new Promise(resolve => {
+      const modal = ensureDashboardNameModal();
+      const t = modal.querySelector('#dashboardNameModalTitle');
+      const note = modal.querySelector('#dashboardNameModalNote');
+      const input = modal.querySelector('#dashboardNameModalInput');
+      const ok = modal.querySelector('#dashboardNameModalOk');
+      const cancel = modal.querySelector('#dashboardNameModalCancel');
+      const x = modal.querySelector('#dashboardNameModalX');
+      t.textContent = title || 'Confirm';
+      note.textContent = message || '';
+      input.style.display = 'none';
+      ok.textContent = okText || 'Confirm';
+      ok.classList.toggle('danger', !!danger);
+      ok.classList.toggle('primary', !danger);
+      let finished = false;
+      function done(value) {
+        if (finished) return;
+        finished = true;
+        modal.classList.remove('open');
+        input.style.display = '';
+        ok.classList.remove('danger');
+        ok.classList.add('primary');
+        ok.onclick = cancel.onclick = x.onclick = null;
+        resolve(value);
+      }
+      ok.onclick = () => done(true);
+      cancel.onclick = () => done(false);
+      x.onclick = () => done(false);
+      modal.onclick = ev => { if (ev.target === modal) done(false); };
+      modal.classList.add('open');
+    });
+  }
+
+  function currentDashboardSummary() {
+    const state = dashboardStateForPreset();
+    const cameras = Array.isArray(state.cameras) ? state.cameras.length : 0;
+    return cameras + ' camera' + (cameras === 1 ? '' : 's') + ' · ' + (state.layout || 'grid') + ' layout';
+  }
+
+  async function upsertDashboardViewByName(name, mode = 'save') {
+    if (!requireSaveAccess()) return null;
+    const client = initSupabaseClient();
+    if (!client || !currentUser) {
+      showVigilToast('Login required', 'You need to be logged in to save dashboards.', 'warn');
+      return null;
+    }
+    const cleanName = String(name || '').trim();
+    if (!cleanName) return null;
+    const views = await getSavedDashboardViews(true);
+    const existing = views.find(v => String(v.name || '').toLowerCase() === cleanName.toLowerCase()) || null;
+    const maxSaved = getPlanLimits().maxSavedDashboards;
+    if (!existing && maxSaved < 999 && views.length >= maxSaved) {
+      showUpgradePrompt('Your current tier allows up to ' + maxSaved + ' saved dashboard views.');
+      return null;
+    }
+    if (existing && mode === 'save') {
+      const ok = await confirmDashboardAction('Overwrite dashboard?', 'A dashboard named "' + cleanName + '" already exists. Overwrite it with the current dashboard?', 'Overwrite', false);
+      if (!ok) return null;
+    }
+    const state = dashboardStateForPreset();
+    const payload = {
+      user_id: currentUser.id,
+      name: cleanName,
+      dashboard_json: state,
+      camera_count: Array.isArray(state.cameras) ? state.cameras.length : 0,
+      updated_at: new Date().toISOString()
+    };
+    let result;
+    if (existing) {
+      result = await client
+        .from('dashboards')
+        .update(payload)
+        .eq('id', existing.id)
+        .eq('user_id', currentUser.id)
+        .select('id,name,dashboard_json,camera_count,created_at,updated_at')
+        .maybeSingle();
+    } else {
+      result = await client
+        .from('dashboards')
+        .insert(payload)
+        .select('id,name,dashboard_json,camera_count,created_at,updated_at')
+        .maybeSingle();
+    }
+    if (result.error) throw result.error;
+    await getSavedDashboardViews(true);
+    updateDashboardSavedViewButtons(false);
+    showVigilToast(existing ? 'Dashboard updated' : 'Dashboard saved', cleanName + ' · ' + currentDashboardSummary(), 'ok');
+    return result.data ? normaliseCloudDashboardRow(result.data) : null;
+  }
+
+  window.saveCurrentDashboardView = async function saveCurrentDashboardViewPatched() {
+    if (!requireSaveAccess()) return;
+    if (!dashboardState.cameras.length) {
+      const ok = await confirmDashboardAction('Save empty dashboard?', 'This dashboard currently has no cameras. Save it anyway?', 'Save empty', false);
+      if (!ok) return;
+    }
+    const existing = await getSavedDashboardViews(true);
+    const suggested = existing.length ? 'Dashboard ' + (existing.length + 1) : 'My first dashboard';
+    const name = await requestDashboardName({
+      title: 'Save dashboard',
+      note: 'Saved dashboards store only camera IDs and layout, not the full camera JSON. ' + currentDashboardSummary(),
+      value: suggested,
+      okText: 'Save'
+    });
+    if (!name) return;
+    try {
+      await upsertDashboardViewByName(name, 'save');
+      await renderSavedDashboardsPanel(false).catch(() => {});
+    } catch (err) {
+      console.warn('Cloud dashboard save failed:', err);
+      showVigilToast('Could not save dashboard', err && err.message ? err.message : String(err), 'err', 5200);
+    }
+  };
+
+  function formatSavedDashDate(value) {
+    if (!value) return 'unknown date';
+    try { return new Date(value).toLocaleString(); } catch (_) { return 'unknown date'; }
+  }
+
+  window.ensureSavedDashboardsPanel = function ensureSavedDashboardsPanelPatched() {
+    let panel = document.getElementById('savedDashboardsPanel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'savedDashboardsPanel';
+      panel.style.cssText = 'position:fixed;top:calc(var(--top-h) + 10px);right:12px;z-index:240;background:var(--c-surface);border:1px solid var(--c-border);border-radius:10px;box-shadow:var(--c-shadow-md);display:none;overflow:hidden;';
+      document.body.appendChild(panel);
+    }
+    panel.classList.add('pro-manager');
+    panel.innerHTML = `
+      <div class="panel-header" style="padding:12px 14px;">
+        <div style="min-width:0;">
+          <div style="font-size:13px;font-weight:750;color:var(--c-text);">My dashboards</div>
+          <div id="savedDashboardsPlanLine" style="font-family:var(--mono);font-size:10px;color:var(--c-text3);margin-top:2px;"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span class="saved-dash-count-pill" id="savedDashboardsCountPill">—</span>
+          <button class="dash-small-btn" id="savedDashboardsRefresh" type="button">Refresh</button>
+          <button class="dash-small-btn" id="savedDashboardsClose" type="button">×</button>
+        </div>
+      </div>
+      <div class="saved-dash-toolbar">
+        <input id="savedDashboardsSearch" type="text" placeholder="Search saved dashboards…">
+        <button class="dash-small-btn" id="savedDashboardsSaveNew" type="button">Save current</button>
+      </div>
+      <div id="savedDashboardsList" style="max-height:min(470px, calc(100vh - 245px));overflow-y:auto;"></div>`;
+    panel.querySelector('#savedDashboardsClose').onclick = () => closeSavedDashboardsPanel();
+    panel.querySelector('#savedDashboardsRefresh').onclick = () => renderSavedDashboardsPanel(true);
+    panel.querySelector('#savedDashboardsSaveNew').onclick = () => saveCurrentDashboardView();
+    panel.querySelector('#savedDashboardsSearch').oninput = () => renderSavedDashboardsPanel(false);
+    return panel;
+  };
+
+  window.openSavedDashboardsPanel = async function openSavedDashboardsPanelPatched() {
+    if (!currentUser) {
+      showUpgradePrompt('Log in to use saved dashboards.');
+      return;
+    }
+    const panel = ensureSavedDashboardsPanel();
+    panel.style.display = 'block';
+    await renderSavedDashboardsPanel(true);
+  };
+
+  window.closeSavedDashboardsPanel = function closeSavedDashboardsPanelPatched() {
+    const panel = document.getElementById('savedDashboardsPanel');
+    if (panel) panel.style.display = 'none';
+  };
+
+  window.renderSavedDashboardsPanel = async function renderSavedDashboardsPanelPatched(forceRefresh = false) {
+    const panel = ensureSavedDashboardsPanel();
+    const list = panel.querySelector('#savedDashboardsList');
+    const searchInput = panel.querySelector('#savedDashboardsSearch');
+    const planLine = panel.querySelector('#savedDashboardsPlanLine');
+    const pill = panel.querySelector('#savedDashboardsCountPill');
+    if (!list) return;
+
+    const limits = getPlanLimits();
+    if (planLine) planLine.textContent = limits.label + ' plan · saved dashboards: ' + (limits.maxSavedDashboards >= 999 ? 'unlimited' : limits.maxSavedDashboards);
+    if (forceRefresh) list.innerHTML = '<div class="saved-dash-empty">Loading saved dashboards…</div>';
+    const viewsAll = await getSavedDashboardViews(forceRefresh);
+    const query = ((searchInput && searchInput.value) || '').trim().toLowerCase();
+    const views = query ? viewsAll.filter(v => String(v.name || '').toLowerCase().includes(query)) : viewsAll;
+    if (pill) pill.textContent = viewsAll.length + '/' + (limits.maxSavedDashboards >= 999 ? '∞' : limits.maxSavedDashboards);
+
+    if (!viewsAll.length) {
+      list.innerHTML = '<div class="saved-dash-empty">No saved dashboards yet.<br>Build a dashboard, then click <strong>Save current</strong>. This stores only dashboard state and camera IDs.</div>';
+      return;
+    }
+    if (!views.length) {
+      list.innerHTML = '<div class="saved-dash-empty">No dashboards match your search.</div>';
+      return;
+    }
+
+    list.innerHTML = views.map(v => {
+      const stateCams = v.state && Array.isArray(v.state.cameras) ? v.state.cameras.length : v.cameraCount || 0;
+      const layout = v.state && v.state.layout ? v.state.layout : 'grid';
+      const grid = v.state && v.state.gridSize ? ' · ' + v.state.gridSize : '';
+      const updated = formatSavedDashDate(v.updatedAt);
+      const created = formatSavedDashDate(v.createdAt);
+      return `
+        <div class="saved-dash-row2" data-id="${escapeHtml(v.id)}">
+          <div style="min-width:0;">
+            <div class="saved-dash-name" title="${escapeHtml(v.name)}">${escapeHtml(v.name)}</div>
+            <div class="saved-dash-meta">${stateCams} camera${stateCams === 1 ? '' : 's'} · ${escapeHtml(layout)}${escapeHtml(grid)}<br>Updated ${escapeHtml(updated)} · Created ${escapeHtml(created)}</div>
+          </div>
+          <div class="saved-dash-actions2">
+            <button class="saved-dash-action saved-dash-load" type="button">Load</button>
+            <button class="saved-dash-action saved-dash-overwrite" type="button">Overwrite</button>
+            <button class="saved-dash-action saved-dash-rename" type="button">Rename</button>
+            <button class="saved-dash-action saved-dash-duplicate" type="button">Duplicate</button>
+            <button class="saved-dash-action danger saved-dash-delete" type="button">Delete</button>
+          </div>
+        </div>`;
+    }).join('');
+
+    function viewFromButton(btn) {
+      const row = btn.closest('.saved-dash-row2');
+      const id = row ? row.dataset.id : '';
+      return viewsAll.find(v => String(v.id) === String(id));
+    }
+
+    list.querySelectorAll('.saved-dash-load').forEach(btn => btn.onclick = async () => {
+      const view = viewFromButton(btn); if (!view) return;
+      closeSavedDashboardsPanel();
+      await loadSavedDashboardViewObject(view);
+      showVigilToast('Dashboard loaded', view.name, 'ok');
+    });
+
+    list.querySelectorAll('.saved-dash-overwrite').forEach(btn => btn.onclick = async () => {
+      const view = viewFromButton(btn); if (!view) return;
+      const ok = await confirmDashboardAction('Overwrite saved dashboard?', 'Replace "' + view.name + '" with your current dashboard? ' + currentDashboardSummary(), 'Overwrite', false);
+      if (!ok) return;
+      try {
+        await overwriteSavedDashboardViewObject(view);
+        await renderSavedDashboardsPanel(true);
+      } catch (err) {
+        console.warn('Overwrite failed:', err);
+        showVigilToast('Could not overwrite dashboard', err && err.message ? err.message : String(err), 'err', 5200);
+      }
+    });
+
+    list.querySelectorAll('.saved-dash-rename').forEach(btn => btn.onclick = async () => {
+      const view = viewFromButton(btn); if (!view) return;
+      const name = await requestDashboardName({ title: 'Rename dashboard', note: 'Choose a new name for this saved dashboard.', value: view.name, okText: 'Rename' });
+      if (!name || name === view.name) return;
+      try {
+        await renameSavedDashboardViewObject(view, name);
+        await renderSavedDashboardsPanel(true);
+      } catch (err) {
+        console.warn('Rename failed:', err);
+        showVigilToast('Could not rename dashboard', err && err.message ? err.message : String(err), 'err', 5200);
+      }
+    });
+
+    list.querySelectorAll('.saved-dash-duplicate').forEach(btn => btn.onclick = async () => {
+      const view = viewFromButton(btn); if (!view) return;
+      const name = await requestDashboardName({ title: 'Duplicate dashboard', note: 'Create a new copy of "' + view.name + '".', value: view.name + ' copy', okText: 'Duplicate' });
+      if (!name) return;
+      try {
+        await duplicateSavedDashboardViewObject(view, name);
+        await renderSavedDashboardsPanel(true);
+      } catch (err) {
+        console.warn('Duplicate failed:', err);
+        showVigilToast('Could not duplicate dashboard', err && err.message ? err.message : String(err), 'err', 5200);
+      }
+    });
+
+    list.querySelectorAll('.saved-dash-delete').forEach(btn => btn.onclick = async () => {
+      const view = viewFromButton(btn); if (!view) return;
+      await deleteSavedDashboardViewObject(view, { useModal: true });
+      await renderSavedDashboardsPanel(true);
+    });
+  };
+
+  window.overwriteSavedDashboardViewObject = async function overwriteSavedDashboardViewObject(view) {
+    if (!currentUser || !view) return;
+    const client = initSupabaseClient();
+    const state = dashboardStateForPreset();
+    const { error } = await client
+      .from('dashboards')
+      .update({ dashboard_json: state, camera_count: state.cameras.length, updated_at: new Date().toISOString() })
+      .eq('id', view.id)
+      .eq('user_id', currentUser.id);
+    if (error) throw error;
+    await getSavedDashboardViews(true);
+    updateDashboardSavedViewButtons(false);
+    showVigilToast('Dashboard overwritten', view.name + ' · ' + currentDashboardSummary(), 'ok');
+  };
+
+  window.renameSavedDashboardViewObject = async function renameSavedDashboardViewObject(view, newName) {
+    if (!currentUser || !view) return;
+    const client = initSupabaseClient();
+    const cleanName = String(newName || '').trim();
+    if (!cleanName) return;
+    const views = await getSavedDashboardViews(false);
+    const duplicate = views.find(v => v.id !== view.id && String(v.name || '').toLowerCase() === cleanName.toLowerCase());
+    if (duplicate) throw new Error('Another dashboard already uses that name.');
+    const { error } = await client
+      .from('dashboards')
+      .update({ name: cleanName, updated_at: new Date().toISOString() })
+      .eq('id', view.id)
+      .eq('user_id', currentUser.id);
+    if (error) throw error;
+    await getSavedDashboardViews(true);
+    updateDashboardSavedViewButtons(false);
+    showVigilToast('Dashboard renamed', cleanName, 'ok');
+  };
+
+  window.duplicateSavedDashboardViewObject = async function duplicateSavedDashboardViewObject(view, newName) {
+    if (!currentUser || !view) return;
+    const client = initSupabaseClient();
+    const views = await getSavedDashboardViews(true);
+    const maxSaved = getPlanLimits().maxSavedDashboards;
+    if (maxSaved < 999 && views.length >= maxSaved) {
+      showUpgradePrompt('Your current tier allows up to ' + maxSaved + ' saved dashboard views.');
+      return;
+    }
+    const cleanName = String(newName || '').trim();
+    if (!cleanName) return;
+    if (views.some(v => String(v.name || '').toLowerCase() === cleanName.toLowerCase())) {
+      throw new Error('Another dashboard already uses that name.');
+    }
+    const state = view.state && typeof view.state === 'object' ? view.state : {};
+    const cameraCount = Array.isArray(state.cameras) ? state.cameras.length : (view.cameraCount || 0);
+    const { error } = await client
+      .from('dashboards')
+      .insert({ user_id: currentUser.id, name: cleanName, dashboard_json: state, camera_count: cameraCount, updated_at: new Date().toISOString() });
+    if (error) throw error;
+    await getSavedDashboardViews(true);
+    updateDashboardSavedViewButtons(false);
+    showVigilToast('Dashboard duplicated', cleanName, 'ok');
+  };
+
+  const originalDelete = window.deleteSavedDashboardViewObject;
+  window.deleteSavedDashboardViewObject = async function deleteSavedDashboardViewObjectPatched(view, opts = {}) {
+    if (!currentUser || !view) {
+      showUpgradePrompt('Log in to delete saved dashboards.');
+      return;
+    }
+    let ok;
+    if (opts && opts.useModal) ok = await confirmDashboardAction('Delete dashboard?', 'Delete "' + view.name + '"? This cannot be undone.', 'Delete', true);
+    else ok = confirm('Delete saved dashboard "' + view.name + '"?');
+    if (!ok) return;
+    const client = initSupabaseClient();
+    if (!client) throw new Error('Supabase is not available.');
+    const { error } = await client
+      .from('dashboards')
+      .delete()
+      .eq('id', view.id)
+      .eq('user_id', currentUser.id);
+    if (error) throw error;
+    await getSavedDashboardViews(true);
+    updateDashboardSavedViewButtons(false);
+    showVigilToast('Dashboard deleted', view.name, 'ok');
+  };
+
+  // If the old panel exists from a previous click, rebuild it next time.
+  const oldPanel = document.getElementById('savedDashboardsPanel');
+  if (oldPanel) oldPanel.remove();
+})();
+</script>
 </body>
 </html>
