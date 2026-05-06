@@ -2042,6 +2042,7 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
   </div>
   <div class="account-menu-actions">
     <button class="account-menu-btn primary" id="btnAccountUpgrade" type="button" onclick="startProCheckout()">Upgrade to Pro</button>
+    <button class="account-menu-btn" id="btnManageBilling" type="button" style="display:none">Manage billing</button>
     <button class="account-menu-btn" id="btnAccountDashboards" type="button">My dashboards</button>
     <button class="account-menu-btn danger" id="btnAccountLogout" type="button">Log out</button>
   </div>
@@ -2544,6 +2545,7 @@ const PLAN_LIMITS = {
 
 let currentUser = null;
 let currentPlan = 'guest';
+let currentProfile = null;
 let authMode = 'login';
 let supabaseClient = null;
 let authInitialised = false;
@@ -2605,6 +2607,7 @@ async function applyAuthSession(session) {
 
   if (!currentUser) {
     currentPlan = 'guest';
+    currentProfile = null;
     dashboardState.cameras = enforceDashboardCameraLimit(dashboardState.cameras);
     updateAuthUI();
     updatePlanUI();
@@ -2627,13 +2630,14 @@ async function loadUserProfile() {
   const client = initSupabaseClient();
   if (!client || !currentUser) {
     currentPlan = 'guest';
+    currentProfile = null;
     return null;
   }
 
   const email = currentUser.email || null;
   let { data: profile, error } = await client
     .from('profiles')
-    .select('user_id,email,plan,subscription_status,current_period_end')
+    .select('user_id,email,plan,subscription_status,current_period_end,lemon_customer_id,lemon_subscription_id')
     .eq('user_id', currentUser.id)
     .maybeSingle();
 
@@ -2645,7 +2649,7 @@ async function loadUserProfile() {
     const insertResult = await client
       .from('profiles')
       .insert({ user_id: currentUser.id, email, plan: 'free', subscription_status: 'none' })
-      .select('user_id,email,plan,subscription_status,current_period_end')
+      .select('user_id,email,plan,subscription_status,current_period_end,lemon_customer_id,lemon_subscription_id')
       .maybeSingle();
     profile = insertResult.data || null;
     if (insertResult.error) console.warn('Profile create error:', insertResult.error.message);
@@ -2653,6 +2657,7 @@ async function loadUserProfile() {
 
   const rawPlan = profile && profile.plan ? String(profile.plan).toLowerCase() : 'free';
   const status = profile && profile.subscription_status ? String(profile.subscription_status).toLowerCase() : 'none';
+  currentProfile = profile || null;
   currentPlan = rawPlan === 'pro' && ['active', 'trialing'].includes(status) ? 'pro' : 'free';
   return profile;
 }
@@ -2715,6 +2720,7 @@ function updateAuthUI() {
   const planBadge = document.getElementById('accountPlanBadge');
   const planNote = document.getElementById('accountPlanNote');
   const upgradeBtn = document.getElementById('btnAccountUpgrade');
+  const billingBtn = document.getElementById('btnManageBilling');
   const email = currentUser && currentUser.email ? currentUser.email : '';
   const limits = getPlanLimits();
   const planName = limits.label || currentPlan || 'Guest';
@@ -2740,6 +2746,7 @@ function updateAuthUI() {
       : 'Guest mode allows a basic map and up to 2 dashboard cameras. Create a free account to save dashboards.';
   }
   if (upgradeBtn) upgradeBtn.style.display = currentPlan === 'pro' ? 'none' : 'block';
+  if (billingBtn) billingBtn.style.display = currentUser && currentPlan === 'pro' ? 'block' : 'none';
 }
 
 function toggleAccountMenu(force) {
@@ -6923,6 +6930,16 @@ document.addEventListener('click', async function handleCloudDashboardButtonClic
 }, true);
 
 
+
+document.addEventListener('click', function handleBillingPortalClick(e) {
+  const billingBtn = e.target && e.target.closest ? e.target.closest('#btnManageBilling') : null;
+  if (!billingBtn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  toggleAccountMenu(false);
+  startBillingPortal();
+}, true);
+
 // Robust delegated Pro upgrade handler. This survives UI re-renders and
 // prevents the account menu close handler from swallowing the click.
 document.addEventListener('click', function handleUpgradeClick(e) {
@@ -7002,7 +7019,61 @@ async function startProCheckout() {
 }
 window.startProCheckout = startProCheckout;
 
+async function startBillingPortal() {
+  try {
+    const client = initSupabaseClient();
+
+    if (!currentUser || !client) {
+      toggleAccountMenu(false);
+      openAuthModal('login');
+      notifyApp('Log in required', 'Please log in before managing billing.', 'warn');
+      return;
+    }
+
+    notifyApp('Opening billing portal', 'Preparing your Lemon Squeezy billing portal…', 'ok');
+
+    const { data: sessionData, error: sessionError } = await client.auth.getSession();
+    const accessToken = sessionData?.session?.access_token;
+
+    if (sessionError || !accessToken) {
+      notifyApp('Session problem', 'Your login session could not be verified. Please log out and log back in.', 'warn');
+      return;
+    }
+
+    const response = await fetch('https://vigil-billing-worker.luke-gowlett.workers.dev/billing-portal', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      console.error('Billing portal failed:', response.status, text);
+      notifyApp('Billing portal unavailable', 'Could not open the billing portal. If this account was manually set to Pro, it may not have a Lemon Squeezy subscription ID yet.', 'error');
+      return;
+    }
+
+    const data = await response.json();
+
+    if (!data || !data.url) {
+      console.error('Invalid billing portal response:', data);
+      notifyApp('Billing portal unavailable', 'The billing server did not return a billing portal URL.', 'error');
+      return;
+    }
+
+    window.location.href = data.url;
+  } catch (err) {
+    console.error('Unable to open billing portal:', err);
+    notifyApp('Billing portal unavailable', 'Unable to open billing portal. Check the browser console and Cloudflare Worker logs.', 'error');
+  }
+}
+window.startBillingPortal = startBillingPortal;
+
+
   const btnAccountUpgrade = document.getElementById('btnAccountUpgrade');
+  const btnManageBilling = document.getElementById('btnManageBilling');
   const btnAccountDashboards = document.getElementById('btnAccountDashboards');
   const authModalClose = document.getElementById('authModalClose');
   const authSubmit = document.getElementById('authSubmit');
@@ -7013,6 +7084,7 @@ window.startProCheckout = startProCheckout;
   if (btnAccountMenu) btnAccountMenu.onclick = e => { e.stopPropagation(); toggleAccountMenu(); };
   if (btnAccountLogout) btnAccountLogout.onclick = async () => { toggleAccountMenu(false); await logoutCurrentUser(); notifyApp('Logged out', 'You are back in guest mode.', 'ok'); };
   if (btnAccountUpgrade) btnAccountUpgrade.onclick = () => { toggleAccountMenu(false); startProCheckout(); };
+  if (btnManageBilling) btnManageBilling.onclick = () => { toggleAccountMenu(false); startBillingPortal(); };
   if (btnAccountDashboards) btnAccountDashboards.onclick = () => { toggleAccountMenu(false); if (typeof openSavedDashboardsPanel === 'function') openSavedDashboardsPanel(); };
   if (authModalClose) authModalClose.onclick = closeAuthModal;
   if (authSubmit) authSubmit.onclick = submitAuthForm;
