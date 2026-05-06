@@ -2041,7 +2041,7 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
     <div class="account-plan-note" id="accountPlanNote">Guest mode allows a basic map and up to 2 dashboard cameras. Create a free account to save dashboards.</div>
   </div>
   <div class="account-menu-actions">
-    <button class="account-menu-btn primary" id="btnAccountUpgrade" type="button">Upgrade to Pro</button>
+    <button class="account-menu-btn primary" id="btnAccountUpgrade" type="button" onclick="startProCheckout()">Upgrade to Pro</button>
     <button class="account-menu-btn" id="btnAccountDashboards" type="button">My dashboards</button>
     <button class="account-menu-btn danger" id="btnAccountLogout" type="button">Log out</button>
   </div>
@@ -6922,6 +6922,18 @@ document.addEventListener('click', async function handleCloudDashboardButtonClic
   }
 }, true);
 
+
+// Robust delegated Pro upgrade handler. This survives UI re-renders and
+// prevents the account menu close handler from swallowing the click.
+document.addEventListener('click', function handleUpgradeClick(e) {
+  const upgradeBtn = e.target && e.target.closest ? e.target.closest('#btnAccountUpgrade') : null;
+  if (!upgradeBtn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  toggleAccountMenu(false);
+  startProCheckout();
+}, true);
+
 // ==========================================================
 //  UI WIRING
 // ==========================================================
@@ -6937,22 +6949,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function startProCheckout() {
   try {
-    if (!currentUser) {
+    const client = initSupabaseClient();
+
+    if (!currentUser || !client) {
       toggleAccountMenu(false);
       openAuthModal('login');
-      showToast('Please log in before upgrading.', 'warn');
+      notifyApp('Log in required', 'Please log in before upgrading to Pro.', 'warn');
       return;
     }
 
-    const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
+    notifyApp('Preparing checkout', 'Opening a secure Lemon Squeezy checkout…', 'ok');
+
+    const { data: sessionData, error: sessionError } = await client.auth.getSession();
     const accessToken = sessionData?.session?.access_token;
 
     if (sessionError || !accessToken) {
-      showToast('Your login session could not be verified. Please log out and log back in.', 'error');
+      notifyApp('Session problem', 'Your login session could not be verified. Please log out and log back in.', 'warn');
       return;
     }
-
-    showToast('Preparing secure checkout…');
 
     const response = await fetch('https://vigil-billing-worker.luke-gowlett.workers.dev/create-checkout', {
       method: 'POST',
@@ -6960,33 +6974,33 @@ async function startProCheckout() {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${accessToken}`
       },
-      body: JSON.stringify({ email: currentUser.email })
+      body: JSON.stringify({
+        email: currentUser.email
+      })
     });
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
       console.error('Checkout creation failed:', response.status, text);
-      showAppMessage(
-        'Checkout unavailable',
-        'The secure checkout could not be created. Check the Cloudflare Worker logs and Lemon Squeezy API settings, then try again.',
-        { primaryLabel: 'OK' }
-      );
+      notifyApp('Checkout unavailable', 'The secure checkout could not be created. Check the Cloudflare Worker logs and Lemon Squeezy settings, then try again.', 'error');
       return;
     }
 
     const data = await response.json();
-    if (!data?.url) {
+
+    if (!data || !data.url) {
       console.error('Invalid checkout response:', data);
-      showToast('Checkout response did not include a URL.', 'error');
+      notifyApp('Checkout unavailable', 'The billing server did not return a checkout URL.', 'error');
       return;
     }
 
     window.location.href = data.url;
   } catch (err) {
     console.error('Unable to start Pro checkout:', err);
-    showToast('Unable to start checkout.', 'error');
+    notifyApp('Checkout unavailable', 'Unable to start checkout. Check the browser console and Cloudflare Worker logs.', 'error');
   }
 }
+window.startProCheckout = startProCheckout;
 
   const btnAccountUpgrade = document.getElementById('btnAccountUpgrade');
   const btnAccountDashboards = document.getElementById('btnAccountDashboards');
