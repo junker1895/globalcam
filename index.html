@@ -8415,5 +8415,524 @@ window.startBillingPortal = startBillingPortal;
 })();
 </script>
 
+
+<script>
+/* ==========================================================
+   PATCH: API-BACKED GLOBAL CAMERA SOURCE
+   ----------------------------------------------------------
+   Purpose:
+   - Stop requiring the 140k-camera JSON in the browser.
+   - Load only visible camera summaries from Supabase bbox RPC.
+   - Fetch full feed URLs only when a camera is selected/dashboarded.
+   - Keep the existing upload workflow available with ?upload=1.
+   ========================================================== */
+(function patchApiBackedCameraSource() {
+  'use strict';
+
+  const CAMERA_API = {
+    enabled: true,
+    projectUrl: (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : 'https://xqppficzlzhhtoaetuma.supabase.co'),
+    anonKey: (typeof SUPABASE_ANON_KEY !== 'undefined' ? SUPABASE_ANON_KEY : 'sb_publishable_uZgctoeLTYIz0dmfmhwc_A_NEuFki3c'),
+    bboxRpc: 'get_cameras_bbox',
+    detailRpc: 'get_camera_detail',
+    debounceMs: 520,
+    minReloadMs: 900,
+    maxResults: 5000,
+    detailConcurrency: 4,
+  };
+
+  const apiState = {
+    mode: 'api',
+    booted: false,
+    loadingVisible: false,
+    lastLoadAt: 0,
+    lastBoundsKey: '',
+    timer: null,
+    loadedIds: new Set(),
+    hydratedIds: new Set(),
+    hydratingIds: new Set(),
+    dashboardHydrateInFlight: false,
+    suppressNextRenderHydrate: false,
+  };
+
+  window.VIGIL_CAMERA_API = CAMERA_API;
+  window.VIGIL_CAMERA_API_STATE = apiState;
+
+  function cameraId(id) {
+    return String(id ?? '');
+  }
+
+  function validCoord(lat, lng) {
+    return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+  }
+
+  function toNumber(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function apiClient() {
+    if (typeof initSupabaseClient === 'function') {
+      const client = initSupabaseClient();
+      if (client) return client;
+    }
+    if (!window.supabase || typeof window.supabase.createClient !== 'function') return null;
+    return window.supabase.createClient(CAMERA_API.projectUrl, CAMERA_API.anonKey, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+    });
+  }
+
+  function normalizeApiCamera(row, full = false) {
+    if (!row) return null;
+    const id = cameraId(row.id);
+    const lat = toNumber(row.latitude ?? row.lat);
+    const lng = toNumber(row.longitude ?? row.lng);
+    if (!id || !validCoord(lat, lng)) return null;
+
+    const views = Array.isArray(row.views)
+      ? row.views.map(v => ({
+          angleName: v?.angleName || v?.label || 'Default',
+          label: v?.label || v?.angleName || 'Default',
+          imageUrl: v?.imageUrl || v?.image_url || null,
+          videoUrl: v?.videoUrl || v?.video_url || null,
+          feedType: v?.feedType || v?.feed_type || (v?.videoUrl || v?.video_url ? 'video' : 'image')
+        })).filter(v => v.imageUrl || v.videoUrl)
+      : [];
+
+    return {
+      id,
+      location: row.name || row.location || id,
+      name: row.name || row.location || id,
+      lat,
+      lng,
+      roadway: row.roadway || row.road || null,
+      road: row.roadway || row.road || null,
+      country: row.country || null,
+      country_code: row.country_code || null,
+      state: row.state || null,
+      county: row.county || null,
+      city: row.city || null,
+      direction: row.direction || null,
+      bearing: toNumber(row.bearing),
+      feedType: row.feed_type || row.feedType || null,
+      imageUrl: row.image_url || row.imageUrl || null,
+      videoUrl: row.video_url || row.videoUrl || null,
+      views,
+      provider: row.provider || row._source || null,
+      _source: row.provider || row._source || null,
+      metadata: row.metadata || null,
+      _apiSummary: !full,
+      _apiDetail: !!full,
+    };
+  }
+
+  function upsertCamera(cam) {
+    if (!cam || !cam.id) return null;
+    const id = cameraId(cam.id);
+    const existing = cameraMap.get(id);
+    const merged = existing ? { ...existing, ...cam } : cam;
+
+    // Preserve full-detail feed URLs once known; summaries must not erase them.
+    if (existing && existing._apiDetail && !cam._apiDetail) {
+      merged.imageUrl = existing.imageUrl;
+      merged.videoUrl = existing.videoUrl;
+      merged.views = existing.views;
+      merged.metadata = existing.metadata;
+      merged._apiDetail = true;
+    }
+
+    cameraMap.set(id, merged);
+    cameraMap.set(merged.id, merged);
+
+    const idx = cameras.findIndex(c => cameraId(c.id) === id);
+    if (idx >= 0) cameras[idx] = merged;
+    else cameras.push(merged);
+
+    return merged;
+  }
+
+  function setApiStatus(text, color) {
+    const status = document.getElementById('statusCameras');
+    if (status) status.textContent = text;
+    if (typeof setStatus === 'function') setStatus(text, color || 'var(--c-text3)');
+    const count = document.getElementById('cameraCount');
+    if (count) count.textContent = `${cameraMap.size.toLocaleString()} cached`;
+  }
+
+  function addApiCameraEntity(cam) {
+    if (!viewer || !dataSource || !cam || !validCoord(cam.lat, cam.lng)) return;
+    if (dataSource.entities.getById(cam.id)) return;
+
+    const heading = typeof inferHeading === 'function' ? inferHeading(cam) : null;
+    const color = typeof getDirColor === 'function'
+      ? getDirColor(heading)
+      : Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.9);
+
+    const entityGraphics = {
+      id: cam.id,
+      position: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, 0),
+      point: {
+        pixelSize: 7,
+        color,
+        outlineColor: Cesium.Color.WHITE.withAlpha(0.8),
+        outlineWidth: 1,
+        scaleByDistance: new Cesium.NearFarScalar(300, 1.8, 400000, 0.6),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: cam.location || cam.name || cam.id,
+        font: '12px Inter, system-ui, sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.fromCssColorString('#0f172a'),
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -10),
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        show: false,
+      }
+    };
+
+    if (heading !== null && typeof cameraArrowCanvasDataUrl === 'function') {
+      const css = typeof cesiumColorToCss === 'function' && typeof getHeadingColorCss === 'function'
+        ? cesiumColorToCss(color, getHeadingColorCss(heading))
+        : '#2563eb';
+      entityGraphics.billboard = {
+        image: cameraArrowCanvasDataUrl(css),
+        width: 20,
+        height: 20,
+        rotation: -Cesium.Math.toRadians(heading),
+        pixelOffset: new Cesium.Cartesian2(0, -13),
+        scaleByDistance: new Cesium.NearFarScalar(300, 1.25, 400000, 0.5),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        heightReference: Cesium.HeightReference.NONE,
+      };
+    }
+
+    const entity = dataSource.entities.add(entityGraphics);
+    entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
+    entity._searchOff = false;
+  }
+
+  function viewBounds() {
+    if (!viewer || !viewer.camera) return { west: -180, south: -85, east: 180, north: 85 };
+    let rect = null;
+    try {
+      rect = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid);
+    } catch (_) {}
+    if (!rect) return { west: -180, south: -85, east: 180, north: 85 };
+
+    let west = Cesium.Math.toDegrees(rect.west);
+    let south = Cesium.Math.toDegrees(rect.south);
+    let east = Cesium.Math.toDegrees(rect.east);
+    let north = Cesium.Math.toDegrees(rect.north);
+
+    west = Math.max(-180, Math.min(180, west));
+    east = Math.max(-180, Math.min(180, east));
+    south = Math.max(-85, Math.min(85, south));
+    north = Math.max(-85, Math.min(85, north));
+
+    // Antimeridian fallback: ask for a global-ish extent rather than failing.
+    if (east < west) return { west: -180, south, east: 180, north };
+    return { west, south, east, north };
+  }
+
+  function boundsKey(b) {
+    const q = 2;
+    return [b.west, b.south, b.east, b.north].map(v => Number(v).toFixed(q)).join(',');
+  }
+
+  async function loadVisibleCamerasFromApi(reason = 'view') {
+    if (!CAMERA_API.enabled || apiState.mode !== 'api') return;
+    if (!viewer || !dataSource) return;
+    const now = Date.now();
+    if (apiState.loadingVisible || now - apiState.lastLoadAt < CAMERA_API.minReloadMs) return;
+
+    const b = viewBounds();
+    const key = boundsKey(b);
+    if (key === apiState.lastBoundsKey && reason !== 'force') return;
+
+    const client = apiClient();
+    if (!client) {
+      setApiStatus('Camera API unavailable', 'var(--c-danger)');
+      return;
+    }
+
+    apiState.loadingVisible = true;
+    apiState.lastLoadAt = now;
+    apiState.lastBoundsKey = key;
+    setApiStatus('Loading visible cameras…', 'var(--c-accent)');
+
+    try {
+      const { data, error } = await client.rpc(CAMERA_API.bboxRpc, {
+        west: b.west,
+        south: b.south,
+        east: b.east,
+        north: b.north,
+        max_results: CAMERA_API.maxResults,
+      });
+      if (error) throw error;
+
+      let added = 0;
+      for (const row of data || []) {
+        const cam = normalizeApiCamera(row, false);
+        if (!cam) continue;
+        const merged = upsertCamera(cam);
+        addApiCameraEntity(merged);
+        if (!apiState.loadedIds.has(merged.id)) {
+          apiState.loadedIds.add(merged.id);
+          added++;
+        }
+      }
+
+      setApiStatus(`${cameraMap.size.toLocaleString()} cameras cached · API`, 'var(--c-success)');
+      if (typeof renderDashboardMap === 'function' && document.body.classList.contains('dashboard-active')) renderDashboardMap();
+      if (typeof updateDashboardBadge === 'function') updateDashboardBadge();
+      if (typeof trackEvent === 'function') trackEvent('camera_api_bbox_loaded', { reason, returned: (data || []).length, added, cached: cameraMap.size });
+    } catch (err) {
+      console.warn('Camera API bbox load failed:', err);
+      setApiStatus('Camera API load failed', 'var(--c-danger)');
+    } finally {
+      apiState.loadingVisible = false;
+    }
+  }
+
+  function scheduleVisibleCameraLoad(reason = 'view') {
+    if (!CAMERA_API.enabled || apiState.mode !== 'api') return;
+    clearTimeout(apiState.timer);
+    apiState.timer = setTimeout(() => loadVisibleCamerasFromApi(reason), CAMERA_API.debounceMs);
+  }
+
+  async function hydrateCameraDetail(id, reason = 'detail') {
+    const key = cameraId(id);
+    if (!key) return null;
+    const existing = cameraMap.get(key);
+    if (existing && existing._apiDetail && ((existing.imageUrl || existing.videoUrl) || (existing.views && existing.views.length))) return existing;
+    if (apiState.hydratingIds.has(key)) {
+      // Wait briefly for an existing request to complete.
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 100));
+        const ready = cameraMap.get(key);
+        if (ready && ready._apiDetail) return ready;
+      }
+      return cameraMap.get(key) || null;
+    }
+
+    const client = apiClient();
+    if (!client) return existing || null;
+    apiState.hydratingIds.add(key);
+    try {
+      const { data, error } = await client.rpc(CAMERA_API.detailRpc, { camera_id: key });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      const cam = normalizeApiCamera(row, true);
+      if (!cam) return existing || null;
+      const merged = upsertCamera(cam);
+      addApiCameraEntity(merged);
+      apiState.hydratedIds.add(key);
+      if (typeof trackEvent === 'function') trackEvent('camera_api_detail_loaded', { camera_id: key, reason });
+      return merged;
+    } catch (err) {
+      console.warn('Camera API detail load failed for', key, err);
+      return existing || null;
+    } finally {
+      apiState.hydratingIds.delete(key);
+    }
+  }
+
+  async function hydrateDashboardMissingCameras() {
+    if (!Array.isArray(dashboardState?.cameras) || !dashboardState.cameras.length) return;
+    if (apiState.dashboardHydrateInFlight) return;
+    const missing = dashboardState.cameras
+      .map(cameraId)
+      .filter(id => {
+        const cam = cameraMap.get(id);
+        return !cam || (!cam._apiDetail && !cam.imageUrl && !cam.videoUrl && !(cam.views && cam.views.length));
+      });
+    if (!missing.length) return;
+
+    apiState.dashboardHydrateInFlight = true;
+    try {
+      for (let i = 0; i < missing.length; i += CAMERA_API.detailConcurrency) {
+        const chunk = missing.slice(i, i + CAMERA_API.detailConcurrency);
+        await Promise.all(chunk.map(id => hydrateCameraDetail(id, 'dashboard')));
+      }
+    } finally {
+      apiState.dashboardHydrateInFlight = false;
+    }
+  }
+
+  function installOverrides() {
+    if (installOverrides.done) return;
+    installOverrides.done = true;
+
+    const originalLoadFile = typeof loadFile === 'function' ? loadFile : null;
+    if (originalLoadFile) {
+      loadFile = function apiAwareLoadFile(file) {
+        apiState.mode = 'upload';
+        CAMERA_API.enabled = false;
+        return originalLoadFile.apply(this, arguments);
+      };
+    }
+
+    const originalGetCameraFeed = typeof getCameraFeed === 'function' ? getCameraFeed : null;
+    if (originalGetCameraFeed) {
+      getCameraFeed = function apiAwareGetCameraFeed(cam) {
+        const firstView = cam?.views && cam.views.length ? cam.views[0] : null;
+        return {
+          imageUrl: cam?.imageUrl || cam?.image_url || firstView?.imageUrl || firstView?.image_url || null,
+          videoUrl: cam?.videoUrl || cam?.video_url || firstView?.videoUrl || firstView?.video_url || null,
+        };
+      };
+    }
+
+    const originalSelectCamera = typeof selectCamera === 'function' ? selectCamera : null;
+    if (originalSelectCamera) {
+      selectCamera = async function apiAwareSelectCamera(cam) {
+        let fullCam = cam;
+        const feed = typeof getCameraFeed === 'function' ? getCameraFeed(cam) : { imageUrl: cam?.imageUrl, videoUrl: cam?.videoUrl };
+        if (apiState.mode === 'api' && cam?.id && !cam._apiDetail && !feed.imageUrl && !feed.videoUrl) {
+          fullCam = await hydrateCameraDetail(cam.id, 'select') || cam;
+        } else if (apiState.mode === 'api' && cam?.id && !cam._apiDetail) {
+          // Still hydrate metadata/source details in the background; do not block UI.
+          hydrateCameraDetail(cam.id, 'select_background').catch(() => {});
+        }
+        return originalSelectCamera.call(this, fullCam);
+      };
+    }
+
+    const originalMountDashboardFeed = typeof mountDashboardFeed === 'function' ? mountDashboardFeed : null;
+    if (originalMountDashboardFeed) {
+      mountDashboardFeed = function apiAwareMountDashboardFeed(cam, idx) {
+        const feed = typeof getCameraFeed === 'function' ? getCameraFeed(cam) : { imageUrl: cam?.imageUrl, videoUrl: cam?.videoUrl };
+        if (apiState.mode === 'api' && cam?.id && !feed.imageUrl && !feed.videoUrl) {
+          const media = document.getElementById(`dash-media-${typeof dashDomId === 'function' ? dashDomId(cam.id) : String(cam.id)}`);
+          if (media) media.innerHTML = '<div class="dash-no-feed">Loading camera details…</div>';
+          hydrateCameraDetail(cam.id, 'dashboard_feed').then(fullCam => {
+            if (fullCam) originalMountDashboardFeed.call(this, fullCam, idx);
+            else if (media) media.innerHTML = '<div class="dash-no-feed">Camera details unavailable</div>';
+          });
+          return;
+        }
+        return originalMountDashboardFeed.call(this, cam, idx);
+      };
+    }
+
+    const originalOpenDashboardFeed = typeof openDashboardFeed === 'function' ? openDashboardFeed : null;
+    if (originalOpenDashboardFeed) {
+      openDashboardFeed = async function apiAwareOpenDashboardFeed(cam) {
+        let fullCam = cam;
+        const feed = typeof getCameraFeed === 'function' ? getCameraFeed(cam) : { imageUrl: cam?.imageUrl, videoUrl: cam?.videoUrl };
+        if (apiState.mode === 'api' && cam?.id && !feed.imageUrl && !feed.videoUrl) {
+          fullCam = await hydrateCameraDetail(cam.id, 'open_feed') || cam;
+        }
+        return originalOpenDashboardFeed.call(this, fullCam);
+      };
+    }
+
+    const originalLocateDashboardCamera = typeof locateDashboardCamera === 'function' ? locateDashboardCamera : null;
+    if (originalLocateDashboardCamera) {
+      locateDashboardCamera = async function apiAwareLocateDashboardCamera(cam) {
+        let fullCam = cam;
+        if (apiState.mode === 'api' && cam?.id && !cam.lat && !cam.lng) {
+          fullCam = await hydrateCameraDetail(cam.id, 'locate') || cam;
+        }
+        return originalLocateDashboardCamera.call(this, fullCam);
+      };
+    }
+
+    const originalRenderDashboard = typeof renderDashboard === 'function' ? renderDashboard : null;
+    if (originalRenderDashboard) {
+      renderDashboard = function apiAwareRenderDashboard() {
+        if (apiState.mode === 'api' && !apiState.suppressNextRenderHydrate) {
+          const missing = Array.isArray(dashboardState?.cameras)
+            ? dashboardState.cameras.some(id => !cameraMap.get(String(id)))
+            : false;
+          if (missing) {
+            hydrateDashboardMissingCameras().then(() => {
+              apiState.suppressNextRenderHydrate = true;
+              try { renderDashboard(); }
+              finally { apiState.suppressNextRenderHydrate = false; }
+            });
+          }
+        }
+        return originalRenderDashboard.apply(this, arguments);
+      };
+    }
+
+    const originalRefreshDashboardAll = typeof refreshDashboardAll === 'function' ? refreshDashboardAll : null;
+    if (originalRefreshDashboardAll) {
+      refreshDashboardAll = async function apiAwareRefreshDashboardAll() {
+        if (apiState.mode === 'api') await hydrateDashboardMissingCameras();
+        return originalRefreshDashboardAll.apply(this, arguments);
+      };
+    }
+  }
+
+  async function bootstrapApiCameraMode() {
+    if (apiState.booted) return;
+    if (new URLSearchParams(location.search).get('upload') === '1') return;
+    apiState.booted = true;
+    apiState.mode = 'api';
+    CAMERA_API.enabled = true;
+
+    installOverrides();
+
+    try {
+      const overlay = document.getElementById('uploadOverlay');
+      const progressWrap = document.getElementById('progressWrap');
+      const progressFill = document.getElementById('progressFill');
+      const progressText = document.getElementById('progressText');
+      if (overlay) overlay.style.display = 'none';
+      if (progressWrap) progressWrap.style.display = 'block';
+      if (progressFill) progressFill.style.width = '20%';
+      if (progressText) progressText.textContent = 'Connecting to global camera index…';
+
+      // Start the app with an empty cache. Visible cameras will stream in from Supabase.
+      cameras = [];
+      cameraMap.clear();
+      if (typeof initializeMap === 'function') await initializeMap();
+
+      if (progressFill) progressFill.style.width = '100%';
+      if (progressText) progressText.textContent = 'Global camera index ready';
+
+      if (viewer?.camera?.moveEnd && typeof viewer.camera.moveEnd.addEventListener === 'function') {
+        viewer.camera.moveEnd.addEventListener(() => scheduleVisibleCameraLoad('globe_move'));
+      }
+
+      // Load the initial viewport shortly after Cesium settles.
+      window.setTimeout(() => loadVisibleCamerasFromApi('initial'), 700);
+      window.setTimeout(() => loadVisibleCamerasFromApi('initial_retry'), 2200);
+
+      // Hydrate saved dashboards by ID even when those cameras are outside the current viewport.
+      if (Array.isArray(dashboardState?.cameras) && dashboardState.cameras.length) {
+        hydrateDashboardMissingCameras().then(() => {
+          if (typeof renderDashboard === 'function') renderDashboard();
+          if (typeof updateDashboardBadge === 'function') updateDashboardBadge();
+        });
+      }
+
+      setApiStatus('Global camera index ready', 'var(--c-success)');
+    } catch (err) {
+      console.error('API camera bootstrap failed:', err);
+      setApiStatus('Global camera startup failed', 'var(--c-danger)');
+      const overlay = document.getElementById('uploadOverlay');
+      if (overlay) overlay.style.display = 'flex';
+    }
+  }
+
+  window.loadVisibleCamerasFromApi = loadVisibleCamerasFromApi;
+  window.hydrateCameraDetail = hydrateCameraDetail;
+  window.bootstrapApiCameraMode = bootstrapApiCameraMode;
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrapApiCameraMode, { once: true });
+  } else {
+    bootstrapApiCameraMode();
+  }
+})();
+</script>
+
 </body>
 </html>
