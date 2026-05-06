@@ -4356,7 +4356,9 @@ function openImageFullscreen() {
     `<body><img src="${currentImageUrl}" alt="Camera feed">
       <div id="lbl">${title}</div>
       <button id="fs" onclick="document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen()">⛶ Fullscreen</button>
-    </body></html>`
+    
+
+</body></html>`
   );
   win.document.close();
 }
@@ -8417,87 +8419,78 @@ window.startBillingPortal = startBillingPortal;
 
 
 <script>
-/* ==========================================================
-   PATCH: API-BACKED GLOBAL CAMERA SOURCE
-   ----------------------------------------------------------
-   Purpose:
-   - Stop requiring the 140k-camera JSON in the browser.
-   - Load only visible camera summaries from Supabase bbox RPC.
-   - Fetch full feed URLs only when a camera is selected/dashboarded.
-   - Keep the existing upload workflow available with ?upload=1.
-   ========================================================== */
-(function patchApiBackedCameraSource() {
+// ==========================================================
+//  SUPABASE CAMERA API MODE — viewport clusters + bbox cameras
+//  This layer deliberately does NOT download the full camera index.
+//  Map discovery uses server-side clusters/bbox summaries. Feed URLs are
+//  fetched only via get_camera_detail when a camera is selected/used.
+// ==========================================================
+(function () {
   'use strict';
 
-  const CAMERA_API = {
-    enabled: true,
-    projectUrl: (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : 'https://xqppficzlzhhtoaetuma.supabase.co'),
-    anonKey: (typeof SUPABASE_ANON_KEY !== 'undefined' ? SUPABASE_ANON_KEY : 'sb_publishable_uZgctoeLTYIz0dmfmhwc_A_NEuFki3c'),
-    bboxRpc: 'get_cameras_bbox',
-    detailRpc: 'get_camera_detail',
-    debounceMs: 520,
-    minReloadMs: 900,
-    maxResults: 5000,
-    detailConcurrency: 4,
-  };
+  const API_MODE = !new URLSearchParams(location.search).has('upload');
+  const API_URL = 'https://xqppficzlzhhtoaetuma.supabase.co/rest/v1/rpc/';
+  const API_KEY = 'sb_publishable_uZgctoeLTYIz0dmfmhwc_A_NEuFki3c';
+  const CAMERA_TOTAL_ESTIMATE = 140601;
 
   const apiState = {
-    mode: 'api',
+    mode: 'idle',
+    requestSeq: 0,
+    moveTimer: null,
+    lastKey: '',
+    lastRefreshAt: 0,
     booted: false,
-    loadingVisible: false,
-    lastLoadAt: 0,
-    lastBoundsKey: '',
-    timer: null,
-    loadedIds: new Set(),
-    hydratedIds: new Set(),
-    hydratingIds: new Set(),
-    dashboardHydrateInFlight: false,
-    suppressNextRenderHydrate: false,
+    detailPromises: new Map(),
+    selectedCluster: null,
   };
 
-  window.VIGIL_CAMERA_API = CAMERA_API;
+  window.VIGIL_CAMERA_API_MODE = API_MODE;
   window.VIGIL_CAMERA_API_STATE = apiState;
 
-  function cameraId(id) {
-    return String(id ?? '');
+  function apiHeaders() {
+    return {
+      apikey: API_KEY,
+      Authorization: `Bearer ${API_KEY}`,
+      'Content-Type': 'application/json',
+    };
   }
 
-  function validCoord(lat, lng) {
-    return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
-  }
-
-  function toNumber(v) {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : null;
-  }
-
-  function apiClient() {
-    if (typeof initSupabaseClient === 'function') {
-      const client = initSupabaseClient();
-      if (client) return client;
-    }
-    if (!window.supabase || typeof window.supabase.createClient !== 'function') return null;
-    return window.supabase.createClient(CAMERA_API.projectUrl, CAMERA_API.anonKey, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+  async function rpc(name, body) {
+    const res = await fetch(API_URL + name, {
+      method: 'POST',
+      headers: apiHeaders(),
+      body: JSON.stringify(body || {}),
     });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`${name} failed ${res.status}: ${text.slice(0, 300)}`);
+    }
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
   }
 
-  function normalizeApiCamera(row, full = false) {
+  function toCamelCamera(row) {
     if (!row) return null;
-    const id = cameraId(row.id);
-    const lat = toNumber(row.latitude ?? row.lat);
-    const lng = toNumber(row.longitude ?? row.lng);
-    if (!id || !validCoord(lat, lng)) return null;
+    const id = row.id == null ? null : String(row.id);
+    const lat = Number(row.latitude ?? row.lat);
+    const lng = Number(row.longitude ?? row.lng);
+    if (!id || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
-    const views = Array.isArray(row.views)
-      ? row.views.map(v => ({
-          angleName: v?.angleName || v?.label || 'Default',
-          label: v?.label || v?.angleName || 'Default',
-          imageUrl: v?.imageUrl || v?.image_url || null,
-          videoUrl: v?.videoUrl || v?.video_url || null,
-          feedType: v?.feedType || v?.feed_type || (v?.videoUrl || v?.video_url ? 'video' : 'image')
-        })).filter(v => v.imageUrl || v.videoUrl)
-      : [];
+    let views = [];
+    if (Array.isArray(row.views)) {
+      views = row.views.map(v => ({
+        angleName: v.angleName || v.label || 'View',
+        imageUrl: v.imageUrl || v.image_url || null,
+        videoUrl: v.videoUrl || v.video_url || null,
+        feedType: v.feedType || v.feed_type || (v.videoUrl || v.video_url ? 'video' : 'image'),
+      })).filter(v => v.imageUrl || v.videoUrl);
+    }
+
+    const imageUrl = row.image_url || row.imageUrl || null;
+    const videoUrl = row.video_url || row.videoUrl || null;
+    if (!views.length && (imageUrl || videoUrl)) {
+      views = [{ angleName: row.direction || 'Default', imageUrl, videoUrl, feedType: row.feed_type || row.feedType || (videoUrl ? 'video' : 'image') }];
+    }
 
     return {
       id,
@@ -8505,6 +8498,8 @@ window.startBillingPortal = startBillingPortal;
       name: row.name || row.location || id,
       lat,
       lng,
+      provider: row.provider || row._source || null,
+      _source: row.provider || row._source || null,
       roadway: row.roadway || row.road || null,
       road: row.roadway || row.road || null,
       country: row.country || null,
@@ -8513,63 +8508,194 @@ window.startBillingPortal = startBillingPortal;
       county: row.county || null,
       city: row.city || null,
       direction: row.direction || null,
-      bearing: toNumber(row.bearing),
-      feedType: row.feed_type || row.feedType || null,
-      imageUrl: row.image_url || row.imageUrl || null,
-      videoUrl: row.video_url || row.videoUrl || null,
+      bearing: row.bearing == null ? null : Number(row.bearing),
+      feedType: row.feed_type || row.feedType || (videoUrl ? 'video' : 'image'),
+      imageUrl,
+      videoUrl,
       views,
-      provider: row.provider || row._source || null,
-      _source: row.provider || row._source || null,
-      metadata: row.metadata || null,
-      _apiSummary: !full,
-      _apiDetail: !!full,
+      metadata: row.metadata || {},
+      _apiSummary: !imageUrl && !videoUrl && !views.length,
+      _apiDetailLoaded: !!(imageUrl || videoUrl || views.length),
     };
   }
 
-  function upsertCamera(cam) {
+  function mergeCamera(cam) {
     if (!cam || !cam.id) return null;
-    const id = cameraId(cam.id);
+    const id = String(cam.id);
     const existing = cameraMap.get(id);
-    const merged = existing ? { ...existing, ...cam } : cam;
-
-    // Preserve full-detail feed URLs once known; summaries must not erase them.
-    if (existing && existing._apiDetail && !cam._apiDetail) {
-      merged.imageUrl = existing.imageUrl;
-      merged.videoUrl = existing.videoUrl;
-      merged.views = existing.views;
-      merged.metadata = existing.metadata;
-      merged._apiDetail = true;
-    }
-
+    const merged = existing ? Object.assign(existing, cam) : cam;
     cameraMap.set(id, merged);
     cameraMap.set(merged.id, merged);
-
-    const idx = cameras.findIndex(c => cameraId(c.id) === id);
-    if (idx >= 0) cameras[idx] = merged;
-    else cameras.push(merged);
-
     return merged;
   }
 
-  function setApiStatus(text, color) {
-    const status = document.getElementById('statusCameras');
-    if (status) status.textContent = text;
-    if (typeof setStatus === 'function') setStatus(text, color || 'var(--c-text3)');
-    const count = document.getElementById('cameraCount');
-    if (count) count.textContent = `${cameraMap.size.toLocaleString()} cached`;
+  function hasFeedDetails(cam) {
+    if (!cam) return false;
+    if (cam.imageUrl || cam.videoUrl) return true;
+    return Array.isArray(cam.views) && cam.views.some(v => v && (v.imageUrl || v.videoUrl));
   }
 
-  function addApiCameraEntity(cam) {
-    if (!viewer || !dataSource || !cam || !validCoord(cam.lat, cam.lng)) return;
-    if (dataSource.entities.getById(cam.id)) return;
+  async function hydrateCameraDetail(idOrCam) {
+    const id = String(typeof idOrCam === 'object' ? idOrCam.id : idOrCam);
+    if (!id || id.startsWith('cluster:')) return null;
+    const existing = cameraMap.get(id);
+    if (existing && hasFeedDetails(existing)) return existing;
+    if (apiState.detailPromises.has(id)) return apiState.detailPromises.get(id);
 
-    const heading = typeof inferHeading === 'function' ? inferHeading(cam) : null;
-    const color = typeof getDirColor === 'function'
-      ? getDirColor(heading)
-      : Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.9);
+    const p = rpc('get_camera_detail', { camera_id: id })
+      .then(rows => {
+        const full = toCamelCamera(rows[0]);
+        if (!full) return existing || null;
+        return mergeCamera(full);
+      })
+      .finally(() => apiState.detailPromises.delete(id));
 
-    const entityGraphics = {
-      id: cam.id,
+    apiState.detailPromises.set(id, p);
+    return p;
+  }
+  window.hydrateCameraDetail = hydrateCameraDetail;
+
+  function cameraHeight() {
+    try { return viewer?.camera?.positionCartographic?.height || 99999999; }
+    catch (_) { return 99999999; }
+  }
+
+  function normLng(lng) {
+    return ((Number(lng) + 540) % 360) - 180;
+  }
+
+  function clampLat(lat) {
+    return Math.max(-85, Math.min(85, Number(lat)));
+  }
+
+  function getViewBboxes() {
+    if (!viewer || !viewer.camera || !viewer.scene) return [{ west: -180, south: -85, east: 180, north: 85 }];
+    let rect = null;
+    try { rect = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid); } catch (_) { rect = null; }
+    if (!rect) return [{ west: -180, south: -85, east: 180, north: 85 }];
+
+    let west = Cesium.Math.toDegrees(rect.west);
+    let east = Cesium.Math.toDegrees(rect.east);
+    let south = clampLat(Cesium.Math.toDegrees(rect.south));
+    let north = clampLat(Cesium.Math.toDegrees(rect.north));
+
+    // At whole-globe distances the computed rectangle can be unstable or too small
+    // while Cesium settles. Use a global cluster query and let the globe occlusion
+    // pass hide points on the far side, mimicking the old uploaded JSON behaviour.
+    if (cameraHeight() > 5200000 || !Number.isFinite(west + east + south + north)) {
+      return [{ west: -180, south: -85, east: 180, north: 85 }];
+    }
+
+    west = normLng(west);
+    east = normLng(east);
+    const latPad = Math.max(0.05, (north - south) * 0.20);
+    south = clampLat(south - latPad);
+    north = clampLat(north + latPad);
+
+    // If the viewport crosses the antimeridian, split into two normal bboxes.
+    if (west <= east) {
+      const pad = Math.max(0.05, (east - west) * 0.20);
+      return [{ west: Math.max(-180, west - pad), south, east: Math.min(180, east + pad), north }];
+    }
+    return [
+      { west: west, south, east: 180, north },
+      { west: -180, south, east: east, north },
+    ];
+  }
+
+  function gridDegreesForHeight(h) {
+    if (h > 10000000) return 8;
+    if (h > 6500000) return 6;
+    if (h > 3500000) return 3.5;
+    if (h > 1800000) return 1.7;
+    if (h > 900000) return 0.85;
+    return 0.45;
+  }
+
+  function shouldUseClusters() {
+    return cameraHeight() > 900000;
+  }
+
+  function requestKey() {
+    const h = Math.round(cameraHeight() / 50000) * 50000;
+    const boxes = getViewBboxes().map(b => [Math.round(b.west * 10), Math.round(b.south * 10), Math.round(b.east * 10), Math.round(b.north * 10)].join(',')).join('|');
+    return `${shouldUseClusters() ? 'clusters' : 'cameras'}:${h}:${boxes}`;
+  }
+
+  function clusterColor(n) {
+    if (n > 5000) return '#dc2626';
+    if (n > 1000) return '#ef4444';
+    if (n > 250) return '#f97316';
+    if (n > 50) return '#2563eb';
+    return '#64748b';
+  }
+
+  function clusterLabel(n) {
+    if (n >= 10000) return `${Math.round(n / 1000)}k`;
+    if (n >= 1000) return `${(n / 1000).toFixed(n >= 9500 ? 0 : 1)}k`;
+    return String(n);
+  }
+
+  function clearCurrentDataSource() {
+    if (viewer && dataSource) {
+      try { viewer.dataSources.remove(dataSource, true); } catch (_) {}
+    }
+    dataSource = new Cesium.CustomDataSource('api-cameras');
+    if (viewer) viewer.dataSources.add(dataSource);
+  }
+
+  function addServerClusterEntity(cluster) {
+    const count = Number(cluster.camera_count || cluster.count || 0);
+    const lat = Number(cluster.latitude);
+    const lng = Number(cluster.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || count <= 0) return;
+    const id = `cluster:${cluster.cluster_id || `${lng.toFixed(3)},${lat.toFixed(3)}`}`;
+    const size = Math.max(13, Math.min(42, 13 + Math.log10(count + 1) * 8));
+    const color = Cesium.Color.fromCssColorString(clusterColor(count)).withAlpha(0.86);
+    const entity = dataSource.entities.add({
+      id,
+      position: Cesium.Cartesian3.fromDegrees(lng, lat, 0),
+      point: {
+        pixelSize: size,
+        color,
+        outlineColor: Cesium.Color.WHITE.withAlpha(0.72),
+        outlineWidth: 1.5,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: clusterLabel(count),
+        font: '700 11px Inter, system-ui, sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.CENTER,
+        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        pixelOffset: new Cesium.Cartesian2(0, 0),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
+    entity._searchOff = false;
+    entity._serverCluster = {
+      id,
+      count,
+      lat,
+      lng,
+      west: Number(cluster.west),
+      south: Number(cluster.south),
+      east: Number(cluster.east),
+      north: Number(cluster.north),
+      gridDegrees: Number(cluster.grid_degrees || 1),
+    };
+  }
+
+  function addCameraEntity(cam) {
+    if (!cam || !cam.id || !Number.isFinite(Number(cam.lat)) || !Number.isFinite(Number(cam.lng))) return;
+    const heading = inferHeading(cam);
+    const color = getDirColor(heading);
+    const graphics = {
+      id: String(cam.id),
       position: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, 0),
       point: {
         pixelSize: 7,
@@ -8591,772 +8717,11 @@ window.startBillingPortal = startBillingPortal;
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
         show: false,
-      }
-    };
-
-    if (heading !== null && typeof cameraArrowCanvasDataUrl === 'function') {
-      const css = typeof cesiumColorToCss === 'function' && typeof getHeadingColorCss === 'function'
-        ? cesiumColorToCss(color, getHeadingColorCss(heading))
-        : '#2563eb';
-      entityGraphics.billboard = {
-        image: cameraArrowCanvasDataUrl(css),
-        width: 20,
-        height: 20,
-        rotation: -Cesium.Math.toRadians(heading),
-        pixelOffset: new Cesium.Cartesian2(0, -13),
-        scaleByDistance: new Cesium.NearFarScalar(300, 1.25, 400000, 0.5),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        heightReference: Cesium.HeightReference.NONE,
-      };
-    }
-
-    const entity = dataSource.entities.add(entityGraphics);
-    entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
-    entity._searchOff = false;
-  }
-
-  function viewBounds() {
-    if (!viewer || !viewer.camera) return { west: -180, south: -85, east: 180, north: 85 };
-    let rect = null;
-    try {
-      rect = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid);
-    } catch (_) {}
-    if (!rect) return { west: -180, south: -85, east: 180, north: 85 };
-
-    let west = Cesium.Math.toDegrees(rect.west);
-    let south = Cesium.Math.toDegrees(rect.south);
-    let east = Cesium.Math.toDegrees(rect.east);
-    let north = Cesium.Math.toDegrees(rect.north);
-
-    west = Math.max(-180, Math.min(180, west));
-    east = Math.max(-180, Math.min(180, east));
-    south = Math.max(-85, Math.min(85, south));
-    north = Math.max(-85, Math.min(85, north));
-
-    // Antimeridian fallback: ask for a global-ish extent rather than failing.
-    if (east < west) return { west: -180, south, east: 180, north };
-    return { west, south, east, north };
-  }
-
-  function boundsKey(b) {
-    const q = 2;
-    return [b.west, b.south, b.east, b.north].map(v => Number(v).toFixed(q)).join(',');
-  }
-
-  async function loadVisibleCamerasFromApi(reason = 'view') {
-    if (!CAMERA_API.enabled || apiState.mode !== 'api') return;
-    if (!viewer || !dataSource) return;
-    const now = Date.now();
-    if (apiState.loadingVisible || now - apiState.lastLoadAt < CAMERA_API.minReloadMs) return;
-
-    const b = viewBounds();
-    const key = boundsKey(b);
-    if (key === apiState.lastBoundsKey && reason !== 'force') return;
-
-    const client = apiClient();
-    if (!client) {
-      setApiStatus('Camera API unavailable', 'var(--c-danger)');
-      return;
-    }
-
-    apiState.loadingVisible = true;
-    apiState.lastLoadAt = now;
-    apiState.lastBoundsKey = key;
-    setApiStatus('Loading visible cameras…', 'var(--c-accent)');
-
-    try {
-      const { data, error } = await client.rpc(CAMERA_API.bboxRpc, {
-        west: b.west,
-        south: b.south,
-        east: b.east,
-        north: b.north,
-        max_results: CAMERA_API.maxResults,
-      });
-      if (error) throw error;
-
-      let added = 0;
-      for (const row of data || []) {
-        const cam = normalizeApiCamera(row, false);
-        if (!cam) continue;
-        const merged = upsertCamera(cam);
-        addApiCameraEntity(merged);
-        if (!apiState.loadedIds.has(merged.id)) {
-          apiState.loadedIds.add(merged.id);
-          added++;
-        }
-      }
-
-      setApiStatus(`${cameraMap.size.toLocaleString()} cameras cached · API`, 'var(--c-success)');
-      if (typeof renderDashboardMap === 'function' && document.body.classList.contains('dashboard-active')) renderDashboardMap();
-      if (typeof updateDashboardBadge === 'function') updateDashboardBadge();
-      if (typeof trackEvent === 'function') trackEvent('camera_api_bbox_loaded', { reason, returned: (data || []).length, added, cached: cameraMap.size });
-    } catch (err) {
-      console.warn('Camera API bbox load failed:', err);
-      setApiStatus('Camera API load failed', 'var(--c-danger)');
-    } finally {
-      apiState.loadingVisible = false;
-    }
-  }
-
-  function scheduleVisibleCameraLoad(reason = 'view') {
-    if (!CAMERA_API.enabled || apiState.mode !== 'api') return;
-    clearTimeout(apiState.timer);
-    apiState.timer = setTimeout(() => loadVisibleCamerasFromApi(reason), CAMERA_API.debounceMs);
-  }
-
-  async function hydrateCameraDetail(id, reason = 'detail') {
-    const key = cameraId(id);
-    if (!key) return null;
-    const existing = cameraMap.get(key);
-    if (existing && existing._apiDetail && ((existing.imageUrl || existing.videoUrl) || (existing.views && existing.views.length))) return existing;
-    if (apiState.hydratingIds.has(key)) {
-      // Wait briefly for an existing request to complete.
-      for (let i = 0; i < 30; i++) {
-        await new Promise(r => setTimeout(r, 100));
-        const ready = cameraMap.get(key);
-        if (ready && ready._apiDetail) return ready;
-      }
-      return cameraMap.get(key) || null;
-    }
-
-    const client = apiClient();
-    if (!client) return existing || null;
-    apiState.hydratingIds.add(key);
-    try {
-      const { data, error } = await client.rpc(CAMERA_API.detailRpc, { camera_id: key });
-      if (error) throw error;
-      const row = Array.isArray(data) ? data[0] : data;
-      const cam = normalizeApiCamera(row, true);
-      if (!cam) return existing || null;
-      const merged = upsertCamera(cam);
-      addApiCameraEntity(merged);
-      apiState.hydratedIds.add(key);
-      if (typeof trackEvent === 'function') trackEvent('camera_api_detail_loaded', { camera_id: key, reason });
-      return merged;
-    } catch (err) {
-      console.warn('Camera API detail load failed for', key, err);
-      return existing || null;
-    } finally {
-      apiState.hydratingIds.delete(key);
-    }
-  }
-
-  async function hydrateDashboardMissingCameras() {
-    if (!Array.isArray(dashboardState?.cameras) || !dashboardState.cameras.length) return;
-    if (apiState.dashboardHydrateInFlight) return;
-    const missing = dashboardState.cameras
-      .map(cameraId)
-      .filter(id => {
-        const cam = cameraMap.get(id);
-        return !cam || (!cam._apiDetail && !cam.imageUrl && !cam.videoUrl && !(cam.views && cam.views.length));
-      });
-    if (!missing.length) return;
-
-    apiState.dashboardHydrateInFlight = true;
-    try {
-      for (let i = 0; i < missing.length; i += CAMERA_API.detailConcurrency) {
-        const chunk = missing.slice(i, i + CAMERA_API.detailConcurrency);
-        await Promise.all(chunk.map(id => hydrateCameraDetail(id, 'dashboard')));
-      }
-    } finally {
-      apiState.dashboardHydrateInFlight = false;
-    }
-  }
-
-  function installOverrides() {
-    if (installOverrides.done) return;
-    installOverrides.done = true;
-
-    const originalLoadFile = typeof loadFile === 'function' ? loadFile : null;
-    if (originalLoadFile) {
-      loadFile = function apiAwareLoadFile(file) {
-        apiState.mode = 'upload';
-        CAMERA_API.enabled = false;
-        return originalLoadFile.apply(this, arguments);
-      };
-    }
-
-    const originalGetCameraFeed = typeof getCameraFeed === 'function' ? getCameraFeed : null;
-    if (originalGetCameraFeed) {
-      getCameraFeed = function apiAwareGetCameraFeed(cam) {
-        const firstView = cam?.views && cam.views.length ? cam.views[0] : null;
-        return {
-          imageUrl: cam?.imageUrl || cam?.image_url || firstView?.imageUrl || firstView?.image_url || null,
-          videoUrl: cam?.videoUrl || cam?.video_url || firstView?.videoUrl || firstView?.video_url || null,
-        };
-      };
-    }
-
-    const originalSelectCamera = typeof selectCamera === 'function' ? selectCamera : null;
-    if (originalSelectCamera) {
-      selectCamera = async function apiAwareSelectCamera(cam) {
-        let fullCam = cam;
-        const feed = typeof getCameraFeed === 'function' ? getCameraFeed(cam) : { imageUrl: cam?.imageUrl, videoUrl: cam?.videoUrl };
-        if (apiState.mode === 'api' && cam?.id && !cam._apiDetail && !feed.imageUrl && !feed.videoUrl) {
-          fullCam = await hydrateCameraDetail(cam.id, 'select') || cam;
-        } else if (apiState.mode === 'api' && cam?.id && !cam._apiDetail) {
-          // Still hydrate metadata/source details in the background; do not block UI.
-          hydrateCameraDetail(cam.id, 'select_background').catch(() => {});
-        }
-        return originalSelectCamera.call(this, fullCam);
-      };
-    }
-
-    const originalMountDashboardFeed = typeof mountDashboardFeed === 'function' ? mountDashboardFeed : null;
-    if (originalMountDashboardFeed) {
-      mountDashboardFeed = function apiAwareMountDashboardFeed(cam, idx) {
-        const feed = typeof getCameraFeed === 'function' ? getCameraFeed(cam) : { imageUrl: cam?.imageUrl, videoUrl: cam?.videoUrl };
-        if (apiState.mode === 'api' && cam?.id && !feed.imageUrl && !feed.videoUrl) {
-          const media = document.getElementById(`dash-media-${typeof dashDomId === 'function' ? dashDomId(cam.id) : String(cam.id)}`);
-          if (media) media.innerHTML = '<div class="dash-no-feed">Loading camera details…</div>';
-          hydrateCameraDetail(cam.id, 'dashboard_feed').then(fullCam => {
-            if (fullCam) originalMountDashboardFeed.call(this, fullCam, idx);
-            else if (media) media.innerHTML = '<div class="dash-no-feed">Camera details unavailable</div>';
-          });
-          return;
-        }
-        return originalMountDashboardFeed.call(this, cam, idx);
-      };
-    }
-
-    const originalOpenDashboardFeed = typeof openDashboardFeed === 'function' ? openDashboardFeed : null;
-    if (originalOpenDashboardFeed) {
-      openDashboardFeed = async function apiAwareOpenDashboardFeed(cam) {
-        let fullCam = cam;
-        const feed = typeof getCameraFeed === 'function' ? getCameraFeed(cam) : { imageUrl: cam?.imageUrl, videoUrl: cam?.videoUrl };
-        if (apiState.mode === 'api' && cam?.id && !feed.imageUrl && !feed.videoUrl) {
-          fullCam = await hydrateCameraDetail(cam.id, 'open_feed') || cam;
-        }
-        return originalOpenDashboardFeed.call(this, fullCam);
-      };
-    }
-
-    const originalLocateDashboardCamera = typeof locateDashboardCamera === 'function' ? locateDashboardCamera : null;
-    if (originalLocateDashboardCamera) {
-      locateDashboardCamera = async function apiAwareLocateDashboardCamera(cam) {
-        let fullCam = cam;
-        if (apiState.mode === 'api' && cam?.id && !cam.lat && !cam.lng) {
-          fullCam = await hydrateCameraDetail(cam.id, 'locate') || cam;
-        }
-        return originalLocateDashboardCamera.call(this, fullCam);
-      };
-    }
-
-    const originalRenderDashboard = typeof renderDashboard === 'function' ? renderDashboard : null;
-    if (originalRenderDashboard) {
-      renderDashboard = function apiAwareRenderDashboard() {
-        if (apiState.mode === 'api' && !apiState.suppressNextRenderHydrate) {
-          const missing = Array.isArray(dashboardState?.cameras)
-            ? dashboardState.cameras.some(id => !cameraMap.get(String(id)))
-            : false;
-          if (missing) {
-            hydrateDashboardMissingCameras().then(() => {
-              apiState.suppressNextRenderHydrate = true;
-              try { renderDashboard(); }
-              finally { apiState.suppressNextRenderHydrate = false; }
-            });
-          }
-        }
-        return originalRenderDashboard.apply(this, arguments);
-      };
-    }
-
-    const originalRefreshDashboardAll = typeof refreshDashboardAll === 'function' ? refreshDashboardAll : null;
-    if (originalRefreshDashboardAll) {
-      refreshDashboardAll = async function apiAwareRefreshDashboardAll() {
-        if (apiState.mode === 'api') await hydrateDashboardMissingCameras();
-        return originalRefreshDashboardAll.apply(this, arguments);
-      };
-    }
-  }
-
-  async function bootstrapApiCameraMode() {
-    if (apiState.booted) return;
-    if (new URLSearchParams(location.search).get('upload') === '1') return;
-    apiState.booted = true;
-    apiState.mode = 'api';
-    CAMERA_API.enabled = true;
-
-    installOverrides();
-
-    try {
-      const overlay = document.getElementById('uploadOverlay');
-      const progressWrap = document.getElementById('progressWrap');
-      const progressFill = document.getElementById('progressFill');
-      const progressText = document.getElementById('progressText');
-      if (overlay) overlay.style.display = 'none';
-      if (progressWrap) progressWrap.style.display = 'block';
-      if (progressFill) progressFill.style.width = '20%';
-      if (progressText) progressText.textContent = 'Connecting to global camera index…';
-
-      // Start the app with an empty cache. Visible cameras will stream in from Supabase.
-      cameras = [];
-      cameraMap.clear();
-      if (typeof initializeMap === 'function') await initializeMap();
-
-      if (progressFill) progressFill.style.width = '100%';
-      if (progressText) progressText.textContent = 'Global camera index ready';
-
-      if (viewer?.camera?.moveEnd && typeof viewer.camera.moveEnd.addEventListener === 'function') {
-        viewer.camera.moveEnd.addEventListener(() => scheduleVisibleCameraLoad('globe_move'));
-      }
-
-      // Load the initial viewport shortly after Cesium settles.
-      window.setTimeout(() => loadVisibleCamerasFromApi('initial'), 700);
-      window.setTimeout(() => loadVisibleCamerasFromApi('initial_retry'), 2200);
-
-      // Hydrate saved dashboards by ID even when those cameras are outside the current viewport.
-      if (Array.isArray(dashboardState?.cameras) && dashboardState.cameras.length) {
-        hydrateDashboardMissingCameras().then(() => {
-          if (typeof renderDashboard === 'function') renderDashboard();
-          if (typeof updateDashboardBadge === 'function') updateDashboardBadge();
-        });
-      }
-
-      setApiStatus('Global camera index ready', 'var(--c-success)');
-    } catch (err) {
-      console.error('API camera bootstrap failed:', err);
-      setApiStatus('Global camera startup failed', 'var(--c-danger)');
-      const overlay = document.getElementById('uploadOverlay');
-      if (overlay) overlay.style.display = 'flex';
-    }
-  }
-
-  window.loadVisibleCamerasFromApi = loadVisibleCamerasFromApi;
-  window.hydrateCameraDetail = hydrateCameraDetail;
-  window.bootstrapApiCameraMode = bootstrapApiCameraMode;
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bootstrapApiCameraMode, { once: true });
-  } else {
-    bootstrapApiCameraMode();
-  }
-})();
-</script>
-
-
-<script>
-/* ==========================================================
-   PATCH: API CAMERA CLUSTERS FOR LOW-ZOOM GLOBAL VIEW
-   ----------------------------------------------------------
-   Purpose:
-   - Keep the anti-scrape API loading model.
-   - Show global/continent coverage using safe aggregate clusters.
-   - Avoid creating 140k Cesium entities at low zoom.
-   Requires Supabase RPC: get_camera_clusters_bbox
-   ========================================================== */
-(function patchApiCameraClusters() {
-  'use strict';
-
-  const CLUSTER_API = {
-    enabled: true,
-    rpc: 'get_camera_clusters_bbox',
-    debounceMs: 650,
-    minReloadMs: 1200,
-    maxClusters: 420,
-    showAboveHeight: 2500000,
-  };
-
-  const clusterState = {
-    dataSource: null,
-    loading: false,
-    lastLoadAt: 0,
-    lastKey: '',
-    timer: null,
-    installedClickWrap: false,
-  };
-
-  window.VIGIL_CAMERA_CLUSTER_API = CLUSTER_API;
-  window.VIGIL_CAMERA_CLUSTER_STATE = clusterState;
-
-  function apiClientForClusters() {
-    if (typeof initSupabaseClient === 'function') {
-      const client = initSupabaseClient();
-      if (client) return client;
-    }
-    if (!window.supabase || typeof window.supabase.createClient !== 'function') return null;
-    const cameraApi = window.VIGIL_CAMERA_API || {};
-    return window.supabase.createClient(
-      cameraApi.projectUrl || 'https://xqppficzlzhhtoaetuma.supabase.co',
-      cameraApi.anonKey || 'sb_publishable_uZgctoeLTYIz0dmfmhwc_A_NEuFki3c',
-      { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } }
-    );
-  }
-
-  function toNumber(v, fallback = null) {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : fallback;
-  }
-
-  function getCameraHeight() {
-    try { return viewer?.camera?.positionCartographic?.height || 0; }
-    catch (_) { return 0; }
-  }
-
-  function shouldShowClusters() {
-    const apiState = window.VIGIL_CAMERA_API_STATE;
-    return !!(CLUSTER_API.enabled && apiState?.mode === 'api' && getCameraHeight() >= CLUSTER_API.showAboveHeight);
-  }
-
-  function currentViewBoundsForClusters() {
-    if (!viewer || !viewer.camera || !Cesium) return { west: -180, south: -85, east: 180, north: 85 };
-    let rect = null;
-    try { rect = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid); } catch (_) {}
-    if (!rect) return { west: -180, south: -85, east: 180, north: 85 };
-
-    let west = Cesium.Math.toDegrees(rect.west);
-    let south = Cesium.Math.toDegrees(rect.south);
-    let east = Cesium.Math.toDegrees(rect.east);
-    let north = Cesium.Math.toDegrees(rect.north);
-
-    west = Math.max(-180, Math.min(180, west));
-    east = Math.max(-180, Math.min(180, east));
-    south = Math.max(-85, Math.min(85, south));
-    north = Math.max(-85, Math.min(85, north));
-    if (east < west) return { west: -180, south, east: 180, north };
-    return { west, south, east, north };
-  }
-
-  function gridDegreesForView(bounds) {
-    const width = Math.max(1, Math.abs(bounds.east - bounds.west));
-    const height = Math.max(1, Math.abs(bounds.north - bounds.south));
-    const span = Math.max(width, height);
-    const cameraHeight = getCameraHeight();
-
-    if (span > 250 || cameraHeight > 25000000) return 8;
-    if (span > 150 || cameraHeight > 14000000) return 5;
-    if (span > 80 || cameraHeight > 8000000) return 3;
-    if (span > 35 || cameraHeight > 4500000) return 1.5;
-    return 0.75;
-  }
-
-  function clustersKey(bounds, grid) {
-    return [bounds.west, bounds.south, bounds.east, bounds.north, grid]
-      .map(v => Number(v).toFixed(2))
-      .join(',');
-  }
-
-  function ensureClusterDataSource() {
-    if (clusterState.dataSource) return clusterState.dataSource;
-    if (!viewer || !Cesium) return null;
-    const ds = new Cesium.CustomDataSource('camera-clusters');
-    clusterState.dataSource = ds;
-    viewer.dataSources.add(ds);
-    return ds;
-  }
-
-  function clearClusters() {
-    if (clusterState.dataSource) clusterState.dataSource.entities.removeAll();
-  }
-
-  function clusterColor(count) {
-    if (count >= 5000) return '#dc2626';
-    if (count >= 1000) return '#f97316';
-    if (count >= 250) return '#2563eb';
-    return '#64748b';
-  }
-
-  function addClusterEntity(cluster) {
-    const ds = ensureClusterDataSource();
-    if (!ds || !cluster) return;
-    const count = toNumber(cluster.camera_count ?? cluster.count, 0);
-    const lat = toNumber(cluster.latitude ?? cluster.lat);
-    const lng = toNumber(cluster.longitude ?? cluster.lng);
-    if (!count || lat === null || lng === null) return;
-
-    const radius = Math.max(22, Math.min(58, 18 + Math.log10(count + 1) * 13));
-    const id = `camera-cluster-${cluster.cluster_id || `${lng.toFixed(2)}-${lat.toFixed(2)}`}`;
-    const color = Cesium.Color.fromCssColorString(clusterColor(count)).withAlpha(0.88);
-
-    const labelText = count >= 1000
-      ? `${(count / 1000).toFixed(count >= 10000 ? 0 : 1)}k`
-      : String(count);
-
-    const entity = ds.entities.add({
-      id,
-      position: Cesium.Cartesian3.fromDegrees(lng, lat, 0),
-      point: {
-        pixelSize: radius,
-        color,
-        outlineColor: Cesium.Color.WHITE.withAlpha(0.9),
-        outlineWidth: 2,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        scaleByDistance: new Cesium.NearFarScalar(500000, 1.0, 50000000, 0.78),
       },
-      label: {
-        text: labelText,
-        font: '700 13px Inter, system-ui, sans-serif',
-        fillColor: Cesium.Color.WHITE,
-        outlineColor: Cesium.Color.fromCssColorString('#0f172a'),
-        outlineWidth: 3,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        verticalOrigin: Cesium.VerticalOrigin.CENTER,
-        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      }
-    });
-
-    entity._isCameraCluster = true;
-    entity._clusterInfo = {
-      count,
-      lat,
-      lng,
-      west: toNumber(cluster.west, lng - 1),
-      south: toNumber(cluster.south, lat - 1),
-      east: toNumber(cluster.east, lng + 1),
-      north: toNumber(cluster.north, lat + 1),
-      grid: toNumber(cluster.grid_degrees, 1),
     };
-  }
-
-  async function loadCameraClusters(reason = 'view') {
-    if (!shouldShowClusters()) {
-      clearClusters();
-      return;
-    }
-    if (!viewer || !Cesium) return;
-
-    const now = Date.now();
-    if (clusterState.loading || now - clusterState.lastLoadAt < CLUSTER_API.minReloadMs) return;
-
-    const bounds = currentViewBoundsForClusters();
-    const grid = gridDegreesForView(bounds);
-    const key = clustersKey(bounds, grid);
-    if (key === clusterState.lastKey && reason !== 'force') return;
-
-    const client = apiClientForClusters();
-    if (!client) return;
-
-    clusterState.loading = true;
-    clusterState.lastLoadAt = now;
-    clusterState.lastKey = key;
-
-    try {
-      const { data, error } = await client.rpc(CLUSTER_API.rpc, {
-        west: bounds.west,
-        south: bounds.south,
-        east: bounds.east,
-        north: bounds.north,
-        grid_degrees: grid,
-        max_clusters: CLUSTER_API.maxClusters,
-      });
-      if (error) throw error;
-
-      clearClusters();
-      for (const cluster of data || []) addClusterEntity(cluster);
-
-      const total = (data || []).reduce((sum, c) => sum + toNumber(c.camera_count ?? c.count, 0), 0);
-      const countEl = document.getElementById('cameraCount');
-      if (countEl) countEl.textContent = `${total.toLocaleString()} indexed`;
-      const status = document.getElementById('statusCameras');
-      if (status) status.textContent = `${(data || []).length.toLocaleString()} clusters · ${total.toLocaleString()} cameras`;
-      if (typeof trackEvent === 'function') {
-        trackEvent('camera_api_clusters_loaded', { reason, clusters: (data || []).length, total, grid });
-      }
-    } catch (err) {
-      console.warn('Camera cluster API load failed:', err);
-    } finally {
-      clusterState.loading = false;
-    }
-  }
-
-  function scheduleClusterLoad(reason = 'view') {
-    clearTimeout(clusterState.timer);
-    clusterState.timer = setTimeout(() => loadCameraClusters(reason), CLUSTER_API.debounceMs);
-  }
-
-  function installClusterClickHandler() {
-    if (clusterState.installedClickWrap || !viewer?.screenSpaceEventHandler || !Cesium) return;
-    const handler = viewer.screenSpaceEventHandler;
-    const original = typeof handler.getInputAction === 'function'
-      ? handler.getInputAction(Cesium.ScreenSpaceEventType.LEFT_CLICK)
-      : null;
-
-    handler.setInputAction(click => {
-      const picked = viewer.scene.pick(click.position);
-      const entity = picked && picked.id;
-      if (entity && entity._isCameraCluster && entity._clusterInfo) {
-        const info = entity._clusterInfo;
-        const nextHeight = Math.max(300000, getCameraHeight() * 0.38);
-        viewer.camera.flyTo({
-          destination: Cesium.Cartesian3.fromDegrees(info.lng, info.lat, nextHeight),
-          duration: 0.8,
-        });
-        window.setTimeout(() => {
-          if (typeof window.loadVisibleCamerasFromApi === 'function') window.loadVisibleCamerasFromApi('cluster_click');
-          scheduleClusterLoad('cluster_click');
-        }, 950);
-        return;
-      }
-      if (typeof original === 'function') return original(click);
-    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
-
-    clusterState.installedClickWrap = true;
-  }
-
-  function installClusterLoader() {
-    if (!viewer || !Cesium) {
-      window.setTimeout(installClusterLoader, 500);
-      return;
-    }
-    ensureClusterDataSource();
-    installClusterClickHandler();
-
-    if (viewer.camera?.moveEnd && typeof viewer.camera.moveEnd.addEventListener === 'function') {
-      viewer.camera.moveEnd.addEventListener(() => scheduleClusterLoad('globe_move'));
-    }
-
-    window.setTimeout(() => loadCameraClusters('initial'), 1100);
-    window.setTimeout(() => loadCameraClusters('initial_retry'), 3200);
-  }
-
-  window.loadCameraClustersFromApi = loadCameraClusters;
-  window.clearCameraClusters = clearClusters;
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', installClusterLoader, { once: true });
-  } else {
-    installClusterLoader();
-  }
-})();
-</script>
-
-
-<script>
-/* ==========================================================
-   PATCH: GLOBAL CAMERA SEARCH + RELIABLE STARTUP CLUSTERS
-   ----------------------------------------------------------
-   Adds:
-   - Global Supabase search_cameras RPC for top search and dashboard Add Camera.
-   - Stable camera summary caching without exposing feed URLs until detail hydration.
-   - Forced global startup cluster load so first render does not depend on Cesium's
-     initial computeViewRectangle timing.
-   ========================================================== */
-(function patchGlobalCameraSearchAndStartupClusters() {
-  'use strict';
-
-  const API = {
-    projectUrl: (window.VIGIL_CAMERA_API && window.VIGIL_CAMERA_API.projectUrl) || (typeof SUPABASE_URL !== 'undefined' ? SUPABASE_URL : 'https://xqppficzlzhhtoaetuma.supabase.co'),
-    anonKey: (window.VIGIL_CAMERA_API && window.VIGIL_CAMERA_API.anonKey) || (typeof SUPABASE_ANON_KEY !== 'undefined' ? SUPABASE_ANON_KEY : 'sb_publishable_uZgctoeLTYIz0dmfmhwc_A_NEuFki3c'),
-    searchRpc: 'search_cameras',
-    clusterRpc: 'get_camera_clusters_bbox',
-    searchLimit: 80,
-  };
-
-  function client() {
-    if (typeof initSupabaseClient === 'function') {
-      const c = initSupabaseClient();
-      if (c) return c;
-    }
-    if (!window.supabase || typeof window.supabase.createClient !== 'function') return null;
-    return window.supabase.createClient(API.projectUrl, API.anonKey, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
-    });
-  }
-
-  function toNumber(v, fallback = null) {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : fallback;
-  }
-
-  function validCoord(lat, lng) {
-    return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
-  }
-
-  function normalizeCameraSummary(row) {
-    if (!row) return null;
-    const id = String(row.id ?? '');
-    const lat = toNumber(row.latitude ?? row.lat);
-    const lng = toNumber(row.longitude ?? row.lng);
-    if (!id || !validCoord(lat, lng)) return null;
-    return {
-      id,
-      location: row.name || row.location || id,
-      name: row.name || row.location || id,
-      lat,
-      lng,
-      roadway: row.roadway || row.road || null,
-      road: row.roadway || row.road || null,
-      country: row.country || null,
-      country_code: row.country_code || null,
-      state: row.state || null,
-      county: row.county || null,
-      city: row.city || null,
-      direction: row.direction || null,
-      bearing: toNumber(row.bearing),
-      feedType: row.feed_type || row.feedType || null,
-      provider: row.provider || row._source || null,
-      _source: row.provider || row._source || null,
-      _apiSummary: true,
-      _apiDetail: false,
-    };
-  }
-
-  function cacheCamera(cam) {
-    if (!cam || !cam.id || typeof cameraMap === 'undefined' || !Array.isArray(cameras)) return cam;
-    const key = String(cam.id);
-    const existing = cameraMap.get(key);
-    const merged = existing ? { ...existing, ...cam } : cam;
-
-    // Never let a search summary erase already hydrated feed details.
-    if (existing && existing._apiDetail && !cam._apiDetail) {
-      merged.imageUrl = existing.imageUrl;
-      merged.videoUrl = existing.videoUrl;
-      merged.views = existing.views;
-      merged.metadata = existing.metadata;
-      merged._apiDetail = true;
-    }
-
-    cameraMap.set(key, merged);
-    cameraMap.set(merged.id, merged);
-    const idx = cameras.findIndex(c => String(c.id) === key);
-    if (idx >= 0) cameras[idx] = merged;
-    else cameras.push(merged);
-    return merged;
-  }
-
-  function addGlobeEntityForCamera(cam) {
-    if (!cam || !validCoord(cam.lat, cam.lng)) return;
-    if (typeof dataSource === 'undefined' || !dataSource || typeof viewer === 'undefined' || !viewer || typeof Cesium === 'undefined') return;
-    if (dataSource.entities.getById(cam.id)) return;
-
-    const heading = typeof inferHeading === 'function' ? inferHeading(cam) : null;
-    const color = typeof getDirColor === 'function'
-      ? getDirColor(heading)
-      : Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.9);
-
-    const graphics = {
-      id: cam.id,
-      position: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, 0),
-      point: {
-        pixelSize: 8,
-        color,
-        outlineColor: Cesium.Color.WHITE.withAlpha(0.8),
-        outlineWidth: 1,
-        scaleByDistance: new Cesium.NearFarScalar(300, 1.8, 400000, 0.6),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-      label: {
-        text: cam.location || cam.name || cam.id,
-        font: '12px Inter, system-ui, sans-serif',
-        fillColor: Cesium.Color.WHITE,
-        outlineColor: Cesium.Color.fromCssColorString('#0f172a'),
-        outlineWidth: 3,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-        pixelOffset: new Cesium.Cartesian2(0, -10),
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        show: false,
-      }
-    };
-
-    if (heading !== null && typeof cameraArrowCanvasDataUrl === 'function') {
-      const css = typeof cesiumColorToCss === 'function' && typeof getHeadingColorCss === 'function'
-        ? cesiumColorToCss(color, getHeadingColorCss(heading))
-        : '#2563eb';
+    if (heading !== null) {
       graphics.billboard = {
-        image: cameraArrowCanvasDataUrl(css),
+        image: cameraArrowCanvasDataUrl(cesiumColorToCss(color, getHeadingColorCss(heading))),
         width: 20,
         height: 20,
         rotation: -Cesium.Math.toRadians(heading),
@@ -9366,337 +8731,335 @@ window.startBillingPortal = startBillingPortal;
         heightReference: Cesium.HeightReference.NONE,
       };
     }
-
     const entity = dataSource.entities.add(graphics);
     entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
     entity._searchOff = false;
   }
 
-  async function searchCameraIndex(query, limit = API.searchLimit) {
-    const q = String(query || '').trim();
-    if (q.length < 2) return [];
-    const c = client();
-    if (!c) throw new Error('Supabase camera search unavailable');
-    const { data, error } = await c.rpc(API.searchRpc, {
-      search_text: q,
-      max_results: limit,
+  function renderApiEntities(items, mode) {
+    clearCurrentDataSource();
+    apiState.mode = mode;
+    if (mode === 'clusters') {
+      items.forEach(addServerClusterEntity);
+      document.getElementById('statusCameras').textContent = `${items.length.toLocaleString()} clusters · ${CAMERA_TOTAL_ESTIMATE.toLocaleString()} cameras`;
+      document.getElementById('cameraCount').textContent = `${CAMERA_TOTAL_ESTIMATE.toLocaleString()} indexed`;
+    } else {
+      cameras = items.map(mergeCamera).filter(Boolean);
+      items.forEach(addCameraEntity);
+      document.getElementById('statusCameras').textContent = `${items.length.toLocaleString()} visible cameras · API`;
+      document.getElementById('cameraCount').textContent = `${CAMERA_TOTAL_ESTIMATE.toLocaleString()} indexed`;
+    }
+    try { dataSource.clustering.enabled = false; } catch (_) {}
+    if (viewer) viewer.scene.requestRender();
+  }
+
+  async function fetchClustersForView(seq) {
+    const boxes = getViewBboxes();
+    const grid = gridDegreesForHeight(cameraHeight());
+    const parts = await Promise.all(boxes.map(b => rpc('get_camera_clusters_bbox', {
+      west: b.west, south: b.south, east: b.east, north: b.north,
+      grid_degrees: grid,
+      max_clusters: 1000,
+    })));
+    if (seq !== apiState.requestSeq) return;
+    const seen = new Set();
+    const clusters = [];
+    parts.flat().forEach(c => {
+      const key = c.cluster_id || `${c.longitude},${c.latitude}`;
+      if (seen.has(key)) return;
+      seen.add(key); clusters.push(c);
     });
-    if (error) throw error;
-    return (data || []).map(normalizeCameraSummary).filter(Boolean).map(cacheCamera);
+    renderApiEntities(clusters, 'clusters');
   }
 
-  function resultMeta(cam) {
-    return [cam.roadway || cam.road, cam.city, cam.state, cam.country, cam.provider]
-      .filter(Boolean)
-      .join(' · ') || cam.id;
+  async function fetchCamerasForView(seq) {
+    const boxes = getViewBboxes();
+    const parts = await Promise.all(boxes.map(b => rpc('get_cameras_bbox', {
+      west: b.west, south: b.south, east: b.east, north: b.north,
+      max_results: 5000,
+    })));
+    if (seq !== apiState.requestSeq) return;
+    const seen = new Set();
+    const rows = [];
+    parts.flat().forEach(r => {
+      const cam = toCamelCamera(r);
+      if (!cam || seen.has(cam.id)) return;
+      seen.add(cam.id); rows.push(cam);
+    });
+    renderApiEntities(rows, 'cameras');
   }
 
-  async function hydrateIfNeeded(cam, reason) {
-    if (!cam) return cam;
-    if (typeof window.hydrateCameraDetail === 'function') {
-      return await window.hydrateCameraDetail(cam.id, reason || 'search') || cam;
-    }
-    return cam;
-  }
-
-  async function addSearchCameraToDashboard(cam, button) {
-    const fullCam = await hydrateIfNeeded(cam, 'add_camera_search');
-    if (typeof addCameraToDashboard === 'function' && addCameraToDashboard(fullCam)) {
-      if (button) {
-        button.textContent = 'Added';
-        button.disabled = true;
+  async function refreshApiViewport(force = false) {
+    if (!API_MODE || !apiState.booted || !viewer || activeView === 'dashboard') return;
+    const key = requestKey();
+    const now = Date.now();
+    if (!force && key === apiState.lastKey && now - apiState.lastRefreshAt < 1500) return;
+    apiState.lastKey = key;
+    apiState.lastRefreshAt = now;
+    const seq = ++apiState.requestSeq;
+    const status = document.getElementById('statusCameras');
+    if (status) status.textContent = shouldUseClusters() ? 'Loading clusters…' : 'Loading visible cameras…';
+    try {
+      if (shouldUseClusters()) await fetchClustersForView(seq);
+      else await fetchCamerasForView(seq);
+    } catch (err) {
+      if (seq === apiState.requestSeq) {
+        console.error('Camera API viewport refresh failed:', err);
+        if (status) status.textContent = 'Camera API error';
       }
-      if (typeof updateDashboardBadge === 'function') updateDashboardBadge();
-      return true;
     }
-    return false;
+  }
+  window.refreshApiViewport = refreshApiViewport;
+
+  function scheduleApiViewportRefresh(force = false) {
+    if (!API_MODE) return;
+    clearTimeout(apiState.moveTimer);
+    apiState.moveTimer = setTimeout(() => refreshApiViewport(force), force ? 60 : 420);
   }
 
-  function showTopSearchResults(results, query) {
+  function zoomToServerCluster(cluster) {
+    if (!cluster || !viewer) return;
+    const pad = Math.max(0.08, (cluster.gridDegrees || 1) * 0.9);
+    const west = Math.max(-180, Math.min(180, cluster.west - pad));
+    const east = Math.max(-180, Math.min(180, cluster.east + pad));
+    const south = clampLat(cluster.south - pad);
+    const north = clampLat(cluster.north + pad);
+    viewer.camera.flyTo({
+      destination: Cesium.Rectangle.fromDegrees(west, south, east, north),
+      duration: 0.85,
+      complete: () => scheduleApiViewportRefresh(true),
+      cancel: () => scheduleApiViewportRefresh(true),
+    });
+  }
+
+  function installApiClickHandler() {
+    if (!viewer || !viewer.screenSpaceEventHandler) return;
+    viewer.screenSpaceEventHandler.setInputAction(async click => {
+      if (areaSelection.active && areaSelection.source === 'globe') {
+        addGlobeAreaPointFromClick(click.position);
+        return;
+      }
+      const picked = viewer.scene.pick(click.position);
+      if (!picked || !picked.id) { deselect(); return; }
+      const entity = picked.id;
+      if (entity && entity._uploadedLayerFeatureIndex !== undefined && entity._uploadedLayerFeatureIndex !== null) {
+        selectUploadedLayerFeature(entity._uploadedLayerFeatureIndex);
+        return;
+      }
+      if (entity._serverCluster) {
+        zoomToServerCluster(entity._serverCluster);
+        return;
+      }
+      if (typeof entity.id === 'string' && entity.id.startsWith('selected-camera-marker-') && selectedCamera) {
+        selectCamera(selectedCamera);
+        return;
+      }
+      const id = String(entity.id || '');
+      const cam = cameraMap.get(id) || cameras.find(c => String(c.id) === id);
+      if (cam) { await selectCamera(cam); return; }
+      const cartesian = viewer.scene.pickPosition(click.position);
+      if (cartesian) {
+        const height = viewer.camera.positionCartographic.height;
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.add(cartesian, new Cesium.Cartesian3(0, 0, height * 0.1), new Cesium.Cartesian3()),
+          duration: 0.7,
+          complete: () => scheduleApiViewportRefresh(true),
+        });
+      }
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+  }
+
+  const originalSelectCamera = window.selectCamera || selectCamera;
+  selectCamera = async function apiSelectCamera(cam) {
+    const full = await hydrateCameraDetail(cam).catch(err => { console.warn('Camera detail failed:', err); return cam; });
+    return originalSelectCamera(full || cam);
+  };
+
+  const originalAddCameraToDashboard = window.addCameraToDashboard || addCameraToDashboard;
+  addCameraToDashboard = function apiAddCameraToDashboard(cam, options = {}) {
+    if (!cam || !cam.id) return false;
+    mergeCamera(cam);
+    const result = originalAddCameraToDashboard(cam, options);
+    hydrateCameraDetail(cam).then(full => {
+      if (full && dashboardState.cameras.includes(String(full.id))) {
+        renderDashboard();
+        if (dashboardMap) renderDashboardMap();
+      }
+    }).catch(err => console.warn('Dashboard camera hydrate failed:', err));
+    return result;
+  };
+
+  const originalOpenDashboardAddPanel = window.openDashboardAddPanel || openDashboardAddPanel;
+  openDashboardAddPanel = function apiOpenDashboardAddPanel() {
+    originalOpenDashboardAddPanel();
+    renderDashboardLocalResults('');
+  };
+
+  async function searchCameraSummaries(query, max = 40) {
+    const q = (query || '').trim();
+    if (q.length < 2) return [];
+    const rows = await rpc('search_cameras', { search_text: q, max_results: max });
+    return rows.map(toCamelCamera).filter(Boolean).map(mergeCamera);
+  }
+
+  async function runApiCameraSearch(query, { dashboard = false } = {}) {
+    const q = (query || '').trim();
+    if (!q) { clearSearchResults(); return; }
+    const statusEl = document.getElementById('statusCameras');
+    if (statusEl && !dashboard) statusEl.textContent = 'Searching cameras…';
+    let results = [];
+    try { results = await searchCameraSummaries(q, dashboard ? 50 : 30); }
+    catch (err) { console.error('Camera search failed:', err); }
+    return results;
+  }
+
+  runLocationSearch = async function apiRunLocationSearch(query) {
+    const q = (query || '').trim();
+    if (!q) { clearSearchResults(); return; }
+    clearSearchResults();
+    const results = await runApiCameraSearch(q, { dashboard: false });
     const panel = document.getElementById('searchResults');
     const list = document.getElementById('searchResultsList');
     const statusEl = document.getElementById('statusCameras');
-    if (!panel || !list) return;
+    if (!list || !panel) return;
 
     if (!results.length) {
-      list.innerHTML = `<div class="sr-item"><div class="sr-name">No cameras found</div><div class="sr-meta">Try a road, city, state, country, provider, or camera ID.</div></div>`;
+      list.innerHTML = `<div class="sr-item"><div class="sr-name">No matching cameras</div><div class="sr-meta">Try a road, place, state, provider, or camera ID.</div></div>`;
       panel.style.display = 'block';
-      if (statusEl) statusEl.textContent = `No camera matches for "${query}"`;
+      if (statusEl) statusEl.textContent = 'No camera matches';
       return;
     }
 
-    searchResultCameras = results.slice(0, 25);
     list.innerHTML = '';
-
-    results.slice(0, 25).forEach(cam => {
-      addGlobeEntityForCamera(cam);
+    results.forEach(cam => {
       const item = document.createElement('div');
       item.className = 'sr-item';
-      const heading = typeof inferHeading === 'function' ? inferHeading(cam) : null;
-      const dirBadge = heading !== null
-        ? `<span class="sr-dir">${['N','NE','E','SE','S','SW','W','NW'][heading/45]}</span>`
-        : '';
-      const exists = Array.isArray(dashboardState?.cameras) && dashboardState.cameras.includes(String(cam.id));
+      const exists = dashboardState.cameras.includes(String(cam.id));
+      const meta = [cam.roadway || cam.road, cam.city, cam.state, cam.country].filter(Boolean).join(' · ') || cam.id;
       item.innerHTML = `
         <div class="sr-row-main">
           <div class="sr-row-text">
-            <div class="sr-name">${typeof escapeHtml === 'function' ? escapeHtml(cam.location || cam.name || cam.id) : (cam.location || cam.name || cam.id)}</div>
-            <div class="sr-meta">${typeof escapeHtml === 'function' ? escapeHtml(resultMeta(cam)) : resultMeta(cam)} ${dirBadge}</div>
+            <div class="sr-name">${escapeHtml(cameraTitle(cam))}</div>
+            <div class="sr-meta">${escapeHtml(meta)}</div>
           </div>
           <button class="sr-add-btn" ${exists ? 'disabled' : ''}>${exists ? 'Added' : '+ Add'}</button>
         </div>`;
-
-      item.onclick = async () => {
-        const fullCam = await hydrateIfNeeded(cam, 'top_search_select');
-        if (activeView === 'dashboard') {
-          dashboardSearchContext = { lat: fullCam.lat, lng: fullCam.lng, name: typeof cameraTitle === 'function' ? cameraTitle(fullCam) : fullCam.location };
-          if (dashboardMap) dashboardMap.setView([fullCam.lat, fullCam.lng], Math.max(dashboardMap.getZoom() || 0, 13), { animate: true });
-          if (typeof renderDashboardMap === 'function') renderDashboardMap();
-        } else if (typeof selectCamera === 'function') {
-          selectCamera(fullCam);
+      item.onclick = async () => { await selectCamera(cam); };
+      item.querySelector('.sr-add-btn').onclick = ev => {
+        ev.stopPropagation();
+        if (addCameraToDashboard(cam)) {
+          ev.currentTarget.textContent = 'Added';
+          ev.currentTarget.disabled = true;
         }
       };
-
-      const addBtn = item.querySelector('.sr-add-btn');
-      addBtn.onclick = ev => {
-        ev.stopPropagation();
-        addSearchCameraToDashboard(cam, addBtn);
-      };
-
       list.appendChild(item);
     });
-
-    // Highlight result entities on globe.
-    if (activeView === 'globe' && typeof dataSource !== 'undefined' && dataSource && typeof Cesium !== 'undefined') {
-      results.slice(0, 25).forEach(cam => {
-        const e = dataSource.entities.getById(cam.id);
-        if (e && e.point) {
-          e.point.color = new Cesium.ConstantProperty(Cesium.Color.fromCssColorString('#f59e0b'));
-          e.point.pixelSize = new Cesium.ConstantProperty(11);
-          e.point.outlineWidth = new Cesium.ConstantProperty(2);
-        }
-      });
-      const first = results[0];
-      if (viewer && first && validCoord(first.lat, first.lng)) {
-        viewer.camera.flyTo({
-          destination: Cesium.Cartesian3.fromDegrees(first.lng, first.lat, 25000),
-          orientation: { heading: 0, pitch: Cesium.Math.toRadians(-55), roll: 0 },
-          duration: 1.25,
-        });
-      }
-    }
-
     panel.style.display = 'block';
-    if (statusEl) statusEl.textContent = `${results.length} camera matches for "${query}"`;
-  }
-
-  const previousRunLocationSearch = typeof window.runLocationSearch === 'function' ? window.runLocationSearch : null;
-  window.runLocationSearch = async function apiGlobalRunLocationSearch(query) {
-    const q = String(query || '').trim();
-    if (!q) {
-      if (typeof clearSearchResults === 'function') clearSearchResults();
-      return;
-    }
-    const statusEl = document.getElementById('statusCameras');
-    if (statusEl) statusEl.textContent = 'Searching global camera index…';
-    try {
-      const results = await searchCameraIndex(q, API.searchLimit);
-      if (results.length) {
-        showTopSearchResults(results, q);
-        return;
-      }
-    } catch (err) {
-      console.warn('Global camera search failed; falling back to location search:', err);
-    }
-
-    if (previousRunLocationSearch) return previousRunLocationSearch.call(this, q);
+    if (statusEl) statusEl.textContent = `${results.length} camera matches`;
   };
-  // Also update the global binding used by existing event handlers in non-module scripts.
-  try { runLocationSearch = window.runLocationSearch; } catch (_) {}
 
-  function renderDashboardSearchResults(results, query) {
+  renderDashboardLocalResults = function apiRenderDashboardLocalResults(query, origin = null) {
     const list = document.getElementById('dashboardSearchResults');
     if (!list) return;
+    const q = (query || '').trim();
+    if (!q) {
+      const chosen = dashboardCameras().slice(0, 10);
+      if (!chosen.length) {
+        list.innerHTML = `<div class="dashboard-empty" style="min-height:130px;border:0;">Search globally to add cameras.</div>`;
+        return;
+      }
+      list.innerHTML = chosen.map(cam => `<div class="dash-result" data-id="${escapeHtml(cam.id)}"><div class="dash-result-name">${escapeHtml(cameraTitle(cam))}</div><div class="dash-result-meta">Already in dashboard</div><button class="dash-small-btn" disabled>Added</button></div>`).join('');
+      return;
+    }
+    list.innerHTML = `<div class="dashboard-empty" style="min-height:130px;border:0;">Searching global cameras…</div>`;
+  };
+
+  runDashboardSearch = async function apiRunDashboardSearch() {
+    const input = document.getElementById('dashboardSearchInput');
+    const list = document.getElementById('dashboardSearchResults');
+    if (!input || !list) return;
+    const q = input.value.trim();
+    if (!q) { renderDashboardLocalResults(''); return; }
+    list.innerHTML = `<div class="dashboard-empty" style="min-height:130px;border:0;">Searching global cameras…</div>`;
+    const results = await runApiCameraSearch(q, { dashboard: true });
     if (!results.length) {
       list.innerHTML = `<div class="dashboard-empty" style="min-height:130px;border:0;">No matching cameras found.</div>`;
       return;
     }
-
     list.innerHTML = results.map(cam => {
-      const exists = Array.isArray(dashboardState?.cameras) && dashboardState.cameras.includes(String(cam.id));
-      const title = typeof cameraTitle === 'function' ? cameraTitle(cam) : (cam.location || cam.name || cam.id);
-      const meta = resultMeta(cam);
-      return `<div class="dash-result" data-id="${typeof escapeHtml === 'function' ? escapeHtml(cam.id) : cam.id}">
-        <div class="dash-result-name">${typeof escapeHtml === 'function' ? escapeHtml(title) : title}</div>
-        <div class="dash-result-meta">${typeof escapeHtml === 'function' ? escapeHtml(meta) : meta}</div>
+      const exists = dashboardState.cameras.includes(String(cam.id));
+      const meta = [cam.roadway || cam.road, cam.city, cam.state, cam.country].filter(Boolean).join(' · ') || cam.id;
+      return `<div class="dash-result" data-id="${escapeHtml(cam.id)}">
+        <div class="dash-result-name">${escapeHtml(cameraTitle(cam))}</div>
+        <div class="dash-result-meta">${escapeHtml(meta)}</div>
         <button class="dash-small-btn" ${exists ? 'disabled' : ''}>${exists ? 'Added' : 'Add'}</button>
       </div>`;
     }).join('');
-
     list.querySelectorAll('.dash-result').forEach(row => {
-      const cam = cameraMap.get(row.dataset.id) || results.find(c => String(c.id) === String(row.dataset.id));
-      const btn = row.querySelector('button');
-      btn.onclick = async () => {
-        if (await addSearchCameraToDashboard(cam, btn)) {
-          // Keep the result list current without re-querying.
-          renderDashboardSearchResults(results, query);
-        }
+      const cam = cameraMap.get(row.dataset.id);
+      row.querySelector('button').onclick = () => {
+        if (addCameraToDashboard(cam)) runDashboardSearch();
       };
-      row.ondblclick = async () => {
-        const fullCam = await hydrateIfNeeded(cam, 'dashboard_search_open');
-        if (fullCam && typeof addCameraToDashboard === 'function') addCameraToDashboard(fullCam);
-      };
+      row.addEventListener('dblclick', () => locateDashboardCamera(cam));
     });
-  }
-
-  const previousRunDashboardSearch = typeof window.runDashboardSearch === 'function' ? window.runDashboardSearch : null;
-  window.runDashboardSearch = async function apiGlobalRunDashboardSearch() {
-    const input = document.getElementById('dashboardSearchInput');
-    const q = (input?.value || '').trim();
-    if (!q) {
-      if (typeof renderDashboardLocalResults === 'function') renderDashboardLocalResults('');
-      return;
-    }
-
-    const list = document.getElementById('dashboardSearchResults');
-    if (list) list.innerHTML = `<div class="dashboard-empty" style="min-height:130px;border:0;">Searching global camera index…</div>`;
-
-    try {
-      const results = await searchCameraIndex(q, API.searchLimit);
-      renderDashboardSearchResults(results, q);
-    } catch (err) {
-      console.warn('Dashboard global camera search failed; falling back to local search:', err);
-      if (previousRunDashboardSearch) return previousRunDashboardSearch.call(this);
-      if (typeof renderDashboardLocalResults === 'function') renderDashboardLocalResults(q);
-    }
   };
-  try { runDashboardSearch = window.runDashboardSearch; } catch (_) {}
 
-  function clusterColor(count) {
-    if (count >= 5000) return '#dc2626';
-    if (count >= 1000) return '#f97316';
-    if (count >= 250) return '#2563eb';
-    return '#64748b';
-  }
-
-  function ensureClusterDataSource() {
-    if (!window.VIGIL_CAMERA_CLUSTER_STATE) return null;
-    if (window.VIGIL_CAMERA_CLUSTER_STATE.dataSource) return window.VIGIL_CAMERA_CLUSTER_STATE.dataSource;
-    if (!viewer || typeof Cesium === 'undefined') return null;
-    const ds = new Cesium.CustomDataSource('camera-clusters');
-    window.VIGIL_CAMERA_CLUSTER_STATE.dataSource = ds;
-    viewer.dataSources.add(ds);
-    return ds;
-  }
-
-  function addStartupCluster(cluster) {
-    const ds = ensureClusterDataSource();
-    if (!ds || !cluster || typeof Cesium === 'undefined') return;
-    const count = toNumber(cluster.camera_count ?? cluster.count, 0);
-    const lat = toNumber(cluster.latitude ?? cluster.lat);
-    const lng = toNumber(cluster.longitude ?? cluster.lng);
-    if (!count || lat === null || lng === null) return;
-
-    const radius = Math.max(22, Math.min(58, 18 + Math.log10(count + 1) * 13));
-    const color = Cesium.Color.fromCssColorString(clusterColor(count)).withAlpha(0.88);
-    const labelText = count >= 1000 ? `${(count / 1000).toFixed(count >= 10000 ? 0 : 1)}k` : String(count);
-    const entity = ds.entities.add({
-      id: `camera-cluster-startup-${cluster.cluster_id || `${lng.toFixed(2)}-${lat.toFixed(2)}`}`,
-      position: Cesium.Cartesian3.fromDegrees(lng, lat, 0),
-      point: {
-        pixelSize: radius,
-        color,
-        outlineColor: Cesium.Color.WHITE.withAlpha(0.9),
-        outlineWidth: 2,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        scaleByDistance: new Cesium.NearFarScalar(500000, 1.0, 50000000, 0.78),
-      },
-      label: {
-        text: labelText,
-        font: '700 13px Inter, system-ui, sans-serif',
-        fillColor: Cesium.Color.WHITE,
-        outlineColor: Cesium.Color.fromCssColorString('#0f172a'),
-        outlineWidth: 3,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        verticalOrigin: Cesium.VerticalOrigin.CENTER,
-        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      }
+  function hydrateSavedDashboardCameras() {
+    const ids = Array.isArray(dashboardState?.cameras) ? dashboardState.cameras.map(String) : [];
+    if (!ids.length) return Promise.resolve([]);
+    return Promise.allSettled(ids.map(id => hydrateCameraDetail(id))).then(() => {
+      updateDashboardBadge();
+      renderDashboard();
+      if (dashboardMap) renderDashboardMap();
     });
-    entity._isCameraCluster = true;
-    entity._clusterInfo = {
-      count,
-      lat,
-      lng,
-      west: toNumber(cluster.west, lng - 1),
-      south: toNumber(cluster.south, lat - 1),
-      east: toNumber(cluster.east, lng + 1),
-      north: toNumber(cluster.north, lat + 1),
-      grid: toNumber(cluster.grid_degrees, 8),
-    };
   }
 
-  async function loadStartupGlobalClusters(reason = 'startup_global') {
-    const c = client();
-    if (!c || !window.VIGIL_CAMERA_CLUSTER_STATE) return;
-    if (!viewer || typeof Cesium === 'undefined') return;
-    const ds = ensureClusterDataSource();
-    if (!ds) return;
-    try {
-      const { data, error } = await c.rpc(API.clusterRpc, {
-        west: -180,
-        south: -85,
-        east: 180,
-        north: 85,
-        grid_degrees: 8,
-        max_clusters: 1000,
-      });
-      if (error) throw error;
-      ds.entities.removeAll();
-      (data || []).forEach(addStartupCluster);
-      const total = (data || []).reduce((sum, cl) => sum + toNumber(cl.camera_count ?? cl.count, 0), 0);
-      const countEl = document.getElementById('cameraCount');
-      if (countEl && total) countEl.textContent = `${total.toLocaleString()} indexed`;
+  function installApiMoveHandlers() {
+    if (!viewer || viewer._vigilApiMoveHandlersInstalled) return;
+    viewer._vigilApiMoveHandlersInstalled = true;
+    viewer.camera.moveEnd.addEventListener(() => scheduleApiViewportRefresh(false));
+    viewer.camera.changed.addEventListener(() => scheduleApiViewportRefresh(false));
+    viewer.scene.postRender.addEventListener(() => {
+      if (!apiState.booted) return;
+      // Safety net for cases where Cesium settles after load without a camera event.
+      if (Date.now() - apiState.lastRefreshAt > 5000) scheduleApiViewportRefresh(false);
+    });
+  }
+
+  async function startApiMode() {
+    if (!API_MODE) return;
+    if (apiState.booted) return;
+    if (!viewer) initCesium();
+    cameras = [];
+    cameraMap.clear();
+    await initializeMap();
+    apiState.booted = true;
+    installApiClickHandler();
+    installApiMoveHandlers();
+    const dashAddBtn = document.getElementById('dashAddCamera');
+    if (dashAddBtn) dashAddBtn.onclick = openDashboardAddPanel;
+    const dashSearchBtn = document.getElementById('dashboardSearchRun');
+    if (dashSearchBtn) dashSearchBtn.onclick = runDashboardSearch;
+    document.getElementById('cameraCount').textContent = `${CAMERA_TOTAL_ESTIMATE.toLocaleString()} indexed`;
+    document.getElementById('statusCameras').textContent = 'Loading camera index…';
+    hydrateSavedDashboardCameras();
+    setTimeout(() => refreshApiViewport(true), 100);
+    setTimeout(() => refreshApiViewport(true), 1000);
+    setTimeout(() => refreshApiViewport(true), 2600);
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    if (!API_MODE) return;
+    const upload = document.getElementById('uploadOverlay');
+    if (upload) upload.style.display = 'none';
+    setTimeout(() => startApiMode().catch(err => {
+      console.error('Supabase camera API startup failed:', err);
       const status = document.getElementById('statusCameras');
-      if (status && total) status.textContent = `${(data || []).length.toLocaleString()} clusters · ${total.toLocaleString()} cameras`;
-      if (window.VIGIL_CAMERA_CLUSTER_STATE) window.VIGIL_CAMERA_CLUSTER_STATE.lastKey = `startup-global-${Date.now()}`;
-      if (typeof trackEvent === 'function') trackEvent('camera_api_startup_global_clusters_loaded', { reason, clusters: (data || []).length, total });
-    } catch (err) {
-      console.warn('Startup global cluster load failed:', err);
-    }
-  }
-
-  function installReliableStartup() {
-    if (installReliableStartup.done) return;
-    installReliableStartup.done = true;
-    const attempt = (delay, reason) => window.setTimeout(() => loadStartupGlobalClusters(reason), delay);
-    attempt(700, 'startup_global_700ms');
-    attempt(1800, 'startup_global_1800ms');
-    attempt(4200, 'startup_global_4200ms');
-
-    // Rebind dashboard search controls after original setup, so the global API version wins.
-    window.setTimeout(() => {
-      const runBtn = document.getElementById('dashboardSearchRun');
-      const input = document.getElementById('dashboardSearchInput');
-      if (runBtn) runBtn.onclick = window.runDashboardSearch;
-      if (input) {
-        input.onkeydown = e => {
-          if (e.key === 'Enter') window.runDashboardSearch();
-          if (e.key === 'Escape' && typeof closeDashboardAddPanel === 'function') closeDashboardAddPanel();
-        };
-      }
-    }, 1200);
-  }
-
-  window.searchCameraIndex = searchCameraIndex;
-  window.loadStartupGlobalCameraClusters = loadStartupGlobalClusters;
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', installReliableStartup, { once: true });
-  } else {
-    installReliableStartup();
-  }
+      if (status) status.textContent = 'Camera API startup error';
+    }), 80);
+  });
 })();
 </script>
+
 </body>
 </html>
