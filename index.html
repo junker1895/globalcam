@@ -8087,7 +8087,7 @@ window.startBillingPortal = startBillingPortal;
 
   function canAutosaveDashboard() {
     try {
-      if (!window.currentUser) return { ok: false, reason: 'Log in to autosave' };
+      if (!currentUser) return { ok: false, reason: 'Log in to autosave' };
       if (typeof getPlanLimits === 'function') {
         const limits = getPlanLimits();
         if (!limits || !limits.canSaveDashboards) return { ok: false, reason: 'Create a free account to autosave' };
