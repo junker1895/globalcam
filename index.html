@@ -1589,6 +1589,35 @@ body.dashboard-map-drawer #dashboardFeedPane { min-width: 0; }
   white-space: nowrap;
 }
 
+#dashboardAutosaveStatus {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--c-text3);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+#dashboardAutosaveStatus::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--c-text3);
+  flex-shrink: 0;
+}
+#dashboardAutosaveStatus.saving { color: var(--c-accent); }
+#dashboardAutosaveStatus.saving::before { background: var(--c-accent); }
+#dashboardAutosaveStatus.dirty { color: var(--c-warn); }
+#dashboardAutosaveStatus.dirty::before { background: var(--c-warn); }
+#dashboardAutosaveStatus.saved { color: var(--c-success); }
+#dashboardAutosaveStatus.saved::before { background: var(--c-success); }
+#dashboardAutosaveStatus.error { color: var(--c-danger); }
+#dashboardAutosaveStatus.error::before { background: var(--c-danger); }
+#dashboardAutosaveStatus.disabled { color: var(--c-text3); }
+#dashboardAutosaveStatus.disabled::before { background: var(--c-text3); }
+
+
 #dashboardAddPanel {
   position: fixed;
   top: calc(var(--top-h) + 10px);
@@ -7988,5 +8017,366 @@ window.startBillingPortal = startBillingPortal;
   if (oldPanel) oldPanel.remove();
 })();
 </script>
+
+<script>
+// ==========================================================
+//  DASHBOARD AUTOSAVE PATCH
+//  Logged-in cloud autosave with dirty tracking and non-blocking status.
+// ==========================================================
+(function installDashboardAutosavePatch() {
+  const AUTOSAVE_DEBOUNCE_MS = 2500;
+  const AUTOSAVE_PERIODIC_MS = 30000;
+  const AUTOSAVE_DEFAULT_NAME = 'Autosaved dashboard';
+
+  let autosaveTimer = null;
+  let autosaveDirty = false;
+  let autosaveInFlight = false;
+  let autosaveLastSavedAt = null;
+  let autosaveLastSignature = '';
+  let autosaveSuppressDirty = false;
+  let activeDashboardId = null;
+  let activeDashboardName = AUTOSAVE_DEFAULT_NAME;
+  let autosavePatched = false;
+
+  function autosaveStatusEl() {
+    let el = document.getElementById('dashboardAutosaveStatus');
+    const bar = document.getElementById('dashboardBar');
+
+    if (!el && bar) {
+      el = document.createElement('div');
+      el.id = 'dashboardAutosaveStatus';
+      el.className = 'disabled';
+      el.title = 'Cloud autosave';
+      el.textContent = 'Autosave ready';
+      const dashboardStatus = document.getElementById('dashboardStatus');
+      if (dashboardStatus && dashboardStatus.parentNode === bar) bar.insertBefore(el, dashboardStatus);
+      else bar.appendChild(el);
+    }
+    return el;
+  }
+
+  function setAutosaveStatus(text, state = 'disabled') {
+    const el = autosaveStatusEl();
+    if (!el) return;
+    el.textContent = text;
+    el.className = state;
+  }
+
+  function formatAutosaveAge(date) {
+    if (!date) return 'Saved';
+    const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+    if (seconds < 8) return 'Saved just now';
+    if (seconds < 60) return 'Saved ' + seconds + 's ago';
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return 'Saved ' + minutes + 'm ago';
+    return 'Saved ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function autosaveSignature() {
+    try {
+      if (typeof dashboardStateForPreset !== 'function') return '';
+      return JSON.stringify(dashboardStateForPreset());
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function hasDashboardContent() {
+    return !!(window.dashboardState && Array.isArray(dashboardState.cameras) && dashboardState.cameras.length);
+  }
+
+  function canAutosaveDashboard() {
+    try {
+      if (!window.currentUser) return { ok: false, reason: 'Log in to autosave' };
+      if (typeof getPlanLimits === 'function') {
+        const limits = getPlanLimits();
+        if (!limits || !limits.canSaveDashboards) return { ok: false, reason: 'Create a free account to autosave' };
+      }
+      if (!hasDashboardContent()) return { ok: false, reason: 'Autosave ready' };
+      if (typeof initSupabaseClient !== 'function' || !initSupabaseClient()) return { ok: false, reason: 'Autosave unavailable' };
+      return { ok: true, reason: '' };
+    } catch (_) {
+      return { ok: false, reason: 'Autosave unavailable' };
+    }
+  }
+
+  function updateAutosaveIdleStatus() {
+    const gate = canAutosaveDashboard();
+    if (!gate.ok) {
+      setAutosaveStatus(gate.reason, 'disabled');
+      return;
+    }
+    if (autosaveDirty) {
+      setAutosaveStatus('Unsaved changes', 'dirty');
+      return;
+    }
+    if (autosaveLastSavedAt) {
+      setAutosaveStatus(formatAutosaveAge(autosaveLastSavedAt), 'saved');
+      return;
+    }
+    setAutosaveStatus('Autosave ready', 'disabled');
+  }
+
+  function markDashboardDirty(reason = 'change') {
+    if (autosaveSuppressDirty) return;
+    if (!hasDashboardContent()) {
+      autosaveDirty = false;
+      updateAutosaveIdleStatus();
+      return;
+    }
+
+    const sig = autosaveSignature();
+    if (sig && sig === autosaveLastSignature) {
+      autosaveDirty = false;
+      updateAutosaveIdleStatus();
+      return;
+    }
+
+    autosaveDirty = true;
+    setAutosaveStatus('Unsaved changes', 'dirty');
+
+    if (autosaveTimer) clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(() => {
+      runDashboardAutosave(reason).catch(err => console.warn('Dashboard autosave failed:', err));
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }
+
+  async function ensureAutosaveTarget() {
+    if (activeDashboardId) return activeDashboardId;
+
+    const views = typeof getSavedDashboardViews === 'function'
+      ? await getSavedDashboardViews(true)
+      : [];
+
+    const existing = Array.isArray(views)
+      ? views.find(v => String(v.name || '').toLowerCase() === AUTOSAVE_DEFAULT_NAME.toLowerCase())
+      : null;
+
+    if (existing) {
+      activeDashboardId = existing.id;
+      activeDashboardName = existing.name || AUTOSAVE_DEFAULT_NAME;
+      return activeDashboardId;
+    }
+
+    const limits = typeof getPlanLimits === 'function' ? getPlanLimits() : { maxSavedDashboards: 999 };
+    if (limits.maxSavedDashboards < 999 && views.length >= limits.maxSavedDashboards) {
+      throw new Error('Save limit reached. Delete a saved dashboard or upgrade to Pro.');
+    }
+
+    return null;
+  }
+
+  async function runDashboardAutosave(reason = 'debounced') {
+    if (autosaveInFlight) {
+      if (autosaveTimer) clearTimeout(autosaveTimer);
+      autosaveTimer = setTimeout(() => runDashboardAutosave('queued').catch(console.warn), AUTOSAVE_DEBOUNCE_MS);
+      return;
+    }
+
+    const gate = canAutosaveDashboard();
+    if (!gate.ok) {
+      autosaveDirty = false;
+      updateAutosaveIdleStatus();
+      return;
+    }
+
+    const sig = autosaveSignature();
+    if (!sig || sig === autosaveLastSignature) {
+      autosaveDirty = false;
+      updateAutosaveIdleStatus();
+      return;
+    }
+
+    autosaveInFlight = true;
+    setAutosaveStatus('Saving…', 'saving');
+
+    try {
+      const client = initSupabaseClient();
+      const state = dashboardStateForPreset();
+      const targetId = await ensureAutosaveTarget();
+      const payload = {
+        user_id: currentUser.id,
+        name: activeDashboardName || AUTOSAVE_DEFAULT_NAME,
+        dashboard_json: state,
+        camera_count: Array.isArray(state.cameras) ? state.cameras.length : 0,
+        updated_at: new Date().toISOString()
+      };
+
+      let result;
+      if (targetId) {
+        result = await client
+          .from('dashboards')
+          .update(payload)
+          .eq('id', targetId)
+          .eq('user_id', currentUser.id)
+          .select('id,name,dashboard_json,camera_count,created_at,updated_at')
+          .maybeSingle();
+      } else {
+        result = await client
+          .from('dashboards')
+          .insert(payload)
+          .select('id,name,dashboard_json,camera_count,created_at,updated_at')
+          .maybeSingle();
+      }
+
+      if (result.error) throw result.error;
+
+      const row = result.data || {};
+      activeDashboardId = row.id ? String(row.id) : activeDashboardId;
+      activeDashboardName = row.name || activeDashboardName || AUTOSAVE_DEFAULT_NAME;
+      autosaveLastSignature = sig;
+      autosaveDirty = false;
+      autosaveLastSavedAt = new Date();
+
+      if (typeof getSavedDashboardViews === 'function') await getSavedDashboardViews(true);
+      if (typeof updateDashboardSavedViewButtons === 'function') updateDashboardSavedViewButtons(false);
+      if (typeof trackEvent === 'function') {
+        trackEvent('dashboard_autosaved', {
+          dashboard_id: activeDashboardId,
+          dashboard_name: activeDashboardName,
+          dashboard_camera_count: payload.camera_count,
+          reason
+        });
+      }
+
+      setAutosaveStatus('Saved just now', 'saved');
+    } catch (err) {
+      console.warn('Dashboard autosave failed:', err);
+      autosaveDirty = true;
+      setAutosaveStatus('Autosave failed', 'error');
+      if (typeof trackEvent === 'function') {
+        trackEvent('dashboard_autosave_failed', {
+          message: err && err.message ? err.message : String(err)
+        });
+      }
+    } finally {
+      autosaveInFlight = false;
+    }
+  }
+
+  function adoptLoadedDashboard(view) {
+    if (!view) return;
+    activeDashboardId = view.id ? String(view.id) : null;
+    activeDashboardName = view.name || AUTOSAVE_DEFAULT_NAME;
+    autosaveDirty = false;
+    autosaveLastSignature = autosaveSignature();
+    autosaveLastSavedAt = view.updatedAt ? new Date(view.updatedAt) : new Date();
+    setAutosaveStatus(formatAutosaveAge(autosaveLastSavedAt), 'saved');
+  }
+
+  function resetAutosaveTarget(reason = 'new_dashboard') {
+    activeDashboardId = null;
+    activeDashboardName = AUTOSAVE_DEFAULT_NAME;
+    autosaveLastSignature = '';
+    autosaveLastSavedAt = null;
+    if (hasDashboardContent()) markDashboardDirty(reason);
+    else updateAutosaveIdleStatus();
+  }
+
+  function patchDashboardAutosave() {
+    if (autosavePatched) return;
+    autosavePatched = true;
+
+    const originalSaveDashboardState = window.saveDashboardState;
+    if (typeof originalSaveDashboardState === 'function') {
+      window.saveDashboardState = function autosaveAwareSaveDashboardState() {
+        const result = originalSaveDashboardState.apply(this, arguments);
+        markDashboardDirty('state_saved');
+        return result;
+      };
+    }
+
+    const originalLoadObject = window.loadSavedDashboardViewObject;
+    if (typeof originalLoadObject === 'function') {
+      window.loadSavedDashboardViewObject = async function autosaveAwareLoadSavedDashboardViewObject(view) {
+        autosaveSuppressDirty = true;
+        try {
+          const result = await originalLoadObject.apply(this, arguments);
+          adoptLoadedDashboard(view);
+          return result;
+        } finally {
+          autosaveSuppressDirty = false;
+          updateAutosaveIdleStatus();
+        }
+      };
+    }
+
+    const originalManualSave = window.saveCurrentDashboardView;
+    if (typeof originalManualSave === 'function') {
+      window.saveCurrentDashboardView = async function autosaveAwareSaveCurrentDashboardView() {
+        const result = await originalManualSave.apply(this, arguments);
+        try {
+          const views = typeof getSavedDashboardViews === 'function' ? await getSavedDashboardViews(true) : [];
+          if (Array.isArray(views) && views.length) {
+            const latest = views[0];
+            activeDashboardId = latest.id ? String(latest.id) : activeDashboardId;
+            activeDashboardName = latest.name || activeDashboardName || AUTOSAVE_DEFAULT_NAME;
+            autosaveLastSignature = autosaveSignature();
+            autosaveDirty = false;
+            autosaveLastSavedAt = new Date();
+            setAutosaveStatus('Saved just now', 'saved');
+          }
+        } catch (err) {
+          console.warn('Could not sync autosave target after manual save:', err);
+        }
+        return result;
+      };
+    }
+
+    const originalClear = window.clearDashboard;
+    if (typeof originalClear === 'function') {
+      window.clearDashboard = function autosaveAwareClearDashboard() {
+        const result = originalClear.apply(this, arguments);
+        resetAutosaveTarget('clear');
+        return result;
+      };
+    }
+
+    document.addEventListener('click', function autosaveMutationClickListener(e) {
+      const target = e.target && e.target.closest ? e.target.closest(
+        '#dashRefreshAll,#dashFitAll,#dashFitMap,#dashToggleMap,#dashMediaFitToggle,.dash-mini-btn,.dash-result button,.dashboard-map-popup button,.dash-seg button,.dash-small-btn,.area-btn'
+      ) : null;
+      if (!target) return;
+      window.setTimeout(() => markDashboardDirty('dashboard_click'), 220);
+    }, true);
+
+    document.addEventListener('mouseup', function autosaveMouseUpListener() {
+      if (document.body.classList.contains('dashboard-active')) {
+        window.setTimeout(() => markDashboardDirty('pointer_finish'), 280);
+      }
+    }, true);
+
+    document.addEventListener('visibilitychange', function autosaveVisibilityListener() {
+      if (document.visibilityState === 'hidden' && autosaveDirty) {
+        runDashboardAutosave('visibility_hidden').catch(() => {});
+      }
+    });
+
+    window.addEventListener('beforeunload', function autosaveBeforeUnloadListener() {
+      if (autosaveDirty) runDashboardAutosave('before_unload').catch(() => {});
+    });
+
+    window.setInterval(() => {
+      if (autosaveDirty) {
+        runDashboardAutosave('periodic').catch(err => console.warn('Periodic dashboard autosave failed:', err));
+      } else if (autosaveLastSavedAt) {
+        updateAutosaveIdleStatus();
+      }
+    }, AUTOSAVE_PERIODIC_MS);
+
+    updateAutosaveIdleStatus();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', patchDashboardAutosave, { once: true });
+  } else {
+    patchDashboardAutosave();
+  }
+
+  window.markDashboardDirty = markDashboardDirty;
+  window.runDashboardAutosave = runDashboardAutosave;
+})();
+</script>
+
 </body>
 </html>
