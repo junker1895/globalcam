@@ -4027,6 +4027,25 @@ async function selectCamera(cam) {
   // Fly to an oblique inspection angle rather than a top-down view.
   // This makes Google Photorealistic 3D Tiles legible once they stream in.
   const cameraHeading = heading !== null ? heading : 0;
+  const notifyApiSelectionFlightSettled = () => {
+    try {
+      if (window.VIGIL_CAMERA_API_MODE) {
+        if (typeof window.recoverApiViewport === 'function') {
+          window.recoverApiViewport('select-flight-complete');
+        } else if (typeof window.refreshApiViewport === 'function') {
+          window.refreshApiViewport(true);
+        }
+        // One extra short delayed pass mirrors the existing focus recovery, but
+        // it is tied to actual flight completion instead of relying on tab focus.
+        setTimeout(() => {
+          try {
+            if (typeof window.recoverApiViewport === 'function') window.recoverApiViewport('select-flight-complete-followup');
+            else if (typeof window.refreshApiViewport === 'function') window.refreshApiViewport(true);
+          } catch (_) {}
+        }, 260);
+      }
+    } catch (_) {}
+  };
   const backAngle = (cameraHeading + 180) % 360;
   const hRad      = Cesium.Math.toRadians(backAngle);
   const camPos    = Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, groundH);
@@ -4052,8 +4071,14 @@ async function selectCamera(cam) {
       },
       duration: 1.55,
       easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
-      complete: () => markCameraFlyCompleteAndWaitForTiles(tilesLoadToken),
-      cancel: () => hideCameraTilesLoader(tilesLoadToken, true),
+      complete: () => {
+        markCameraFlyCompleteAndWaitForTiles(tilesLoadToken);
+        notifyApiSelectionFlightSettled();
+      },
+      cancel: () => {
+        hideCameraTilesLoader(tilesLoadToken, true);
+        notifyApiSelectionFlightSettled();
+      },
     });
   } else {
     // 2D/satellite fallback is just an ellipsoid globe. Keep this view
@@ -4068,6 +4093,8 @@ async function selectCamera(cam) {
       },
       duration: 1.25,
       easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
+      complete: notifyApiSelectionFlightSettled,
+      cancel: notifyApiSelectionFlightSettled,
     });
   }
 
@@ -8442,6 +8469,15 @@ window.startBillingPortal = startBillingPortal;
     booted: false,
     detailPromises: new Map(),
     selectedCluster: null,
+    isMoving: false,
+    pendingMode: 'idle',
+    lastRenderedMode: 'idle',
+    lastDesiredMode: 'idle',
+    lastHealthCheckAt: 0,
+    focusRefreshTimer: null,
+    recoveryTimer: null,
+    recoverySeq: 0,
+    lastRecoveryAt: 0,
   };
 
   window.VIGIL_CAMERA_API_MODE = API_MODE;
@@ -8603,23 +8639,159 @@ window.startBillingPortal = startBillingPortal;
     ];
   }
 
+
+  function splitCameraBboxForFetch(box) {
+    if (!box) return [];
+    const west = Number(box.west), east = Number(box.east), south = Number(box.south), north = Number(box.north);
+    if (![west, east, south, north].every(Number.isFinite) || east <= west || north <= south) return [];
+
+    const h = cameraHeight();
+    const lonSpan = Math.max(0.0001, east - west);
+    const latSpan = Math.max(0.0001, north - south);
+
+    // In clickable-camera mode, avoid an artificial "first 5000" viewport cap by
+    // splitting the visible area into smaller server bboxes. The Supabase RPC still
+    // protects each tile, but the app can show all practical close-zoom cameras.
+    let cols = 1;
+    let rows = 1;
+    if (h < 900000) {
+      if (lonSpan > 3 || latSpan > 2) { cols = 3; rows = 3; }
+      if (lonSpan > 6 || latSpan > 4) { cols = 4; rows = 4; }
+      if (h < 350000 && (lonSpan > 1.2 || latSpan > 0.8)) { cols = Math.max(cols, 3); rows = Math.max(rows, 3); }
+    }
+
+    const out = [];
+    for (let ix = 0; ix < cols; ix++) {
+      for (let iy = 0; iy < rows; iy++) {
+        const w = west + lonSpan * ix / cols;
+        const e = west + lonSpan * (ix + 1) / cols;
+        const s = south + latSpan * iy / rows;
+        const n = south + latSpan * (iy + 1) / rows;
+        out.push({ west: w, south: s, east: e, north: n });
+      }
+    }
+    return out;
+  }
+
+  function getCameraFetchBboxes() {
+    const base = getViewBboxes();
+    const out = [];
+    base.forEach(b => out.push(...splitCameraBboxForFetch(b)));
+    return out.length ? out : base;
+  }
+
   function gridDegreesForHeight(h) {
-    if (h > 10000000) return 8;
-    if (h > 6500000) return 6;
-    if (h > 3500000) return 3.5;
-    if (h > 1800000) return 1.7;
-    if (h > 900000) return 0.85;
-    return 0.45;
+    // Server-side LOD. Keep enough clustering to stay performant, but use
+    // smaller cells than the first globe-renderer pass so the opening view
+    // feels rich and camera-dense rather than over-aggregated.
+    if (h > 18000000) return 16;
+    if (h > 11000000) return 12;
+    if (h > 7000000) return 8;
+    if (h > 4500000) return 5;
+    if (h > 2500000) return 2.5;
+    if (h > 1500000) return 1.25;
+    if (h > 900000) return 0.65;
+    return 0.35;
+  }
+
+  function chooseApiLayerMode() {
+    const h = cameraHeight();
+    // Hysteresis: do not use a single hard threshold or the layer can get stuck
+    // flickering between clusters and clickable cameras near the boundary.
+    if (apiState.lastRenderedMode === 'cameras') return h > 1200000 ? 'clusters' : 'cameras';
+    if (apiState.lastRenderedMode === 'clusters') return h < 700000 ? 'cameras' : 'clusters';
+    return h > 900000 ? 'clusters' : 'cameras';
   }
 
   function shouldUseClusters() {
-    return cameraHeight() > 900000;
+    return chooseApiLayerMode() === 'clusters';
   }
 
-  function requestKey() {
-    const h = Math.round(cameraHeight() / 50000) * 50000;
-    const boxes = getViewBboxes().map(b => [Math.round(b.west * 10), Math.round(b.south * 10), Math.round(b.east * 10), Math.round(b.north * 10)].join(',')).join('|');
-    return `${shouldUseClusters() ? 'clusters' : 'cameras'}:${h}:${boxes}`;
+  function requestKey(mode = chooseApiLayerMode()) {
+    const h = Math.round(cameraHeight() / 25000) * 25000;
+    const boxes = getViewBboxes().map(b => [
+      Math.round(b.west * 20),
+      Math.round(b.south * 20),
+      Math.round(b.east * 20),
+      Math.round(b.north * 20)
+    ].join(',')).join('|');
+    return `${mode}:${h}:${boxes}`;
+  }
+
+  function maxClustersForHeight(h) {
+    // Higher caps make the first globe view look substantial while still
+    // limiting each request to a bounded summary response, not a full index.
+    if (h > 11000000) return 850;
+    if (h > 7000000) return 1100;
+    if (h > 3500000) return 1400;
+    return 1800;
+  }
+
+  function pointVisibilityFactor(lat, lng) {
+    if (!viewer || !viewer.camera) return 1;
+    try {
+      const p = Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), 0);
+      const pNorm = Cesium.Cartesian3.normalize(p, new Cesium.Cartesian3());
+      const cNorm = Cesium.Cartesian3.normalize(viewer.camera.positionWC, new Cesium.Cartesian3());
+      const dot = Cesium.Cartesian3.dot(pNorm, cNorm);
+      // Hide back-side and rim-adjacent bubbles. The ramp makes the horizon clean
+      // without suddenly removing central clusters.
+      if (dot < 0.10) return 0;
+      if (dot < 0.28) return (dot - 0.10) / 0.18;
+      return 1;
+    } catch (_) {
+      return 1;
+    }
+  }
+
+  function windowPointForLatLng(lat, lng) {
+    if (!viewer || !viewer.scene) return null;
+    try {
+      const pos = Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), 0);
+      const pt = Cesium.SceneTransforms.wgs84ToWindowCoordinates(viewer.scene, pos);
+      if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return null;
+      const canvas = viewer.scene.canvas;
+      if (pt.x < -80 || pt.y < -80 || pt.x > canvas.clientWidth + 80 || pt.y > canvas.clientHeight + 80) return null;
+      return pt;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function filterClustersForDisplay(clusters) {
+    const accepted = [];
+    const acceptedScreen = [];
+    const height = cameraHeight();
+    // Screen-space de-overlap. Keep this deliberately light: enough to stop
+    // rim pileups, not so much that the globe looks under-populated.
+    const minPx = height > 10000000 ? 28 : height > 5000000 ? 23 : 18;
+
+    clusters
+      .map(c => ({
+        raw: c,
+        count: Number(c.camera_count || c.count || 0),
+        lat: Number(c.latitude),
+        lng: Number(c.longitude),
+      }))
+      .filter(c => Number.isFinite(c.lat) && Number.isFinite(c.lng) && c.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .forEach(c => {
+        const visibility = pointVisibilityFactor(c.lat, c.lng);
+        if (visibility <= 0) return;
+        const pt = windowPointForLatLng(c.lat, c.lng);
+        if (!pt) return;
+        const radius = Math.max(10, Math.min(32, 9 + Math.log10(c.count + 1) * 6));
+        const collisionRadius = Math.max(minPx, radius + 6);
+        for (const prev of acceptedScreen) {
+          const dx = pt.x - prev.x;
+          const dy = pt.y - prev.y;
+          if ((dx * dx + dy * dy) < (collisionRadius * collisionRadius)) return;
+        }
+        acceptedScreen.push({ x: pt.x, y: pt.y });
+        accepted.push(Object.assign({}, c.raw, { _visibilityFactor: visibility }));
+      });
+
+    return accepted;
   }
 
   function clusterColor(n) {
@@ -8650,8 +8822,9 @@ window.startBillingPortal = startBillingPortal;
     const lng = Number(cluster.longitude);
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || count <= 0) return;
     const id = `cluster:${cluster.cluster_id || `${lng.toFixed(3)},${lat.toFixed(3)}`}`;
-    const size = Math.max(13, Math.min(42, 13 + Math.log10(count + 1) * 8));
-    const color = Cesium.Color.fromCssColorString(clusterColor(count)).withAlpha(0.86);
+    const visibility = Number.isFinite(Number(cluster._visibilityFactor)) ? Number(cluster._visibilityFactor) : 1;
+    const size = Math.max(12, Math.min(36, 11 + Math.log10(count + 1) * 7));
+    const color = Cesium.Color.fromCssColorString(clusterColor(count)).withAlpha(0.58 + visibility * 0.30);
     const entity = dataSource.entities.add({
       id,
       position: Cesium.Cartesian3.fromDegrees(lng, lat, 0),
@@ -8660,7 +8833,7 @@ window.startBillingPortal = startBillingPortal;
         color,
         outlineColor: Cesium.Color.WHITE.withAlpha(0.72),
         outlineWidth: 1.5,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 0,
       },
       label: {
         text: clusterLabel(count),
@@ -8672,7 +8845,8 @@ window.startBillingPortal = startBillingPortal;
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         pixelOffset: new Cesium.Cartesian2(0, 0),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 0,
+        translucencyByDistance: new Cesium.NearFarScalar(0, 1, 18000000, 0.88),
       },
     });
     entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
@@ -8703,7 +8877,7 @@ window.startBillingPortal = startBillingPortal;
         outlineColor: Cesium.Color.WHITE.withAlpha(0.8),
         outlineWidth: 1,
         scaleByDistance: new Cesium.NearFarScalar(300, 1.8, 400000, 0.6),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 0,
       },
       label: {
         text: cam.location || cam.name || cam.id,
@@ -8715,7 +8889,7 @@ window.startBillingPortal = startBillingPortal;
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
         pixelOffset: new Cesium.Cartesian2(0, -10),
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 0,
         show: false,
       },
     };
@@ -8727,7 +8901,7 @@ window.startBillingPortal = startBillingPortal;
         rotation: -Cesium.Math.toRadians(heading),
         pixelOffset: new Cesium.Cartesian2(0, -13),
         scaleByDistance: new Cesium.NearFarScalar(300, 1.25, 400000, 0.5),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 0,
         heightReference: Cesium.HeightReference.NONE,
       };
     }
@@ -8739,7 +8913,10 @@ window.startBillingPortal = startBillingPortal;
   function renderApiEntities(items, mode) {
     clearCurrentDataSource();
     apiState.mode = mode;
+    apiState.lastRenderedMode = mode;
+    apiState.pendingMode = 'idle';
     if (mode === 'clusters') {
+      items = filterClustersForDisplay(items);
       items.forEach(addServerClusterEntity);
       document.getElementById('statusCameras').textContent = `${items.length.toLocaleString()} clusters · ${CAMERA_TOTAL_ESTIMATE.toLocaleString()} cameras`;
       document.getElementById('cameraCount').textContent = `${CAMERA_TOTAL_ESTIMATE.toLocaleString()} indexed`;
@@ -8759,7 +8936,7 @@ window.startBillingPortal = startBillingPortal;
     const parts = await Promise.all(boxes.map(b => rpc('get_camera_clusters_bbox', {
       west: b.west, south: b.south, east: b.east, north: b.north,
       grid_degrees: grid,
-      max_clusters: 1000,
+      max_clusters: maxClustersForHeight(cameraHeight()),
     })));
     if (seq !== apiState.requestSeq) return;
     const seen = new Set();
@@ -8773,9 +8950,11 @@ window.startBillingPortal = startBillingPortal;
   }
 
   async function fetchCamerasForView(seq) {
-    const boxes = getViewBboxes();
+    const boxes = getCameraFetchBboxes();
     const parts = await Promise.all(boxes.map(b => rpc('get_cameras_bbox', {
       west: b.west, south: b.south, east: b.east, north: b.north,
+      // The RPC has a server-side safety cap; tiling above removes the practical
+      // client-side cap at normal individual-camera zoom levels.
       max_results: 5000,
     })));
     if (seq !== apiState.requestSeq) return;
@@ -8791,16 +8970,27 @@ window.startBillingPortal = startBillingPortal;
 
   async function refreshApiViewport(force = false) {
     if (!API_MODE || !apiState.booted || !viewer || activeView === 'dashboard') return;
-    const key = requestKey();
+
+    const desiredMode = chooseApiLayerMode();
+    const key = requestKey(desiredMode);
     const now = Date.now();
-    if (!force && key === apiState.lastKey && now - apiState.lastRefreshAt < 1500) return;
+    const modeChanged = desiredMode !== apiState.lastDesiredMode || desiredMode !== apiState.lastRenderedMode;
+
+    // Movement should not suppress a real zoom/mode transition. The old version
+    // could return early while Cesium was moving, then never recover cleanly if a
+    // moveEnd/focus event was missed.
+    if (!force && !modeChanged && key === apiState.lastKey && now - apiState.lastRefreshAt < 260) return;
+
+    apiState.lastDesiredMode = desiredMode;
     apiState.lastKey = key;
     apiState.lastRefreshAt = now;
+    apiState.pendingMode = desiredMode;
     const seq = ++apiState.requestSeq;
     const status = document.getElementById('statusCameras');
-    if (status) status.textContent = shouldUseClusters() ? 'Loading clusters…' : 'Loading visible cameras…';
+
+    if (status) status.textContent = desiredMode === 'clusters' ? 'Loading clusters…' : 'Loading visible cameras…';
     try {
-      if (shouldUseClusters()) await fetchClustersForView(seq);
+      if (desiredMode === 'clusters') await fetchClustersForView(seq);
       else await fetchCamerasForView(seq);
     } catch (err) {
       if (seq === apiState.requestSeq) {
@@ -8811,11 +9001,65 @@ window.startBillingPortal = startBillingPortal;
   }
   window.refreshApiViewport = refreshApiViewport;
 
-  function scheduleApiViewportRefresh(force = false) {
+  function scheduleApiViewportRefresh(force = false, delay = null) {
     if (!API_MODE) return;
     clearTimeout(apiState.moveTimer);
-    apiState.moveTimer = setTimeout(() => refreshApiViewport(force), force ? 60 : 420);
+    const wait = delay == null ? (force ? 35 : 140) : delay;
+    apiState.moveTimer = setTimeout(() => refreshApiViewport(force), wait);
   }
+
+
+  function enforceImmediateModeTransition(reason = 'mode-transition') {
+    if (!API_MODE || !apiState.booted || !viewer || activeView === 'dashboard') return;
+    const desired = chooseApiLayerMode();
+    if (desired === apiState.lastRenderedMode && desired === apiState.lastDesiredMode) return;
+
+    // A true zoom-level crossing must be recognised immediately. Do not wait for
+    // debounce/focus recovery and do not let a stale request key suppress it.
+    apiState.lastDesiredMode = 'idle';
+    apiState.lastKey = '';
+    apiState.lastRefreshAt = 0;
+    scheduleApiViewportRefresh(true, 1);
+  }
+  window.enforceImmediateModeTransition = enforceImmediateModeTransition;
+
+  function requestCesiumRenderRecovery() {
+    try { if (viewer && typeof viewer.resize === 'function') viewer.resize(); } catch (_) {}
+    try { if (viewer && viewer.scene && typeof viewer.scene.requestRender === 'function') viewer.scene.requestRender(); } catch (_) {}
+  }
+
+  function recoverApiViewport(reason = 'recover', options = {}) {
+    if (!API_MODE || !apiState.booted || !viewer || activeView === 'dashboard') return;
+    const force = options.force !== false;
+    apiState.isMoving = false;
+    apiState.pendingMode = 'idle';
+    apiState.lastKey = '';
+    apiState.lastRefreshAt = 0;
+    apiState.lastDesiredMode = 'idle';
+    requestCesiumRenderRecovery();
+    updateClusterVisibilityForCurrentCamera();
+    scheduleApiViewportRefresh(force, options.delay == null ? 20 : options.delay);
+  }
+  window.recoverApiViewport = recoverApiViewport;
+
+  function runViewportRecoverySequence(reason = 'recover-sequence') {
+    if (!API_MODE || !apiState.booted || !viewer || activeView === 'dashboard') return;
+    const now = Date.now();
+    // Do not let repeated camera.changed events spam API calls, but always allow
+    // explicit flight/search/moveEnd recovery to start a fresh sequence.
+    apiState.recoverySeq += 1;
+    const seq = apiState.recoverySeq;
+    apiState.lastRecoveryAt = now;
+    recoverApiViewport(`${reason}:now`, { force: true, delay: 1 });
+    [160, 520, 1100].forEach(delay => {
+      setTimeout(() => {
+        if (seq !== apiState.recoverySeq) return;
+        if (!API_MODE || !apiState.booted || !viewer || activeView === 'dashboard') return;
+        recoverApiViewport(`${reason}:${delay}`, { force: true, delay: 1 });
+      }, delay);
+    });
+  }
+  window.runViewportRecoverySequence = runViewportRecoverySequence;
 
   function zoomToServerCluster(cluster) {
     if (!cluster || !viewer) return;
@@ -8827,8 +9071,8 @@ window.startBillingPortal = startBillingPortal;
     viewer.camera.flyTo({
       destination: Cesium.Rectangle.fromDegrees(west, south, east, north),
       duration: 0.85,
-      complete: () => scheduleApiViewportRefresh(true),
-      cancel: () => scheduleApiViewportRefresh(true),
+      complete: () => runViewportRecoverySequence('cluster-fly-complete'),
+      cancel: () => runViewportRecoverySequence('cluster-fly-cancel'),
     });
   }
 
@@ -8863,16 +9107,35 @@ window.startBillingPortal = startBillingPortal;
         viewer.camera.flyTo({
           destination: Cesium.Cartesian3.add(cartesian, new Cesium.Cartesian3(0, 0, height * 0.1), new Cesium.Cartesian3()),
           duration: 0.7,
-          complete: () => scheduleApiViewportRefresh(true),
+          complete: () => runViewportRecoverySequence('map-fly-complete'),
+          cancel: () => runViewportRecoverySequence('map-fly-cancel'),
         });
       }
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
   }
 
+  function schedulePostSelectionViewportRefresh(reason = 'select-camera') {
+    if (!API_MODE) return;
+    // Search/location fly-to can bypass the normal moveEnd cadence. Treat it the
+    // same way tab focus recovery is treated: force a deterministic renderer
+    // re-evaluation after Cesium has had time to settle, without changing the
+    // working renderer model.
+    setTimeout(() => runViewportRecoverySequence(reason), 120);
+    setTimeout(() => runViewportRecoverySequence(`${reason}:settled`), 850);
+  }
+  window.schedulePostSelectionViewportRefresh = schedulePostSelectionViewportRefresh;
+
   const originalSelectCamera = window.selectCamera || selectCamera;
   selectCamera = async function apiSelectCamera(cam) {
+    if (cam && cam._apiSearchResult) {
+      try { clearSearchResults(); } catch (_) {}
+    }
+
     const full = await hydrateCameraDetail(cam).catch(err => { console.warn('Camera detail failed:', err); return cam; });
-    return originalSelectCamera(full || cam);
+    const selected = full || cam;
+    const result = await originalSelectCamera(selected);
+    schedulePostSelectionViewportRefresh('select-camera');
+    return result;
   };
 
   const originalAddCameraToDashboard = window.addCameraToDashboard || addCameraToDashboard;
@@ -8899,7 +9162,10 @@ window.startBillingPortal = startBillingPortal;
     const q = (query || '').trim();
     if (q.length < 2) return [];
     const rows = await rpc('search_cameras', { search_text: q, max_results: max });
-    return rows.map(toCamelCamera).filter(Boolean).map(mergeCamera);
+    return rows.map(toCamelCamera).filter(Boolean).map(cam => {
+      cam._apiSearchResult = true;
+      return mergeCamera(cam);
+    });
   }
 
   async function runApiCameraSearch(query, { dashboard = false } = {}) {
@@ -9014,16 +9280,83 @@ window.startBillingPortal = startBillingPortal;
     });
   }
 
+  function updateClusterVisibilityForCurrentCamera() {
+    if (!dataSource || apiState.lastRenderedMode !== 'clusters') return;
+    try {
+      const values = dataSource.entities.values || [];
+      for (const entity of values) {
+        if (!entity || !entity._serverCluster) continue;
+        const v = pointVisibilityFactor(entity._serverCluster.lat, entity._serverCluster.lng);
+        entity.show = v > 0.08;
+        if (entity.point) {
+          const base = Cesium.Color.fromCssColorString(clusterColor(entity._serverCluster.count));
+          entity.point.color = base.withAlpha(entity.show ? (0.50 + Math.min(1, v) * 0.35) : 0);
+        }
+        if (entity.label) {
+          entity.label.show = entity.show && v > 0.22;
+        }
+      }
+      if (viewer) viewer.scene.requestRender();
+    } catch (_) {}
+  }
+
+  function setApiLayerMoving(isMoving) {
+    apiState.isMoving = !!isMoving;
+    // Do not hide the whole layer while moving. Keep the old layer visible and
+    // only update per-cluster horizon visibility so the app feels continuous.
+    updateClusterVisibilityForCurrentCamera();
+  }
+
   function installApiMoveHandlers() {
     if (!viewer || viewer._vigilApiMoveHandlersInstalled) return;
     viewer._vigilApiMoveHandlersInstalled = true;
-    viewer.camera.moveEnd.addEventListener(() => scheduleApiViewportRefresh(false));
-    viewer.camera.changed.addEventListener(() => scheduleApiViewportRefresh(false));
+
+    viewer.camera.moveStart.addEventListener(() => {
+      setApiLayerMoving(true);
+      // Do not invalidate in-flight requests here. Invalidating every movement
+      // was causing legitimate cluster/camera responses to be discarded, which
+      // made the layer appear to randomly stop loading after zooming in/out.
+    });
+
+    viewer.camera.moveEnd.addEventListener(() => {
+      setApiLayerMoving(false);
+      runViewportRecoverySequence('moveEnd');
+    });
+
+    viewer.camera.changed.addEventListener(() => {
+      updateClusterVisibilityForCurrentCamera();
+      // Zoom threshold crossings should update immediately; ordinary same-mode
+      // viewport movement remains lightly throttled.
+      const desired = chooseApiLayerMode();
+      if (desired !== apiState.lastRenderedMode || desired !== apiState.lastDesiredMode) {
+        const now = Date.now();
+        if (now - apiState.lastRecoveryAt > 220) runViewportRecoverySequence('camera.changed');
+        else enforceImmediateModeTransition('camera.changed');
+      } else {
+        scheduleApiViewportRefresh(false, 70);
+      }
+    });
+
     viewer.scene.postRender.addEventListener(() => {
       if (!apiState.booted) return;
-      // Safety net for cases where Cesium settles after load without a camera event.
-      if (Date.now() - apiState.lastRefreshAt > 5000) scheduleApiViewportRefresh(false);
+      const now = Date.now();
+      const desiredMode = chooseApiLayerMode();
+      const modeMismatch = desiredMode !== apiState.lastDesiredMode || desiredMode !== apiState.lastRenderedMode;
+      if (modeMismatch && now - apiState.lastHealthCheckAt > 250) {
+        apiState.lastHealthCheckAt = now;
+        runViewportRecoverySequence('postRender-mode-mismatch');
+        return;
+      }
+      // Safety net for missed Cesium events / tab restoration.
+      if (now - apiState.lastRefreshAt > 2200) scheduleApiViewportRefresh(false, 60);
     });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') runViewportRecoverySequence('visibility');
+    });
+    window.addEventListener('focus', () => runViewportRecoverySequence('focus'));
+    window.addEventListener('pageshow', () => runViewportRecoverySequence('pageshow'));
+    window.addEventListener('resize', () => runViewportRecoverySequence('resize'));
   }
 
   async function startApiMode() {
@@ -9041,11 +9374,11 @@ window.startBillingPortal = startBillingPortal;
     const dashSearchBtn = document.getElementById('dashboardSearchRun');
     if (dashSearchBtn) dashSearchBtn.onclick = runDashboardSearch;
     document.getElementById('cameraCount').textContent = `${CAMERA_TOTAL_ESTIMATE.toLocaleString()} indexed`;
-    document.getElementById('statusCameras').textContent = 'Loading camera index…';
+    document.getElementById('statusCameras').textContent = 'Loading camera layer…';
     hydrateSavedDashboardCameras();
-    setTimeout(() => refreshApiViewport(true), 100);
-    setTimeout(() => refreshApiViewport(true), 1000);
-    setTimeout(() => refreshApiViewport(true), 2600);
+    setTimeout(() => runViewportRecoverySequence('startup'), 80);
+    setTimeout(() => runViewportRecoverySequence('startup-warm'), 700);
+    setTimeout(() => runViewportRecoverySequence('startup-final'), 1700);
   }
 
   document.addEventListener('DOMContentLoaded', () => {
