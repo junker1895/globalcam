@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vigil — Global Camera Intelligence</title>
+<!-- Patch: distance-aware 3D marker placement. Background markers are visibility-first; selected marker/frustum are surface-aware. -->
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
@@ -2554,11 +2555,12 @@ let frustumTilt  = 15;
 // appear inside the photogrammetry mesh at low camera angles. The app therefore
 // uses a deliberately conservative screen-visible 3D display altitude and disables
 // depth testing. This prioritises operational visibility over exact mesh contact.
-const CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M = 220;
+const CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M = 0;
 const CAMERA_3D_NORMAL_VISUAL_HEIGHT_M = 220;
 const CAMERA_3D_MARKER_LIFT_M = 0;
-const CAMERA_3D_SELECTED_LIFT_M = 10;
-const CAMERA_3D_FRUSTUM_LIFT_M = 12;
+const CAMERA_3D_SELECTED_LIFT_M = 4.5;
+const CAMERA_3D_FRUSTUM_LIFT_M = 5.5;
+const CAMERA_3D_SELECTED_FALLBACK_HEIGHT_M = 28;
 const CAMERA_3D_SELECTED_HEIGHT_TIMEOUT_MS = 950;
 const CAMERA_3D_SURFACE_CACHE_PRECISION = 5;
 const cameraSurfaceHeightCache = new Map();
@@ -2732,9 +2734,23 @@ function visualCameraHeight(baseHeight = 0, extraLift = 0) {
   const base = Number(baseHeight);
   if (google3DEnabled) {
     const safeBase = Number.isFinite(base) ? base : CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M;
-    // Never allow a 3D marker/frustum origin below this display altitude. This
-    // prevents icons and frustum lines from being drawn underneath Google tiles.
+    // Visibility-first placement for unselected/background cameras. These dots
+    // intentionally float high enough to remain visible while zoomed out and
+    // while Google 3D tiles stream. Selected cameras use selectedCameraHeight()
+    // instead so the frustum stays physically meaningful when zoomed in.
     return Math.max(safeBase, CAMERA_3D_NORMAL_VISUAL_HEIGHT_M) + (Number(extraLift) || 0);
+  }
+  return Math.max(0, Number(baseHeight) || 0);
+}
+
+function selectedCameraHeight(baseHeight = 0, extraLift = CAMERA_3D_SELECTED_LIFT_M) {
+  const base = Number(baseHeight);
+  if (google3DEnabled) {
+    const safeBase = Number.isFinite(base) ? base : CAMERA_3D_SELECTED_FALLBACK_HEIGHT_M;
+    // Accuracy-first placement for selected cameras/frustums. Do not apply the
+    // high visibility floor used by background markers; that made selected
+    // frustums float far above the road when zoomed in.
+    return Math.max(safeBase, CAMERA_3D_SELECTED_FALLBACK_HEIGHT_M) + (Number(extraLift) || 0);
   }
   return Math.max(0, Number(baseHeight) || 0);
 }
@@ -2812,7 +2828,7 @@ async function applySelectedCameraEntityStyle(cam) {
   const heading = inferHeading(cam);
   const colour = heading === null ? Cesium.Color.fromCssColorString('#2563eb') : getDirColor(heading);
   const groundH = google3DEnabled ? await sampleGroundHeight(cam.lng, cam.lat) : 0;
-  const selectedHeight = google3DEnabled ? visualCameraHeight(groundH, CAMERA_3D_SELECTED_LIFT_M) : 0;
+  const selectedHeight = google3DEnabled ? selectedCameraHeight(groundH, CAMERA_3D_SELECTED_LIFT_M) : 0;
 
   try {
     selectedCameraEntityId = cam.id;
@@ -3645,7 +3661,8 @@ async function sampleGroundHeight(lng, lat) {
   // Selected-camera only. Cap the wait so clicking a camera does not feel slow
   // while Google tiles are still streaming. If the detailed height arrives later
   // it is cached for the next selection/refresh.
-  const fallback = CAMERA_3D_NORMAL_VISUAL_HEIGHT_M;
+  const cached = cachedCameraSurfaceHeight(lng, lat);
+  const fallback = Number.isFinite(Number(cached)) ? Number(cached) : CAMERA_3D_SELECTED_FALLBACK_HEIGHT_M;
   try {
     return await Promise.race([
       getCameraSurfaceHeight(lng, lat),
@@ -3665,7 +3682,7 @@ function buildFrustumPolylines(lng, lat, groundHeight, heading, originOverride =
   const HFOV_V = (frustumFovH / 2) * (9 / 16);
 
   const originHeight = google3DEnabled
-    ? visualCameraHeight(groundHeight, CAMERA_3D_FRUSTUM_LIFT_M)
+    ? selectedCameraHeight(groundHeight, CAMERA_3D_FRUSTUM_LIFT_M)
     : visualCameraHeight(groundHeight + POLE, 0);
   const origin     = originOverride || Cesium.Cartesian3.fromDegrees(lng, lat, originHeight);
   const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
