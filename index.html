@@ -2955,7 +2955,24 @@ async function refineSelectedCameraSurfaceAfterTiles(expectedTilesToken = null) 
   }
 
   positionSelectedCameraEntityAtGround(cam, entity, h);
-  if (frustumsEnabled) showFrustum(cam, { groundHeight: h, resolved: true });
+
+  // Use the resolved sampled surface height as the single authoritative FOV
+  // anchor. Do not re-read the entity position here: the selected entity is
+  // hidden/restored during the sampling lifecycle, and reading it indirectly
+  // can leave the frustum disconnected even though the selected dot is correct.
+  const resolvedFovAnchor = Cesium.Cartesian3.fromDegrees(
+    Number(cam.lng),
+    Number(cam.lat),
+    selectedCameraHeight(h, CAMERA_3D_FRUSTUM_LIFT_M)
+  );
+
+  if (frustumsEnabled) {
+    showFrustum(cam, {
+      groundHeight: h,
+      resolved: true,
+      originCartesian: resolvedFovAnchor,
+    });
+  }
   try { viewer.scene.requestRender(); } catch (_) {}
 }
 
@@ -3911,13 +3928,14 @@ async function showFrustum(cam, options = {}) {
     groundHeight = await sampleGroundHeight(cam.lng, cam.lat);
   }
 
+  // In 3D mode the frustum must be built from the explicit resolved anchor
+  // supplied by the selected-camera surface resolver. This avoids relying on
+  // the selected entity's transient show/position state during async sampling.
   let originOverride = null;
-  try {
-    const selectedEntity = dataSource ? dataSource.entities.getById(cam.id) : null;
-    if (selectedEntity && selectedEntity.position) {
-      originOverride = selectedEntity.position.getValue(viewer.clock.currentTime || Cesium.JulianDate.now());
-    }
-  } catch (_) {}
+  if (google3DEnabled && options.originCartesian instanceof Cesium.Cartesian3) {
+    originOverride = options.originCartesian;
+  }
+
   const coll = buildFrustumPolylines(cam.lng, cam.lat, groundHeight, heading, originOverride);
   viewer.scene.primitives.add(coll);
   currentFrustumPrimitive = coll;
