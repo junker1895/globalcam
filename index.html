@@ -2552,20 +2552,94 @@ let frustumTilt  = 15;
 // the tileset mesh. We therefore render camera entities a small fixed distance
 // above the WGS84 surface and disable depth testing, instead of relying on
 // sampled 3D-tile heights which can be unstable and make beacons float in the sky.
-const CAMERA_3D_MARKER_HEIGHT_M = 18;
-const CAMERA_3D_SELECTED_EXTRA_M = 4;
-const CAMERA_3D_FRUSTUM_HEIGHT_M = 20;
+const CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M = 35;
+const CAMERA_3D_MARKER_LIFT_M = 7;
+const CAMERA_3D_SELECTED_LIFT_M = 9;
+const CAMERA_3D_FRUSTUM_LIFT_M = 10;
+const CAMERA_3D_SURFACE_CACHE_PRECISION = 5;
+const cameraSurfaceHeightCache = new Map();
+const cameraSurfaceHeightPending = new Map();
 
-function visualCameraHeight(baseHeight = 0, extraLift = 0) {
-  const base = Math.max(0, Number(baseHeight) || 0);
-  return google3DEnabled ? (base + extraLift) : base;
+function surfaceHeightCacheKey(lng, lat) {
+  return `${Number(lng).toFixed(CAMERA_3D_SURFACE_CACHE_PRECISION)},${Number(lat).toFixed(CAMERA_3D_SURFACE_CACHE_PRECISION)}`;
 }
 
-function cameraEntityPosition(lng, lat, baseHeight = 0) {
+function saneSurfaceHeight(h) {
+  const n = Number(h);
+  // Photorealistic 3D tiles occasionally return nonsense during tile transitions.
+  // Keep the range generous enough for real elevated terrain, but reject values
+  // that would make markers/frustums fly into the sky or disappear underground.
+  return Number.isFinite(n) && n > -250 && n < 2500 ? n : null;
+}
+
+async function getCameraSurfaceHeight(lng, lat) {
+  if (!google3DEnabled || !viewer || !viewer.scene) return 0;
+  const key = surfaceHeightCacheKey(lng, lat);
+  if (cameraSurfaceHeightCache.has(key)) return cameraSurfaceHeightCache.get(key);
+  if (cameraSurfaceHeightPending.has(key)) return cameraSurfaceHeightPending.get(key);
+
+  const task = (async () => {
+    let h = null;
+
+    // Best source in Google Photorealistic 3D mode: rendered 3D tile height.
+    try {
+      if (viewer.scene.sampleHeightMostDetailed) {
+        const result = await viewer.scene.sampleHeightMostDetailed([Cesium.Cartographic.fromDegrees(Number(lng), Number(lat))]);
+        if (result && result[0]) h = saneSurfaceHeight(result[0].height);
+      }
+    } catch (_) {}
+
+    // Fallback: clamp a point above the camera down to the visible 3D tile mesh.
+    try {
+      if (h === null && viewer.scene.clampToHeightMostDetailed) {
+        const p = Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), 500);
+        const result = await viewer.scene.clampToHeightMostDetailed([p]);
+        if (result && result[0]) {
+          h = saneSurfaceHeight(Cesium.Cartographic.fromCartesian(result[0]).height);
+        }
+      }
+    } catch (_) {}
+
+    // Fallback for ordinary globe terrain.
+    try {
+      if (h === null && viewer.scene.globe) {
+        h = saneSurfaceHeight(viewer.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(Number(lng), Number(lat))));
+      }
+    } catch (_) {}
+
+    if (h === null) h = CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M;
+    cameraSurfaceHeightCache.set(key, h);
+    cameraSurfaceHeightPending.delete(key);
+    return h;
+  })();
+
+  cameraSurfaceHeightPending.set(key, task);
+  return task;
+}
+
+function visualCameraHeight(baseHeight = 0, extraLift = 0) {
+  const base = Number(baseHeight);
+  return google3DEnabled
+    ? (Number.isFinite(base) ? base : CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M) + extraLift
+    : Math.max(0, Number(baseHeight) || 0);
+}
+
+function cameraEntityPosition(lng, lat, baseHeight = 0, extraLift = CAMERA_3D_MARKER_LIFT_M) {
   const h = google3DEnabled
-    ? Math.max(CAMERA_3D_MARKER_HEIGHT_M, Number(baseHeight) || 0)
+    ? visualCameraHeight(baseHeight || CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, extraLift)
     : Math.max(0, Number(baseHeight) || 0);
   return Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), h);
+}
+
+function raiseCesiumCameraEntityToSurface(entity, lng, lat, lift = CAMERA_3D_MARKER_LIFT_M) {
+  if (!entity || !google3DEnabled) return;
+  getCameraSurfaceHeight(lng, lat).then(surfaceH => {
+    try {
+      if (!entity || !viewer || !dataSource || !dataSource.entities.getById(entity.id)) return;
+      entity.position = new Cesium.ConstantPositionProperty(cameraEntityPosition(lng, lat, surfaceH, lift));
+      entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
+    } catch (_) {}
+  });
 }
 
 // Dashboard state
@@ -3358,18 +3432,7 @@ function dashboardCameraMarker(cam, options = {}) {
 //  FRUSTUM WIREFRAME
 // ==========================================================
 async function sampleGroundHeight(lng, lat) {
-  try {
-    const result = await viewer.scene.sampleHeightMostDetailed(
-      [Cesium.Cartographic.fromDegrees(lng, lat)]
-    );
-    if (result && result[0] && isFinite(result[0].height)) return result[0].height;
-  } catch (_) {}
-  try {
-    const pt = Cesium.Cartesian3.fromDegrees(lng, lat, 2000);
-    const result = await viewer.scene.clampToHeightMostDetailed([pt]);
-    if (result && result[0]) return Cesium.Cartographic.fromCartesian(result[0]).height;
-  } catch (_) {}
-  return 0;
+  return getCameraSurfaceHeight(lng, lat);
 }
 
 function buildFrustumPolylines(lng, lat, groundHeight, heading) {
@@ -3381,7 +3444,7 @@ function buildFrustumPolylines(lng, lat, groundHeight, heading) {
   const HFOV_V = (frustumFovH / 2) * (9 / 16);
 
   const originHeight = google3DEnabled
-    ? CAMERA_3D_FRUSTUM_HEIGHT_M
+    ? visualCameraHeight(groundHeight, CAMERA_3D_FRUSTUM_LIFT_M)
     : visualCameraHeight(groundHeight + POLE, 0);
   const origin     = Cesium.Cartesian3.fromDegrees(lng, lat, originHeight);
   const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
@@ -3497,11 +3560,15 @@ function showSelectedCameraMarker(cam, height = 0) {
   // In 3D Tiles mode, keep the selected marker close to the visual surface.
   // Do not use sampled photogrammetry heights here: they can occasionally return
   // unstable values and make the selected camera appear high in the sky.
+  const surfaceHeight = google3DEnabled
+    ? (Number.isFinite(Number(height)) ? Number(height) : CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M)
+    : Math.max(0, Number(height) || 0);
   const baseHeight = google3DEnabled
-    ? CAMERA_3D_MARKER_HEIGHT_M
-    : Math.max(0, Number(height) || 0) + 1.5;
-  const beaconHeight = google3DEnabled ? CAMERA_3D_SELECTED_EXTRA_M : 1400;
-  const topHeight = baseHeight + beaconHeight;
+    ? visualCameraHeight(surfaceHeight, 0.7)
+    : surfaceHeight + 1.5;
+  const topHeight = google3DEnabled
+    ? visualCameraHeight(surfaceHeight, CAMERA_3D_SELECTED_LIFT_M)
+    : baseHeight + 1400;
   const basePos = Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, baseHeight);
   const topPos = Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, topHeight);
 
@@ -4049,6 +4116,7 @@ async function createCameraEntities(cams) {
       });
       entity._bfp       = entity.position.getValue(Cesium.JulianDate.now());
       entity._searchOff = false;
+      raiseCesiumCameraEntityToSurface(entity, cam.lng, cam.lat);
     });
 
     done += chunk.length;
@@ -4121,6 +4189,7 @@ async function selectCamera(cam) {
       prevEntity.position = new Cesium.ConstantPositionProperty(
         cameraEntityPosition(selectedCamera.lng, selectedCamera.lat, 0)
       );
+      raiseCesiumCameraEntityToSurface(prevEntity, selectedCamera.lng, selectedCamera.lat);
     }
   }
 
@@ -4139,7 +4208,7 @@ async function selectCamera(cam) {
 
   showFrustum(cam);
 
-  const groundH = google3DEnabled ? 0 : await sampleGroundHeight(cam.lng, cam.lat);
+  const groundH = await sampleGroundHeight(cam.lng, cam.lat);
   const heading  = inferHeading(cam);
   showSelectedCameraMarker(cam, groundH);
 
@@ -4167,7 +4236,7 @@ async function selectCamera(cam) {
   };
   const backAngle = (cameraHeading + 180) % 360;
   const hRad      = Cesium.Math.toRadians(backAngle);
-  const camPos    = cameraEntityPosition(cam.lng, cam.lat, google3DEnabled ? CAMERA_3D_MARKER_HEIGHT_M : groundH);
+  const camPos    = cameraEntityPosition(cam.lng, cam.lat, groundH, CAMERA_3D_SELECTED_LIFT_M);
   const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(camPos);
 
   if (google3DEnabled) {
@@ -6708,7 +6777,7 @@ function highlightAreaMatches() {
   const matched = areaSelection.matchedIds.map(id => cameraMap.get(id)).filter(Boolean);
   if (viewer) {
     areaSelection.cesiumHighlightEntities = matched.slice(0, 5000).map(cam => viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, 0),
+      position: cameraEntityPosition(cam.lng, cam.lat, 0),
       point: {
         pixelSize: 10,
         color: Cesium.Color.fromCssColorString('#f59e0b'),
@@ -9082,13 +9151,13 @@ window.startBillingPortal = startBillingPortal;
     const color = Cesium.Color.fromCssColorString(clusterColor(count)).withAlpha(0.58 + visibility * 0.30);
     const entity = dataSource.entities.add({
       id,
-      position: Cesium.Cartesian3.fromDegrees(lng, lat, 0),
+      position: cameraEntityPosition(lng, lat, 0),
       point: {
         pixelSize: size,
         color,
         outlineColor: Cesium.Color.WHITE.withAlpha(0.72),
         outlineWidth: 1.5,
-        disableDepthTestDistance: 0,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       label: {
         text: clusterLabel(count),
@@ -9100,12 +9169,13 @@ window.startBillingPortal = startBillingPortal;
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         pixelOffset: new Cesium.Cartesian2(0, 0),
-        disableDepthTestDistance: 0,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
         translucencyByDistance: new Cesium.NearFarScalar(0, 1, 18000000, 0.88),
       },
     });
     entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
     entity._searchOff = false;
+    raiseCesiumCameraEntityToSurface(entity, lng, lat, CAMERA_3D_MARKER_LIFT_M);
     entity._serverCluster = {
       id,
       count,
@@ -9125,7 +9195,7 @@ window.startBillingPortal = startBillingPortal;
     const color = getDirColor(heading);
     const graphics = {
       id: String(cam.id),
-      position: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, 0),
+      position: cameraEntityPosition(cam.lng, cam.lat, 0),
       point: {
         pixelSize: 7,
         color,
@@ -9165,6 +9235,7 @@ window.startBillingPortal = startBillingPortal;
     const entity = dataSource.entities.add(graphics);
     entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
     entity._searchOff = false;
+    raiseCesiumCameraEntityToSurface(entity, cam.lng, cam.lat);
   }
 
   function renderApiEntities(items, mode) {
