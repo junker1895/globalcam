@@ -2553,9 +2553,15 @@ let frustumTilt  = 15;
 // above the WGS84 surface and disable depth testing, instead of relying on
 // sampled 3D-tile heights which can be unstable and make beacons float in the sky.
 const CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M = 35;
+// Normal nearby markers must be fast. Do not sample 3D tile heights for every
+// visible camera; it makes zooming and API refreshes noticeably slower. Keep them
+// at a stable visual height and disable depth testing so photogrammetry cannot
+// hide them. Only the selected camera/frustum samples the true surface height.
+const CAMERA_3D_NORMAL_VISUAL_HEIGHT_M = 85;
 const CAMERA_3D_MARKER_LIFT_M = 7;
 const CAMERA_3D_SELECTED_LIFT_M = 9;
 const CAMERA_3D_FRUSTUM_LIFT_M = 10;
+const CAMERA_3D_SELECTED_HEIGHT_TIMEOUT_MS = 550;
 const CAMERA_3D_SURFACE_CACHE_PRECISION = 5;
 const cameraSurfaceHeightCache = new Map();
 const cameraSurfaceHeightPending = new Map();
@@ -2633,13 +2639,16 @@ function cameraEntityPosition(lng, lat, baseHeight = 0, extraLift = CAMERA_3D_MA
 
 function raiseCesiumCameraEntityToSurface(entity, lng, lat, lift = CAMERA_3D_MARKER_LIFT_M) {
   if (!entity || !google3DEnabled) return;
-  getCameraSurfaceHeight(lng, lat).then(surfaceH => {
-    try {
-      if (!entity || !viewer || !dataSource || !dataSource.entities.getById(entity.id)) return;
-      entity.position = new Cesium.ConstantPositionProperty(cameraEntityPosition(lng, lat, surfaceH, lift));
-      entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
-    } catch (_) {}
-  });
+  try {
+    // Performance-critical path: this runs for every visible/nearby camera.
+    // Never call sampleHeightMostDetailed/clampToHeightMostDetailed here.
+    // A stable elevated position + depth-test bypass keeps dots visible over
+    // Google 3D tiles without stalling viewport refresh or camera selection.
+    entity.position = new Cesium.ConstantPositionProperty(
+      cameraEntityPosition(lng, lat, CAMERA_3D_NORMAL_VISUAL_HEIGHT_M, lift)
+    );
+    entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
+  } catch (_) {}
 }
 
 // Dashboard state
@@ -3432,7 +3441,19 @@ function dashboardCameraMarker(cam, options = {}) {
 //  FRUSTUM WIREFRAME
 // ==========================================================
 async function sampleGroundHeight(lng, lat) {
-  return getCameraSurfaceHeight(lng, lat);
+  if (!google3DEnabled) return 0;
+  // Selected-camera only. Cap the wait so clicking a camera does not feel slow
+  // while Google tiles are still streaming. If the detailed height arrives later
+  // it is cached for the next selection/refresh.
+  const fallback = CAMERA_3D_NORMAL_VISUAL_HEIGHT_M;
+  try {
+    return await Promise.race([
+      getCameraSurfaceHeight(lng, lat),
+      new Promise(resolve => setTimeout(() => resolve(fallback), CAMERA_3D_SELECTED_HEIGHT_TIMEOUT_MS))
+    ]);
+  } catch (_) {
+    return fallback;
+  }
 }
 
 function buildFrustumPolylines(lng, lat, groundHeight, heading) {
