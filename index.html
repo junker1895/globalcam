@@ -10248,6 +10248,66 @@ window.startBillingPortal = startBillingPortal;
     }), 80);
   });
 })();
+
+window.__debugSampleHeight = async function(lon, lat, excludeObjects = []) {
+  try {
+    console.log('[FOV DEBUG] Starting sample test', { lon, lat });
+
+    const carto = Cesium.Cartographic.fromDegrees(lon, lat);
+
+    // Wait briefly for visible tiles to settle.
+    await new Promise(r => setTimeout(r, 1200));
+
+    const sampled = viewer.scene.sampleHeight(carto, excludeObjects);
+
+    console.log('[FOV DEBUG] sampleHeight result:', sampled);
+
+    if (sampled === undefined || sampled === null || !Number.isFinite(sampled)) {
+      console.warn('[FOV DEBUG] Invalid sample height');
+      return null;
+    }
+
+    const finalHeight = sampled + 3.0;
+
+    console.log('[FOV DEBUG] Final camera height:', finalHeight);
+
+    const pos = Cesium.Cartesian3.fromDegrees(lon, lat, finalHeight);
+
+    if (window.__debugHeightEntity) {
+      viewer.entities.remove(window.__debugHeightEntity);
+    }
+
+    window.__debugHeightEntity = viewer.entities.add({
+      position: pos,
+      point: {
+        pixelSize: 16,
+        color: Cesium.Color.LIME,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
+      },
+      label: {
+        text: 'HEIGHT OK',
+        font: '14px sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        showBackground: true,
+        backgroundColor: Cesium.Color.BLACK,
+        pixelOffset: new Cesium.Cartesian2(0, -28),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
+      }
+    });
+
+    return {
+      sampled,
+      finalHeight
+    };
+
+  } catch (err) {
+    console.error('[FOV DEBUG] sampleHeight failed', err);
+    return null;
+  }
+};
+
 </script>
 
 </body>
