@@ -4442,6 +4442,36 @@ function populateSidePanel(cam) {
   // Prefer video feed when available, fall back to image, including feeds stored only in views[].
   setFeed(primaryFeed.imageUrl || null, primaryFeed.videoUrl || null);
 
+  // If the clicked marker came from a bbox/search summary that did not contain
+  // image_url/views yet, do a one-shot authoritative detail lookup and refresh
+  // the open panel/PiP when the full row arrives. This prevents the first click
+  // showing "No feed" and the second click working because the detail cache has
+  // finally warmed.
+  if (!feedUrl && cam && cam.id && !cam._feedHydrateAttempted && typeof hydrateCameraDetail === 'function') {
+    cam._feedHydrateAttempted = true;
+    const status = document.getElementById('pip-refresh-status');
+    if (status) status.textContent = 'Looking up feed…';
+    setTimeout(async () => {
+      try {
+        const full = await hydrateCameraDetail(cam);
+        const fullFeed = getCameraFeed(full);
+        if (selectedCamera && full && String(selectedCamera.id) === String(cam.id) && (fullFeed.imageUrl || fullFeed.videoUrl)) {
+          selectedCamera = full;
+          populateSidePanel(full);
+        } else if (selectedCamera && String(selectedCamera.id) === String(cam.id)) {
+          const s = document.getElementById('pip-refresh-status');
+          if (s) s.textContent = 'No feed';
+        }
+      } catch (err) {
+        console.warn('Selected camera feed hydration failed:', err);
+        if (selectedCamera && String(selectedCamera.id) === String(cam.id)) {
+          const s = document.getElementById('pip-refresh-status');
+          if (s) s.textContent = 'No feed';
+        }
+      }
+    }, 0);
+  }
+
   // Open PiP with this camera's title
   let pipTitle = cam.location || cam.id;
   if (pipTitle.includes(' - ')) {
