@@ -2568,6 +2568,22 @@ const CAMERA_3D_POLE_WIDTH_PX = 1.35;
 const cameraSurfaceHeightCache = new Map();
 const cameraSurfaceHeightPending = new Map();
 
+function waitForCesiumPostRenderFrame() {
+  return new Promise(resolve => {
+    try {
+      if (!viewer || !viewer.scene || !viewer.scene.postRender) { resolve(); return; }
+      const remove = viewer.scene.postRender.addEventListener(() => {
+        try { remove(); } catch (_) {}
+        resolve();
+      });
+      try { viewer.scene.requestRender(); } catch (_) {}
+      setTimeout(resolve, 90);
+    } catch (_) {
+      resolve();
+    }
+  });
+}
+
 function surfaceHeightCacheKey(lng, lat) {
   return `${Number(lng).toFixed(CAMERA_3D_SURFACE_CACHE_PRECISION)},${Number(lat).toFixed(CAMERA_3D_SURFACE_CACHE_PRECISION)}`;
 }
@@ -2580,14 +2596,31 @@ function saneSurfaceHeight(h) {
   return Number.isFinite(n) && n > -250 && n < 2500 ? n : null;
 }
 
-async function getCameraSurfaceHeight(lng, lat) {
+async function getCameraSurfaceHeight(lng, lat, options = {}) {
   if (!google3DEnabled || !viewer || !viewer.scene) return 0;
   const key = surfaceHeightCacheKey(lng, lat);
-  if (cameraSurfaceHeightCache.has(key)) return cameraSurfaceHeightCache.get(key);
-  if (cameraSurfaceHeightPending.has(key)) return cameraSurfaceHeightPending.get(key);
+  const skipCache = !!options.skipCache;
+  if (!skipCache && cameraSurfaceHeightCache.has(key)) return cameraSurfaceHeightCache.get(key);
+  if (!skipCache && cameraSurfaceHeightPending.has(key)) return cameraSurfaceHeightPending.get(key);
 
   const task = (async () => {
     let h = null;
+    const hiddenEntity = options.hideEntity || null;
+    let previousEntityShow = null;
+
+    // Critical: selected-height sampling must not see this app's own marker pole.
+    // Cesium scene height sampling can hit rendered primitives/entities at the
+    // same coordinate; if the background 220 m pole is visible, the selected
+    // marker/frustum can be incorrectly promoted to pole height. Hide the one
+    // selected entity for a render frame, sample only the loaded 3D surface, then
+    // restore it.
+    if (hiddenEntity) {
+      try {
+        previousEntityShow = hiddenEntity.show;
+        hiddenEntity.show = false;
+        await waitForCesiumPostRenderFrame();
+      } catch (_) {}
+    }
 
     // Best source in Google Photorealistic 3D mode: rendered 3D tile height.
     try {
@@ -2616,12 +2649,18 @@ async function getCameraSurfaceHeight(lng, lat) {
     } catch (_) {}
 
     if (h === null) h = CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M;
-    cameraSurfaceHeightCache.set(key, h);
+
+    if (hiddenEntity) {
+      try { hiddenEntity.show = previousEntityShow !== null ? previousEntityShow : true; } catch (_) {}
+      try { viewer.scene.requestRender(); } catch (_) {}
+    }
+
+    if (!skipCache) cameraSurfaceHeightCache.set(key, h);
     cameraSurfaceHeightPending.delete(key);
     return h;
   })();
 
-  cameraSurfaceHeightPending.set(key, task);
+  if (!skipCache) cameraSurfaceHeightPending.set(key, task);
   return task;
 }
 
@@ -2866,7 +2905,7 @@ async function applySelectedCameraEntityStyle(cam) {
 
   const heading = inferHeading(cam);
   const colour = heading === null ? Cesium.Color.fromCssColorString('#2563eb') : getDirColor(heading);
-  const groundH = google3DEnabled ? await sampleGroundHeight(cam.lng, cam.lat) : 0;
+  const groundH = google3DEnabled ? await sampleGroundHeight(cam.lng, cam.lat, { hideEntity: entity, forceResample: true }) : 0;
   const selectedHeight = google3DEnabled ? selectedCameraHeight(groundH, CAMERA_3D_SELECTED_LIFT_M) : 0;
 
   try {
@@ -3696,12 +3735,12 @@ function dashboardCameraMarker(cam, options = {}) {
 // ==========================================================
 //  FRUSTUM WIREFRAME
 // ==========================================================
-async function sampleGroundHeight(lng, lat) {
+async function sampleGroundHeight(lng, lat, options = {}) {
   if (!google3DEnabled) return 0;
   // Selected-camera only. Cap the wait so clicking a camera does not feel slow
   // while Google tiles are still streaming. If the detailed height arrives later
   // it is cached for the next selection/refresh.
-  const cached = cachedCameraSurfaceHeight(lng, lat);
+  const cached = options.forceResample ? null : cachedCameraSurfaceHeight(lng, lat);
   let fallback = Number.isFinite(Number(cached)) ? Number(cached) : CAMERA_3D_SELECTED_FALLBACK_HEIGHT_M;
   if (!Number.isFinite(Number(cached))) {
     try {
@@ -3713,7 +3752,7 @@ async function sampleGroundHeight(lng, lat) {
   }
   try {
     return await Promise.race([
-      getCameraSurfaceHeight(lng, lat),
+      getCameraSurfaceHeight(lng, lat, { hideEntity: options.hideEntity || null, skipCache: !!options.forceResample }),
       new Promise(resolve => setTimeout(() => resolve(fallback), CAMERA_3D_SELECTED_HEIGHT_TIMEOUT_MS))
     ]);
   } catch (_) {
