@@ -723,6 +723,28 @@ body {
   margin-bottom: 3px;
 }
 
+#frustumInfo.loading {
+  display: block;
+}
+#frustumInfo.loading .frust-label {
+  color: var(--c-warn);
+}
+#frustumInfo.loading::before {
+  content: '';
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 7px;
+  border-radius: 999px;
+  border: 2px solid rgba(217,119,6,0.22);
+  border-top-color: var(--c-warn);
+  animation: tilesSpin 800ms linear infinite;
+  vertical-align: -1px;
+}
+#frustumInfo.error .frust-label {
+  color: var(--c-danger);
+}
+
 /* ─── SIDE PANEL ─── */
 #sidePanel {
   position: fixed;
@@ -2903,13 +2925,17 @@ function selectedGroundHeightFastFallback(lng, lat) {
   const cached = cachedCameraSurfaceHeight(lng, lat);
   if (Number.isFinite(Number(cached))) return Number(cached);
 
-  // Do not use ellipsoid/terrain zero as the first-click 3D fallback. In Google
-  // Photorealistic 3D Tiles, distant destination tiles may not be loaded yet;
-  // a zero-height fallback can put the selected dot/frustum under the streamed
-  // mesh until the user clicks again. Start at the background pole top height,
-  // then refine down to the sampled surface height once the destination tiles
-  // are actually available.
-  return google3DEnabled ? CAMERA_3D_SELECTED_FALLBACK_HEIGHT_M : 0;
+  // Fallback is used only for camera flight/temporary selected styling. The
+  // field-of-view wireframe is intentionally withheld until a real 3D tile
+  // surface height has been resolved. Never reuse the tall background pole
+  // height as a physical camera/frustum anchor.
+  try {
+    if (viewer && viewer.scene && viewer.scene.globe) {
+      const gh = saneSurfaceHeight(viewer.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(Number(lng), Number(lat))));
+      if (gh !== null) return gh;
+    }
+  } catch (_) {}
+  return 0;
 }
 
 function positionSelectedCameraEntityAtGround(cam, entity, groundH) {
@@ -2926,6 +2952,7 @@ function positionSelectedCameraEntityAtGround(cam, entity, groundH) {
       bottomHeight: google3DEnabled ? Number(groundH) || 0 : 0,
     });
     if (entity.point) {
+      entity.point.show = true;
       entity.point.heightReference = Cesium.HeightReference.NONE;
       entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
@@ -2934,6 +2961,7 @@ function positionSelectedCameraEntityAtGround(cam, entity, groundH) {
       entity.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
     if (entity.label) {
+      entity.label.show = true;
       entity.label.heightReference = Cesium.HeightReference.NONE;
       entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
@@ -2941,6 +2969,95 @@ function positionSelectedCameraEntityAtGround(cam, entity, groundH) {
 }
 
 let selectedCameraSurfaceRefineToken = 0;
+
+function setFovLoadingState(message = 'Positioning field of view…') {
+  const fi = document.getElementById('frustumInfo');
+  const ft = document.getElementById('frustumInfoText');
+  if (fi) {
+    fi.classList.add('loading');
+    fi.classList.remove('error');
+    fi.style.display = 'block';
+  }
+  if (ft) ft.textContent = message;
+  const status = document.getElementById('statusFrustum');
+  const statusText = document.getElementById('statusFrustumText');
+  if (status) status.style.display = 'flex';
+  if (statusText) statusText.textContent = 'FOV: positioning…';
+}
+
+function setFovErrorState(message = 'Field of view unavailable — surface height could not be resolved.') {
+  const fi = document.getElementById('frustumInfo');
+  const ft = document.getElementById('frustumInfoText');
+  if (fi) {
+    fi.classList.remove('loading');
+    fi.classList.add('error');
+    fi.style.display = 'block';
+  }
+  if (ft) ft.textContent = message;
+  const status = document.getElementById('statusFrustum');
+  const statusText = document.getElementById('statusFrustumText');
+  if (status) status.style.display = 'flex';
+  if (statusText) statusText.textContent = 'FOV: unavailable';
+}
+
+function clearFovLoadingState() {
+  const fi = document.getElementById('frustumInfo');
+  if (fi) {
+    fi.classList.remove('loading');
+    fi.classList.remove('error');
+  }
+}
+
+async function getCameraSurfaceHeightStrict(lng, lat, entityToHide = null) {
+  if (!google3DEnabled || !viewer || !viewer.scene) return 0;
+  let h = null;
+  let previousEntityShow = null;
+
+  try {
+    if (entityToHide) {
+      previousEntityShow = entityToHide.show;
+      entityToHide.show = false;
+      await waitForCesiumPostRenderFrame();
+    }
+
+    if (viewer.scene.sampleHeightMostDetailed) {
+      try {
+        const result = await viewer.scene.sampleHeightMostDetailed([Cesium.Cartographic.fromDegrees(Number(lng), Number(lat))]);
+        if (result && result[0]) h = saneSurfaceHeight(result[0].height);
+      } catch (_) {}
+    }
+
+    if (h === null && viewer.scene.clampToHeightMostDetailed) {
+      try {
+        const p = Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), 600);
+        const result = await viewer.scene.clampToHeightMostDetailed([p]);
+        if (result && result[0]) h = saneSurfaceHeight(Cesium.Cartographic.fromCartesian(result[0]).height);
+      } catch (_) {}
+    }
+  } finally {
+    if (entityToHide) {
+      try { entityToHide.show = previousEntityShow !== null ? previousEntityShow : true; } catch (_) {}
+      try { viewer.scene.requestRender(); } catch (_) {}
+    }
+  }
+
+  return h;
+}
+
+async function resolveSelectedCameraSurfaceHeight(cam, entity, token) {
+  const attempts = [0, 220, 520, 900, 1400];
+  for (let i = 0; i < attempts.length; i++) {
+    if (token !== selectedCameraSurfaceRefineToken) return null;
+    if (!selectedCamera || selectedCamera.id !== cam.id) return null;
+    if (attempts[i] > 0) await new Promise(resolve => setTimeout(resolve, attempts[i]));
+    await waitForCesiumPostRenderFrame();
+    const h = await getCameraSurfaceHeightStrict(cam.lng, cam.lat, entity);
+    if (h !== null) return h;
+    setFovLoadingState(`Positioning field of view… retry ${i + 1}/${attempts.length}`);
+  }
+  return null;
+}
+
 async function refineSelectedCameraSurfaceAfterTiles(expectedTilesToken = null) {
   if (!google3DEnabled || !selectedCamera || !dataSource || !viewer || !viewer.scene) return;
   if (expectedTilesToken !== null && expectedTilesToken !== cameraTilesLoadToken) return;
@@ -2950,23 +3067,27 @@ async function refineSelectedCameraSurfaceAfterTiles(expectedTilesToken = null) 
   const entity = dataSource.entities.getById(cam.id);
   if (!entity) return;
 
-  try {
-    // Run after the view has settled, when the destination Google tiles are loaded.
-    // This avoids the first-click blank/frustum-missing case while still preventing
-    // Cesium from sampling the app's own 220 m pole as the surface.
-    const h = await getCameraSurfaceHeight(cam.lng, cam.lat, {
-      hideEntity: entity,
-      skipCache: true,
-    });
-    if (refineToken !== selectedCameraSurfaceRefineToken) return;
-    if (!selectedCamera || selectedCamera.id !== cam.id) return;
-    if (expectedTilesToken !== null && expectedTilesToken !== cameraTilesLoadToken) return;
+  removeFrustum();
+  if (frustumsEnabled && trustedCameraBearing(cam) !== null) {
+    setFovLoadingState('Positioning field of view…');
+  }
 
-    cameraSurfaceHeightCache.set(surfaceHeightCacheKey(cam.lng, cam.lat), h);
-    positionSelectedCameraEntityAtGround(cam, entity, h);
-    if (frustumsEnabled) showFrustum(cam);
-    try { viewer.scene.requestRender(); } catch (_) {}
-  } catch (_) {}
+  const h = await resolveSelectedCameraSurfaceHeight(cam, entity, refineToken);
+  if (refineToken !== selectedCameraSurfaceRefineToken) return;
+  if (!selectedCamera || selectedCamera.id !== cam.id) return;
+  if (expectedTilesToken !== null && expectedTilesToken !== cameraTilesLoadToken) return;
+
+  if (h === null) {
+    if (frustumsEnabled && trustedCameraBearing(cam) !== null) {
+      setFovErrorState('Field of view unavailable — surface height could not be resolved.');
+    }
+    return;
+  }
+
+  cameraSurfaceHeightCache.set(surfaceHeightCacheKey(cam.lng, cam.lat), h);
+  positionSelectedCameraEntityAtGround(cam, entity, h);
+  if (frustumsEnabled) showFrustum(cam, { groundHeight: h, resolved: true });
+  try { viewer.scene.requestRender(); } catch (_) {}
 }
 
 async function applySelectedCameraEntityStyle(cam) {
@@ -2991,7 +3112,7 @@ async function applySelectedCameraEntityStyle(cam) {
     updateCameraPoleForEntity(entity, cam.lng, cam.lat, selectedHeight, { selected: true });
 
     if (entity.point) {
-      entity.point.show = true;
+      entity.point.show = !google3DEnabled;
       entity.point.pixelSize = google3DEnabled ? 14 : 12;
       entity.point.color = colour.withAlpha ? colour.withAlpha(1) : colour;
       entity.point.outlineColor = Cesium.Color.WHITE;
@@ -3006,7 +3127,7 @@ async function applySelectedCameraEntityStyle(cam) {
       entity.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
     if (entity.label) {
-      entity.label.show = true;
+      entity.label.show = !google3DEnabled;
       entity.label.text = cam.location || cam.name || cam.id || 'Camera';
       entity.label.pixelOffset = new Cesium.Cartesian2(0, -18);
       entity.label.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, google3DEnabled ? 8000 : 250000);
@@ -3917,7 +4038,7 @@ function buildFrustumPolylines(lng, lat, groundHeight, heading, originOverride =
   return coll;
 }
 
-async function showFrustum(cam) {
+async function showFrustum(cam, options = {}) {
   removeFrustum();
   if (!frustumsEnabled) return;
 
@@ -3925,12 +4046,17 @@ async function showFrustum(cam) {
   const heading = bearing === null ? null : snapHeadingForDisplay(bearing);
   if (heading === null) return;
 
-  // Draw immediately using the best known height. The selected camera/frustum is
-  // refined after the destination 3D tiles finish streaming. Waiting here caused
-  // first-click frustum misses when selecting distant unloaded locations.
-  const groundHeight = google3DEnabled
-    ? selectedGroundHeightFastFallback(cam.lng, cam.lat)
-    : await sampleGroundHeight(cam.lng, cam.lat);
+  let groundHeight;
+  if (google3DEnabled) {
+    if (!options.resolved || !Number.isFinite(Number(options.groundHeight))) {
+      setFovLoadingState('Positioning field of view…');
+      return;
+    }
+    groundHeight = Number(options.groundHeight);
+  } else {
+    groundHeight = await sampleGroundHeight(cam.lng, cam.lat);
+  }
+
   let originOverride = null;
   try {
     const selectedEntity = dataSource ? dataSource.entities.getById(cam.id) : null;
@@ -3942,6 +4068,7 @@ async function showFrustum(cam) {
   viewer.scene.primitives.add(coll);
   currentFrustumPrimitive = coll;
 
+  clearFovLoadingState();
   const fi = document.getElementById('frustumInfo');
   const ft = document.getElementById('frustumInfoText');
   fi.style.display = 'block';
@@ -3957,6 +4084,7 @@ function removeFrustum() {
     viewer.scene.primitives.remove(currentFrustumPrimitive);
     currentFrustumPrimitive = null;
   }
+  clearFovLoadingState();
   document.getElementById('frustumInfo').style.display = 'none';
   document.getElementById('statusFrustum').style.display = 'none';
 }
@@ -4193,9 +4321,14 @@ function hideCameraTilesLoader(token, timedOut = false) {
     cameraTilesLoadState.removePostRender = null;
   }
 
+  const refineToken = token || cameraTilesLoadToken;
   if (!timedOut) {
     setTilesLoaderProgress(100, '3D view ready');
-    const refineToken = token || cameraTilesLoadToken;
+    setTimeout(() => refineSelectedCameraSurfaceAfterTiles(refineToken), 80);
+  } else {
+    // Even if the broad tile loader times out, keep the FOV-specific resolver
+    // running. It will either place the frustum accurately or show a clear
+    // unavailable message instead of silently failing.
     setTimeout(() => refineSelectedCameraSurfaceAfterTiles(refineToken), 80);
   }
   const overlay = document.getElementById('tilesLoadOverlay');
@@ -4561,7 +4694,12 @@ async function selectCamera(cam) {
   // This prevents the old grey/orange duplicate dots and keeps the frustum
   // anchored to the same position as the visible selected marker.
   const groundH = await applySelectedCameraEntityStyle(cam);
-  showFrustum(cam);
+  removeFrustum();
+  if (google3DEnabled && frustumsEnabled && trustedCameraBearing(cam) !== null) {
+    setFovLoadingState('Positioning field of view…');
+  } else if (!google3DEnabled) {
+    showFrustum(cam);
+  }
 
   // Fly to an oblique inspection angle rather than a top-down view.
   // This makes Google Photorealistic 3D Tiles legible once they stream in.
