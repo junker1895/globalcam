@@ -2546,20 +2546,26 @@ let frustumFovH = 58;
 let frustumRange = 85;
 let frustumTilt  = 15;
 
-// Visual-only elevation for Cesium camera markers/frustums.
+// Visual-only elevation hook for Cesium camera markers/frustums.
 // Lat/lng are unchanged, so dashboard/2D map positioning is unaffected.
-// The lift prevents Google Photorealistic 3D Tiles from hiding camera dots
-// and FOV wireframes inside buildings/terrain meshes.
-const CAMERA_MARKER_LIFT_M = 14;
-const CAMERA_FRUSTUM_LIFT_M = 18;
+// In Google Photorealistic 3D Tiles mode, a zero-height entity can render under
+// the tileset mesh. We therefore render camera entities a small fixed distance
+// above the WGS84 surface and disable depth testing, instead of relying on
+// sampled 3D-tile heights which can be unstable and make beacons float in the sky.
+const CAMERA_3D_MARKER_HEIGHT_M = 18;
+const CAMERA_3D_SELECTED_EXTRA_M = 4;
+const CAMERA_3D_FRUSTUM_HEIGHT_M = 20;
 
 function visualCameraHeight(baseHeight = 0, extraLift = 0) {
   const base = Math.max(0, Number(baseHeight) || 0);
-  return base + (google3DEnabled ? extraLift : 0);
+  return google3DEnabled ? (base + extraLift) : base;
 }
 
 function cameraEntityPosition(lng, lat, baseHeight = 0) {
-  return Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), visualCameraHeight(baseHeight, CAMERA_MARKER_LIFT_M));
+  const h = google3DEnabled
+    ? Math.max(CAMERA_3D_MARKER_HEIGHT_M, Number(baseHeight) || 0)
+    : Math.max(0, Number(baseHeight) || 0);
+  return Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), h);
 }
 
 // Dashboard state
@@ -3367,14 +3373,17 @@ async function sampleGroundHeight(lng, lat) {
 }
 
 function buildFrustumPolylines(lng, lat, groundHeight, heading) {
-  const POLE   = google3DEnabled ? 10 : 5.5;
+  const POLE   = google3DEnabled ? 3.5 : 5.5;
   const FAR    = frustumRange;
   const NEAR   = 2;
   const TILT   = -frustumTilt;
   const HFOV_H = frustumFovH / 2;
   const HFOV_V = (frustumFovH / 2) * (9 / 16);
 
-  const origin     = Cesium.Cartesian3.fromDegrees(lng, lat, visualCameraHeight(groundHeight + POLE, CAMERA_FRUSTUM_LIFT_M));
+  const originHeight = google3DEnabled
+    ? CAMERA_3D_FRUSTUM_HEIGHT_M
+    : visualCameraHeight(groundHeight + POLE, 0);
+  const origin     = Cesium.Cartesian3.fromDegrees(lng, lat, originHeight);
   const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
 
   const h = Cesium.Math.toRadians(heading);
@@ -3485,8 +3494,13 @@ function showSelectedCameraMarker(cam, height = 0) {
 
   const heading = inferHeading(cam);
   const colour = heading === null ? Cesium.Color.fromCssColorString('#2563eb') : getDirColor(heading);
-  const baseHeight = visualCameraHeight(Math.max(0, Number(height) || 0) + 1.5, CAMERA_MARKER_LIFT_M);
-  const beaconHeight = google3DEnabled ? 48 : 1400;
+  // In 3D Tiles mode, keep the selected marker close to the visual surface.
+  // Do not use sampled photogrammetry heights here: they can occasionally return
+  // unstable values and make the selected camera appear high in the sky.
+  const baseHeight = google3DEnabled
+    ? CAMERA_3D_MARKER_HEIGHT_M
+    : Math.max(0, Number(height) || 0) + 1.5;
+  const beaconHeight = google3DEnabled ? CAMERA_3D_SELECTED_EXTRA_M : 1400;
   const topHeight = baseHeight + beaconHeight;
   const basePos = Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, baseHeight);
   const topPos = Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, topHeight);
@@ -4111,9 +4125,21 @@ async function selectCamera(cam) {
   }
 
   selectedCamera = cam;
+
+  // Hide the ordinary camera entity before creating the selected beacon/frustum.
+  // This guarantees there is only one selected-camera dot in 3D mode: the visible
+  // beacon above the 3D tiles, never the original entity underneath the mesh.
+  if (dataSource) {
+    const selEntity = dataSource.entities.getById(cam.id);
+    if (selEntity) {
+      selEntity._selectedHidden = true;
+      selEntity.show = false;
+    }
+  }
+
   showFrustum(cam);
 
-  const groundH = await sampleGroundHeight(cam.lng, cam.lat);
+  const groundH = google3DEnabled ? 0 : await sampleGroundHeight(cam.lng, cam.lat);
   const heading  = inferHeading(cam);
   showSelectedCameraMarker(cam, groundH);
 
@@ -4141,7 +4167,7 @@ async function selectCamera(cam) {
   };
   const backAngle = (cameraHeading + 180) % 360;
   const hRad      = Cesium.Math.toRadians(backAngle);
-  const camPos    = Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, visualCameraHeight(groundH, CAMERA_MARKER_LIFT_M));
+  const camPos    = cameraEntityPosition(cam.lng, cam.lat, google3DEnabled ? CAMERA_3D_MARKER_HEIGHT_M : groundH);
   const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(camPos);
 
   if (google3DEnabled) {
@@ -4189,18 +4215,6 @@ async function selectCamera(cam) {
       complete: notifyApiSelectionFlightSettled,
       cancel: notifyApiSelectionFlightSettled,
     });
-  }
-
-  // Avoid the duplicate selected-camera dot in 3D mode.
-  // The main clustered camera entity remains at its dataset position for normal browsing,
-  // but while selected it is hidden and replaced by the explicit ground-anchored selected beacon.
-  // This avoids one dot appearing under/inside the 3D tiles and another above the surface.
-  if (dataSource) {
-    const selEntity = dataSource.entities.getById(cam.id);
-    if (selEntity) {
-      selEntity._selectedHidden = true;
-      selEntity.show = false;
-    }
   }
 
   populateSidePanel(cam);
