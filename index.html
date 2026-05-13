@@ -2560,7 +2560,7 @@ const CAMERA_3D_NORMAL_VISUAL_HEIGHT_M = 220;
 const CAMERA_3D_MARKER_LIFT_M = 0;
 const CAMERA_3D_SELECTED_LIFT_M = 3.0;
 const CAMERA_3D_FRUSTUM_LIFT_M = 3.0;
-const CAMERA_3D_SELECTED_FALLBACK_HEIGHT_M = 0;
+const CAMERA_3D_SELECTED_FALLBACK_HEIGHT_M = CAMERA_3D_NORMAL_VISUAL_HEIGHT_M - CAMERA_3D_SELECTED_LIFT_M;
 const CAMERA_3D_SELECTED_HEIGHT_TIMEOUT_MS = 950;
 const CAMERA_3D_SURFACE_CACHE_PRECISION = 5;
 const CAMERA_3D_POLE_BASE_HEIGHT_M = 0;
@@ -2902,20 +2902,41 @@ function restoreCameraEntityStyle(cam) {
 function selectedGroundHeightFastFallback(lng, lat) {
   const cached = cachedCameraSurfaceHeight(lng, lat);
   if (Number.isFinite(Number(cached))) return Number(cached);
-  try {
-    if (google3DEnabled && viewer && viewer.scene && viewer.scene.globe) {
-      const gh = saneSurfaceHeight(viewer.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(Number(lng), Number(lat))));
-      if (gh !== null) return gh;
-    }
-  } catch (_) {}
-  return CAMERA_3D_SELECTED_FALLBACK_HEIGHT_M;
+
+  // Do not use ellipsoid/terrain zero as the first-click 3D fallback. In Google
+  // Photorealistic 3D Tiles, distant destination tiles may not be loaded yet;
+  // a zero-height fallback can put the selected dot/frustum under the streamed
+  // mesh until the user clicks again. Start at the background pole top height,
+  // then refine down to the sampled surface height once the destination tiles
+  // are actually available.
+  return google3DEnabled ? CAMERA_3D_SELECTED_FALLBACK_HEIGHT_M : 0;
 }
 
 function positionSelectedCameraEntityAtGround(cam, entity, groundH) {
   if (!cam || !entity) return;
   const selectedHeight = google3DEnabled ? selectedCameraHeight(groundH, CAMERA_3D_SELECTED_LIFT_M) : 0;
   try {
-    positionSelectedCameraEntityAtGround(cam, entity, groundH);
+    entity.position = new Cesium.ConstantPositionProperty(
+      Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), selectedHeight)
+    );
+    entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
+    setCameraEntityHeightReference(entity, Cesium.HeightReference.NONE);
+    updateCameraPoleForEntity(entity, cam.lng, cam.lat, selectedHeight, {
+      selected: true,
+      bottomHeight: google3DEnabled ? Number(groundH) || 0 : 0,
+    });
+    if (entity.point) {
+      entity.point.heightReference = Cesium.HeightReference.NONE;
+      entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+    }
+    if (entity.billboard) {
+      entity.billboard.heightReference = Cesium.HeightReference.NONE;
+      entity.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+    }
+    if (entity.label) {
+      entity.label.heightReference = Cesium.HeightReference.NONE;
+      entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+    }
   } catch (_) {}
 }
 
