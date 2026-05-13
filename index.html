@@ -8771,20 +8771,61 @@ window.startBillingPortal = startBillingPortal;
     return Array.isArray(cam.views) && cam.views.some(v => v && (v.imageUrl || v.videoUrl));
   }
 
+  async function fetchCameraRowById(id) {
+    // RPC summaries/details can lag behind schema changes if the database function
+    // was not updated to return every promoted camera column.  As a safety net,
+    // fetch the authoritative row directly from public.cameras when a selected
+    // camera has no usable feed or other detail fields.
+    const url = `${SUPABASE_URL}/rest/v1/cameras?id=eq.${encodeURIComponent(id)}&select=*`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        apikey: API_KEY,
+        Authorization: `Bearer ${API_KEY}`,
+        Accept: 'application/json',
+      },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`cameras direct detail failed ${res.status}: ${text.slice(0, 300)}`);
+    }
+    const rows = await res.json();
+    return toCamelCamera(Array.isArray(rows) ? rows[0] : null);
+  }
+
   async function hydrateCameraDetail(idOrCam) {
     const id = String(typeof idOrCam === 'object' ? idOrCam.id : idOrCam);
     if (!id || id.startsWith('cluster:')) return null;
     const existing = cameraMap.get(id);
-    if (existing && hasFeedDetails(existing)) return existing;
+    if (existing && hasFeedDetails(existing) && existing._apiDetailLoaded) return existing;
     if (apiState.detailPromises.has(id)) return apiState.detailPromises.get(id);
 
-    const p = rpc('get_camera_detail', { camera_id: id })
-      .then(rows => {
-        const full = toCamelCamera(rows[0]);
-        if (!full) return existing || null;
-        return mergeCamera(full);
-      })
-      .finally(() => apiState.detailPromises.delete(id));
+    const p = (async () => {
+      let full = null;
+
+      try {
+        const rows = await rpc('get_camera_detail', { camera_id: id });
+        full = toCamelCamera(rows[0]);
+      } catch (err) {
+        console.warn('RPC camera detail failed, falling back to direct row fetch:', err);
+      }
+
+      // If the RPC returned only a map/search summary, pull the full table row.
+      // This specifically fixes cameras whose image_url/views exist in Supabase
+      // but are not included in get_camera_detail/get_cameras_bbox responses.
+      if (!full || !hasFeedDetails(full)) {
+        try {
+          const direct = await fetchCameraRowById(id);
+          if (direct) full = full ? { ...full, ...direct, metadata: { ...(full.metadata || {}), ...(direct.metadata || {}) } } : direct;
+        } catch (err) {
+          console.warn('Direct camera detail fetch failed:', err);
+        }
+      }
+
+      if (!full) return existing || null;
+      full._apiDetailLoaded = true;
+      return mergeCamera(existing ? { ...existing, ...full } : full);
+    })().finally(() => apiState.detailPromises.delete(id));
 
     apiState.detailPromises.set(id, p);
     return p;
