@@ -2546,6 +2546,22 @@ let frustumFovH = 58;
 let frustumRange = 85;
 let frustumTilt  = 15;
 
+// Visual-only elevation for Cesium camera markers/frustums.
+// Lat/lng are unchanged, so dashboard/2D map positioning is unaffected.
+// The lift prevents Google Photorealistic 3D Tiles from hiding camera dots
+// and FOV wireframes inside buildings/terrain meshes.
+const CAMERA_MARKER_LIFT_M = 14;
+const CAMERA_FRUSTUM_LIFT_M = 18;
+
+function visualCameraHeight(baseHeight = 0, extraLift = 0) {
+  const base = Math.max(0, Number(baseHeight) || 0);
+  return base + (google3DEnabled ? extraLift : 0);
+}
+
+function cameraEntityPosition(lng, lat, baseHeight = 0) {
+  return Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), visualCameraHeight(baseHeight, CAMERA_MARKER_LIFT_M));
+}
+
 // Dashboard state
 const DASHBOARD_PAGE_SIZE = 16;
 const DASHBOARD_MAX_CAMERAS = Number.POSITIVE_INFINITY; // legacy guard; dashboard is now paginated
@@ -3351,14 +3367,14 @@ async function sampleGroundHeight(lng, lat) {
 }
 
 function buildFrustumPolylines(lng, lat, groundHeight, heading) {
-  const POLE   = 5.5;
+  const POLE   = google3DEnabled ? 10 : 5.5;
   const FAR    = frustumRange;
   const NEAR   = 2;
   const TILT   = -frustumTilt;
   const HFOV_H = frustumFovH / 2;
   const HFOV_V = (frustumFovH / 2) * (9 / 16);
 
-  const origin     = Cesium.Cartesian3.fromDegrees(lng, lat, groundHeight + POLE);
+  const origin     = Cesium.Cartesian3.fromDegrees(lng, lat, visualCameraHeight(groundHeight + POLE, CAMERA_FRUSTUM_LIFT_M));
   const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
 
   const h = Cesium.Math.toRadians(heading);
@@ -3418,12 +3434,12 @@ function buildFrustumPolylines(lng, lat, groundHeight, heading) {
   ];
 
   const col      = Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.92);
-  const fadedCol = Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.06);
+  const fadedCol = Cesium.Color.fromCssColorString('#2563eb').withAlpha(google3DEnabled ? 0.52 : 0.12);
   const coll     = new Cesium.PolylineCollection();
   segs.forEach(([s, e]) => {
     coll.add({
       positions: [s, e],
-      width: 1.5,
+      width: google3DEnabled ? 2.4 : 1.5,
       material: Cesium.Material.fromType('Color', { color: col }),
       depthFailMaterial: Cesium.Material.fromType('Color', { color: fadedCol }),
     });
@@ -3435,7 +3451,8 @@ async function showFrustum(cam) {
   removeFrustum();
   if (!frustumsEnabled) return;
 
-  const heading = inferHeading(cam);
+  const bearing = trustedCameraBearing(cam);
+  const heading = bearing === null ? null : snapHeadingForDisplay(bearing);
   if (heading === null) return;
 
   const groundHeight = await sampleGroundHeight(cam.lng, cam.lat);
@@ -3446,11 +3463,11 @@ async function showFrustum(cam) {
   const fi = document.getElementById('frustumInfo');
   const ft = document.getElementById('frustumInfoText');
   fi.style.display = 'block';
-  ft.textContent   = `${DIR_NAMES[heading]} (${heading}°)  ·  58° H × 33° V  ·  85 m range`;
+  ft.textContent   = `${DIR_NAMES[heading]} (${Math.round(bearing)}°)  ·  58° H × 33° V  ·  85 m range`;
 
   document.getElementById('statusFrustum').style.display = 'flex';
   document.getElementById('statusFrustumText').textContent =
-    `FOV: ${DIR_NAMES[heading]} ${heading}°`;
+    `FOV: ${DIR_NAMES[heading]} ${Math.round(bearing)}°`;
 }
 
 function removeFrustum() {
@@ -3468,8 +3485,8 @@ function showSelectedCameraMarker(cam, height = 0) {
 
   const heading = inferHeading(cam);
   const colour = heading === null ? Cesium.Color.fromCssColorString('#2563eb') : getDirColor(heading);
-  const baseHeight = Math.max(0, Number(height) || 0) + 1.5;
-  const beaconHeight = google3DEnabled ? 42 : 1400;
+  const baseHeight = visualCameraHeight(Math.max(0, Number(height) || 0) + 1.5, CAMERA_MARKER_LIFT_M);
+  const beaconHeight = google3DEnabled ? 48 : 1400;
   const topHeight = baseHeight + beaconHeight;
   const basePos = Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, baseHeight);
   const topPos = Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, topHeight);
@@ -3973,7 +3990,7 @@ async function createCameraEntities(cams) {
       const color  = getDirColor(heading);
       const entityGraphics = {
         id: cam.id,
-        position: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, 0),
+        position: cameraEntityPosition(cam.lng, cam.lat, 0),
         point: {
           pixelSize: 7,
           color,
@@ -4088,7 +4105,7 @@ async function selectCamera(cam) {
       prevEntity._selectedHidden = false;
       prevEntity.show = true;
       prevEntity.position = new Cesium.ConstantPositionProperty(
-        Cesium.Cartesian3.fromDegrees(selectedCamera.lng, selectedCamera.lat, 0)
+        cameraEntityPosition(selectedCamera.lng, selectedCamera.lat, 0)
       );
     }
   }
@@ -4124,7 +4141,7 @@ async function selectCamera(cam) {
   };
   const backAngle = (cameraHeading + 180) % 360;
   const hRad      = Cesium.Math.toRadians(backAngle);
-  const camPos    = Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, groundH);
+  const camPos    = Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, visualCameraHeight(groundH, CAMERA_MARKER_LIFT_M));
   const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(camPos);
 
   if (google3DEnabled) {
@@ -9060,7 +9077,8 @@ window.startBillingPortal = startBillingPortal;
         outlineColor: Cesium.Color.WHITE.withAlpha(0.8),
         outlineWidth: 1,
         scaleByDistance: new Cesium.NearFarScalar(300, 1.8, 400000, 0.6),
-        disableDepthTestDistance: 0,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        heightReference: Cesium.HeightReference.NONE,
       },
       label: {
         text: cam.location || cam.name || cam.id,
@@ -9072,7 +9090,8 @@ window.startBillingPortal = startBillingPortal;
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
         pixelOffset: new Cesium.Cartesian2(0, -10),
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000),
-        disableDepthTestDistance: 0,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        heightReference: Cesium.HeightReference.NONE,
         show: false,
       },
     };
@@ -9084,7 +9103,7 @@ window.startBillingPortal = startBillingPortal;
         rotation: -Cesium.Math.toRadians(heading),
         pixelOffset: new Cesium.Cartesian2(0, -13),
         scaleByDistance: new Cesium.NearFarScalar(300, 1.25, 400000, 0.5),
-        disableDepthTestDistance: 0,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
         heightReference: Cesium.HeightReference.NONE,
       };
     }
