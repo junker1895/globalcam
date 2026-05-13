@@ -2898,6 +2898,56 @@ function restoreCameraEntityStyle(cam) {
   } catch (_) {}
 }
 
+
+function selectedGroundHeightFastFallback(lng, lat) {
+  const cached = cachedCameraSurfaceHeight(lng, lat);
+  if (Number.isFinite(Number(cached))) return Number(cached);
+  try {
+    if (google3DEnabled && viewer && viewer.scene && viewer.scene.globe) {
+      const gh = saneSurfaceHeight(viewer.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(Number(lng), Number(lat))));
+      if (gh !== null) return gh;
+    }
+  } catch (_) {}
+  return CAMERA_3D_SELECTED_FALLBACK_HEIGHT_M;
+}
+
+function positionSelectedCameraEntityAtGround(cam, entity, groundH) {
+  if (!cam || !entity) return;
+  const selectedHeight = google3DEnabled ? selectedCameraHeight(groundH, CAMERA_3D_SELECTED_LIFT_M) : 0;
+  try {
+    positionSelectedCameraEntityAtGround(cam, entity, groundH);
+  } catch (_) {}
+}
+
+let selectedCameraSurfaceRefineToken = 0;
+async function refineSelectedCameraSurfaceAfterTiles(expectedTilesToken = null) {
+  if (!google3DEnabled || !selectedCamera || !dataSource || !viewer || !viewer.scene) return;
+  if (expectedTilesToken !== null && expectedTilesToken !== cameraTilesLoadToken) return;
+
+  const refineToken = ++selectedCameraSurfaceRefineToken;
+  const cam = selectedCamera;
+  const entity = dataSource.entities.getById(cam.id);
+  if (!entity) return;
+
+  try {
+    // Run after the view has settled, when the destination Google tiles are loaded.
+    // This avoids the first-click blank/frustum-missing case while still preventing
+    // Cesium from sampling the app's own 220 m pole as the surface.
+    const h = await getCameraSurfaceHeight(cam.lng, cam.lat, {
+      hideEntity: entity,
+      skipCache: true,
+    });
+    if (refineToken !== selectedCameraSurfaceRefineToken) return;
+    if (!selectedCamera || selectedCamera.id !== cam.id) return;
+    if (expectedTilesToken !== null && expectedTilesToken !== cameraTilesLoadToken) return;
+
+    cameraSurfaceHeightCache.set(surfaceHeightCacheKey(cam.lng, cam.lat), h);
+    positionSelectedCameraEntityAtGround(cam, entity, h);
+    if (frustumsEnabled) showFrustum(cam);
+    try { viewer.scene.requestRender(); } catch (_) {}
+  } catch (_) {}
+}
+
 async function applySelectedCameraEntityStyle(cam) {
   if (!cam || !dataSource) return 0;
   const entity = dataSource.entities.getById(cam.id);
@@ -2905,7 +2955,9 @@ async function applySelectedCameraEntityStyle(cam) {
 
   const heading = inferHeading(cam);
   const colour = heading === null ? Cesium.Color.fromCssColorString('#2563eb') : getDirColor(heading);
-  const groundH = google3DEnabled ? await sampleGroundHeight(cam.lng, cam.lat, { hideEntity: entity, forceResample: true }) : 0;
+  // First-click placement must be immediate. Use cached/globe fallback now, then
+  // refine against the loaded 3D tile surface after the inspection flight settles.
+  const groundH = google3DEnabled ? selectedGroundHeightFastFallback(cam.lng, cam.lat) : 0;
   const selectedHeight = google3DEnabled ? selectedCameraHeight(groundH, CAMERA_3D_SELECTED_LIFT_M) : 0;
 
   try {
@@ -3852,7 +3904,12 @@ async function showFrustum(cam) {
   const heading = bearing === null ? null : snapHeadingForDisplay(bearing);
   if (heading === null) return;
 
-  const groundHeight = await sampleGroundHeight(cam.lng, cam.lat);
+  // Draw immediately using the best known height. The selected camera/frustum is
+  // refined after the destination 3D tiles finish streaming. Waiting here caused
+  // first-click frustum misses when selecting distant unloaded locations.
+  const groundHeight = google3DEnabled
+    ? selectedGroundHeightFastFallback(cam.lng, cam.lat)
+    : await sampleGroundHeight(cam.lng, cam.lat);
   let originOverride = null;
   try {
     const selectedEntity = dataSource ? dataSource.entities.getById(cam.id) : null;
@@ -4115,7 +4172,11 @@ function hideCameraTilesLoader(token, timedOut = false) {
     cameraTilesLoadState.removePostRender = null;
   }
 
-  if (!timedOut) setTilesLoaderProgress(100, '3D view ready');
+  if (!timedOut) {
+    setTilesLoaderProgress(100, '3D view ready');
+    const refineToken = token || cameraTilesLoadToken;
+    setTimeout(() => refineSelectedCameraSurfaceAfterTiles(refineToken), 80);
+  }
   const overlay = document.getElementById('tilesLoadOverlay');
   setTimeout(() => {
     if (!cameraTilesLoadState.active) {
@@ -4473,6 +4534,7 @@ async function selectCamera(cam) {
   }
 
   selectedCamera = cam;
+  selectedCameraSurfaceRefineToken += 1;
 
   // Single-entity selected state: style the existing camera marker in-place.
   // This prevents the old grey/orange duplicate dots and keeps the frustum
