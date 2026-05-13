@@ -2549,18 +2549,16 @@ let frustumTilt  = 15;
 
 // Visual-only elevation hook for Cesium camera markers/frustums.
 // Lat/lng are unchanged, so dashboard/2D map positioning is unaffected.
-// In Google Photorealistic 3D Tiles mode, a zero-height entity can render under
-// the tileset mesh. We therefore render camera entities a small fixed distance
-// above the WGS84 surface and disable depth testing, instead of relying on
-// sampled 3D-tile heights which can be unstable and make beacons float in the sky.
-const CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M = 35;
-// Normal nearby markers must be fast. Prefer Cesium's 3D-tile-relative height
-// reference where available. Only fall back to batched async surface sampling on
-// older builds that cannot render billboards relative to Google 3D tiles.
-const CAMERA_3D_NORMAL_VISUAL_HEIGHT_M = 85;
-const CAMERA_3D_MARKER_LIFT_M = 7;
-const CAMERA_3D_SELECTED_LIFT_M = 9;
-const CAMERA_3D_FRUSTUM_LIFT_M = 10;
+// Google Photorealistic 3D Tiles do not consistently cooperate with Cesium
+// point/billboard height references. Tile-relative/clamped billboards can still
+// appear inside the photogrammetry mesh at low camera angles. The app therefore
+// uses a deliberately conservative screen-visible 3D display altitude and disables
+// depth testing. This prioritises operational visibility over exact mesh contact.
+const CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M = 220;
+const CAMERA_3D_NORMAL_VISUAL_HEIGHT_M = 220;
+const CAMERA_3D_MARKER_LIFT_M = 0;
+const CAMERA_3D_SELECTED_LIFT_M = 10;
+const CAMERA_3D_FRUSTUM_LIFT_M = 12;
 const CAMERA_3D_SELECTED_HEIGHT_TIMEOUT_MS = 950;
 const CAMERA_3D_SURFACE_CACHE_PRECISION = 5;
 const cameraSurfaceHeightCache = new Map();
@@ -2631,16 +2629,15 @@ function cachedCameraSurfaceHeight(lng, lat) {
 
 
 function camera3DHeightReference() {
-  // Cesium versions that support Google/3D-tile-relative billboards can place
-  // icons directly above the photogrammetry mesh without async height sampling.
-  // Fall back to RELATIVE_TO_GROUND/NONE for older Cesium builds.
-  return Cesium.HeightReference.RELATIVE_TO_3D_TILE ||
-         Cesium.HeightReference.RELATIVE_TO_GROUND ||
-         Cesium.HeightReference.NONE;
+  // Force absolute-height entities in 3D mode. Tile-relative/clamped height
+  // references can place icons behind or inside Google 3D tiles on some scenes.
+  return Cesium.HeightReference.NONE;
 }
 
 function supports3DTileRelativeHeight() {
-  return !!Cesium.HeightReference.RELATIVE_TO_3D_TILE;
+  // Disabled intentionally: previous 3D-tile-relative placement left some icons
+  // below the visible mesh. Absolute-height + depth-test bypass is more robust.
+  return false;
 }
 
 function setCameraEntityHeightReference(entity, heightReference) {
@@ -2664,15 +2661,6 @@ function setCameraEntityVisualPosition(entity, lng, lat, surfaceHeight = 0, lift
   if (!entity) return;
   try {
     if (google3DEnabled) {
-      const href = camera3DHeightReference();
-      // If Cesium can render relative to the 3D tile surface, use a tiny relative
-      // height. This avoids both underground icons and slow multi-camera sampling.
-      if (supports3DTileRelativeHeight()) {
-        entity.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), Number(lift) || CAMERA_3D_MARKER_LIFT_M));
-        entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
-        setCameraEntityHeightReference(entity, href);
-        return;
-      }
       const h = visualCameraHeight(surfaceHeight, lift);
       entity.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), h));
       entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
@@ -2691,11 +2679,10 @@ let cameraSurfacePlacementTimer = null;
 let cameraSurfacePlacementBusy = false;
 
 function scheduleCameraSurfacePlacement(entity, lng, lat, lift = CAMERA_3D_MARKER_LIFT_M) {
-  if (!google3DEnabled || supports3DTileRelativeHeight() || !entity || !viewer || !viewer.scene) return;
-  const id = String(entity.id || `${lng},${lat}`);
-  cameraSurfacePlacementQueue.set(id, { entity, lng: Number(lng), lat: Number(lat), lift });
-  if (cameraSurfacePlacementTimer) return;
-  cameraSurfacePlacementTimer = setTimeout(flushCameraSurfacePlacementQueue, 80);
+  // Intentionally no-op in 3D mode. Batch surface sampling was the source of
+  // slow zooms and inconsistent under/over-tile marker placement. Markers are
+  // already rendered at a conservative absolute 3D display height.
+  return;
 }
 
 async function flushCameraSurfacePlacementQueue() {
@@ -2743,9 +2730,13 @@ async function flushCameraSurfacePlacementQueue() {
 
 function visualCameraHeight(baseHeight = 0, extraLift = 0) {
   const base = Number(baseHeight);
-  return google3DEnabled
-    ? (Number.isFinite(base) ? base : CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M) + extraLift
-    : Math.max(0, Number(baseHeight) || 0);
+  if (google3DEnabled) {
+    const safeBase = Number.isFinite(base) ? base : CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M;
+    // Never allow a 3D marker/frustum origin below this display altitude. This
+    // prevents icons and frustum lines from being drawn underneath Google tiles.
+    return Math.max(safeBase, CAMERA_3D_NORMAL_VISUAL_HEIGHT_M) + (Number(extraLift) || 0);
+  }
+  return Math.max(0, Number(baseHeight) || 0);
 }
 
 function cameraEntityPosition(lng, lat, baseHeight = 0, extraLift = CAMERA_3D_MARKER_LIFT_M) {
@@ -2760,7 +2751,7 @@ function raiseCesiumCameraEntityToSurface(entity, lng, lat, lift = CAMERA_3D_MAR
   try {
     if (google3DEnabled) {
       const cachedH = cachedCameraSurfaceHeight(lng, lat);
-      const initialH = Number.isFinite(Number(cachedH)) ? Number(cachedH) : CAMERA_3D_NORMAL_VISUAL_HEIGHT_M;
+      const initialH = Math.max(Number.isFinite(Number(cachedH)) ? Number(cachedH) : CAMERA_3D_NORMAL_VISUAL_HEIGHT_M, CAMERA_3D_NORMAL_VISUAL_HEIGHT_M);
       setCameraEntityVisualPosition(entity, lng, lat, initialH, lift);
     } else {
       entity.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), 0));
@@ -4253,6 +4244,7 @@ async function createCameraEntities(cams) {
           outlineWidth: 1,
           scaleByDistance: new Cesium.NearFarScalar(300, 1.8, 400000, 0.6),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          eyeOffset: new Cesium.Cartesian3(0, 0, -80),
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         },
       };
@@ -4269,6 +4261,7 @@ async function createCameraEntities(cams) {
           pixelOffset: new Cesium.Cartesian2(0, -13),
           scaleByDistance: new Cesium.NearFarScalar(300, 1.25, 400000, 0.5),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          eyeOffset: new Cesium.Cartesian3(0, 0, -80),
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         };
       }
@@ -4286,6 +4279,7 @@ async function createCameraEntities(cams) {
           pixelOffset: new Cesium.Cartesian2(0, -10),
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          eyeOffset: new Cesium.Cartesian3(0, 0, -80),
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           show: false,
         },
@@ -9386,6 +9380,7 @@ window.startBillingPortal = startBillingPortal;
         outlineWidth: 1,
         scaleByDistance: new Cesium.NearFarScalar(300, 1.8, 400000, 0.6),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        eyeOffset: new Cesium.Cartesian3(0, 0, -80),
         heightReference: Cesium.HeightReference.NONE,
       },
       label: {
@@ -9399,6 +9394,7 @@ window.startBillingPortal = startBillingPortal;
         pixelOffset: new Cesium.Cartesian2(0, -10),
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        eyeOffset: new Cesium.Cartesian3(0, 0, -80),
         heightReference: Cesium.HeightReference.NONE,
         show: false,
       },
@@ -9412,6 +9408,7 @@ window.startBillingPortal = startBillingPortal;
         pixelOffset: new Cesium.Cartesian2(0, -13),
         scaleByDistance: new Cesium.NearFarScalar(300, 1.25, 400000, 0.5),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        eyeOffset: new Cesium.Cartesian3(0, 0, -80),
         heightReference: Cesium.HeightReference.NONE,
       };
     }
