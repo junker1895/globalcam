@@ -4273,8 +4273,8 @@ function populateSidePanel(cam) {
   const rows = document.getElementById('camDataRows');
   rows.innerHTML = '';
 
-  const selectedFeed = getCameraFeed(cam);
-  const feedUrl = selectedFeed.imageUrl || selectedFeed.videoUrl || null;
+  const primaryFeed = getCameraFeed(cam);
+  const feedUrl = primaryFeed.imageUrl || primaryFeed.videoUrl || null;
 
   const fields = [
     ['Coords',   `${cam.lat.toFixed(5)}, ${cam.lng.toFixed(5)}`, 'accent'],
@@ -4318,9 +4318,8 @@ function populateSidePanel(cam) {
     rows.appendChild(div);
   }
 
-  // Prefer video feed when available, fall back to image. Use getCameraFeed()
-  // so cameras whose feed only exists inside views[] still render correctly.
-  setFeed(selectedFeed.imageUrl || null, selectedFeed.videoUrl || null);
+  // Prefer video feed when available, fall back to image, including feeds stored only in views[].
+  setFeed(primaryFeed.imageUrl || null, primaryFeed.videoUrl || null);
 
   // Open PiP with this camera's title
   let pipTitle = cam.location || cam.id;
@@ -5132,12 +5131,10 @@ function cameraTitle(cam) {
 }
 
 function getCameraFeed(cam) {
-  const views = Array.isArray(cam?.views) ? cam.views : [];
-  const firstViewWithImage = views.find(v => v && v.imageUrl);
-  const firstViewWithVideo = views.find(v => v && v.videoUrl);
+  const firstView = cam?.views && cam.views.length ? cam.views[0] : null;
   return {
-    imageUrl: cam?.imageUrl || firstViewWithImage?.imageUrl || null,
-    videoUrl: cam?.videoUrl || firstViewWithVideo?.videoUrl || null,
+    imageUrl: cam?.imageUrl || firstView?.imageUrl || null,
+    videoUrl: cam?.videoUrl || firstView?.videoUrl || null,
   };
 }
 
