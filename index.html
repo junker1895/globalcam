@@ -3575,6 +3575,29 @@ function normaliseBearingDegrees(value) {
   return ((n % 360) + 360) % 360;
 }
 
+function bearingFromCompositeValue(value) {
+  // Camera feeds often store orientation as strings such as "N - 0",
+  // "S - 180", "180 deg", or "bearing: 045". Number(value) rejects those,
+  // which was causing valid selected cameras to resolve their 3D height but
+  // never build a frustum. Pull out the numeric bearing when one is present.
+  if (value === null || value === undefined || value === '') return null;
+  const direct = normaliseBearingDegrees(value);
+  if (direct !== null) return direct;
+
+  const text = String(value).trim();
+  if (!text) return null;
+  const matches = text.match(/-?\d+(?:\.\d+)?/g);
+  if (!matches || !matches.length) return null;
+
+  // Prefer the last number because labels like "S - 180" use a separator
+  // before the actual bearing value.
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const n = normaliseBearingDegrees(matches[i]);
+    if (n !== null) return n;
+  }
+  return null;
+}
+
 function snapHeadingForDisplay(deg) {
   const n = normaliseBearingDegrees(deg);
   return n === null ? null : (Math.round(n / 45) * 45 + 360) % 360;
@@ -3583,14 +3606,48 @@ function snapHeadingForDisplay(deg) {
 function trustedCameraBearing(cam) {
   if (!cam) return null;
 
-  // Numeric orientation is the only source treated as trustworthy for arrows
-  // and frustums. Text such as NB/SB/EB/WB describes the carriageway or view
-  // label for many traffic feeds, not the actual optical bearing.
-  const candidates = [cam.bearing, cam.azimuth, cam.heading];
-  for (const v of candidates) {
-    const n = normaliseBearingDegrees(v);
+  // Use a single authoritative FOV bearing pipeline. Numeric fields are first,
+  // including composite numeric strings from data providers. Only if there is
+  // no numeric orientation do we fall back to explicit camera/view direction
+  // labels. This prevents the resolver from placing the selected dot correctly
+  // while the frustum silently exits because bearing was parsed as null.
+  const numericCandidates = [
+    cam.bearing,
+    cam.azimuth,
+    cam.heading,
+    cam.direction_bearing,
+    cam.camera_bearing,
+    cam.viewBearing,
+    cam.view_bearing,
+    cam.bearing_degrees,
+    cam.bearingDeg,
+    cam.angleDegrees,
+  ];
+  for (const v of numericCandidates) {
+    const n = bearingFromCompositeValue(v);
     if (n !== null) return n;
   }
+
+  const textCandidates = [
+    cam.angleName,
+    cam.viewLabel,
+    cam.label,
+    cam.direction,
+    cam.description,
+    cam.name,
+    cam.location,
+  ];
+  for (const v of textCandidates) {
+    const explicit = headingFromText(v);
+    if (explicit !== null) return explicit;
+    const cardinal = directionValueToHeading(v, { allowBound: true });
+    if (cardinal !== null) return cardinal;
+  }
+
+  const feed = getCameraFeed(cam);
+  const fromFeed = headingFromFeedUrl(feed.imageUrl || feed.videoUrl || cam.imageUrl || cam.videoUrl || '');
+  if (fromFeed !== null) return fromFeed;
+
   return null;
 }
 
