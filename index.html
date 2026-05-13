@@ -3079,50 +3079,140 @@ const DIR_COLORS = {
   315: '#a5d6a7',
 };
 
-function directionValueToHeading(value) {
+function parseNullableNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normaliseBearingDegrees(value) {
+  const n = parseNullableNumber(value);
+  if (n === null) return null;
+  return ((n % 360) + 360) % 360;
+}
+
+function snapHeadingForDisplay(deg) {
+  const n = normaliseBearingDegrees(deg);
+  return n === null ? null : (Math.round(n / 45) * 45 + 360) % 360;
+}
+
+function trustedCameraBearing(cam) {
+  if (!cam) return null;
+
+  // Numeric orientation is the only source treated as trustworthy for arrows
+  // and frustums. Text such as NB/SB/EB/WB describes the carriageway or view
+  // label for many traffic feeds, not the actual optical bearing.
+  const candidates = [cam.bearing, cam.azimuth, cam.heading];
+  for (const v of candidates) {
+    const n = normaliseBearingDegrees(v);
+    if (n !== null) return n;
+  }
+  return null;
+}
+
+function trustedCameraHeading(cam) {
+  const bearing = trustedCameraBearing(cam);
+  return bearing === null ? null : snapHeadingForDisplay(bearing);
+}
+
+function directionValueToHeading(value, { allowBound = false } = {}) {
   const raw = String(value || '').trim();
   if (!raw) return null;
   const d = raw.toUpperCase().replace(/[^A-Z]/g, '');
 
-  // Only treat the direction field as authoritative when it is actually a
-  // cardinal / intercardinal camera direction. Some providers use this field
-  // for cross-streets, ramps, or named destinations, so those must fall through.
-  const exact = {
-    N: 0, NORTH: 0, NORTHBOUND: 0, NB: 0,
-    NE: 45, NORTHEAST: 45, NORTHEASTBOUND: 45,
-    E: 90, EAST: 90, EASTBOUND: 90, EB: 90,
-    SE: 135, SOUTHEAST: 135, SOUTHEASTBOUND: 135,
-    S: 180, SOUTH: 180, SOUTHBOUND: 180, SB: 180,
-    SW: 225, SOUTHWEST: 225, SOUTHWESTBOUND: 225,
-    W: 270, WEST: 270, WESTBOUND: 270, WB: 270,
-    NW: 315, NORTHWEST: 315, NORTHWESTBOUND: 315,
+  const cardinal = {
+    N: 0, NORTH: 0,
+    NE: 45, NORTHEAST: 45,
+    E: 90, EAST: 90,
+    SE: 135, SOUTHEAST: 135,
+    S: 180, SOUTH: 180,
+    SW: 225, SOUTHWEST: 225,
+    W: 270, WEST: 270,
+    NW: 315, NORTHWEST: 315,
   };
-  return Object.prototype.hasOwnProperty.call(exact, d) ? exact[d] : null;
+  if (Object.prototype.hasOwnProperty.call(cardinal, d)) return cardinal[d];
+
+  if (allowBound) {
+    const bound = {
+      NB: 0, NORTHBOUND: 0,
+      NEB: 45, NORTHEASTBOUND: 45,
+      EB: 90, EASTBOUND: 90,
+      SEB: 135, SOUTHEASTBOUND: 135,
+      SB: 180, SOUTHBOUND: 180,
+      SWB: 225, SOUTHWESTBOUND: 225,
+      WB: 270, WESTBOUND: 270,
+      NWB: 315, NORTHWESTBOUND: 315,
+    };
+    if (Object.prototype.hasOwnProperty.call(bound, d)) return bound[d];
+  }
+  return null;
+}
+
+function isBoundDirectionText(value) {
+  const d = String(value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+  return /^(NB|SB|EB|WB|NEB|NWB|SEB|SWB|NORTHBOUND|SOUTHBOUND|EASTBOUND|WESTBOUND|NORTHEASTBOUND|NORTHWESTBOUND|SOUTHEASTBOUND|SOUTHWESTBOUND)$/.test(d);
+}
+
+function cleanDirectionLabel(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const d = raw.toUpperCase().replace(/[^A-Z]/g, '');
+  const labels = {
+    N: 'N', NORTH: 'North',
+    NE: 'NE', NORTHEAST: 'North-east',
+    E: 'E', EAST: 'East',
+    SE: 'SE', SOUTHEAST: 'South-east',
+    S: 'S', SOUTH: 'South',
+    SW: 'SW', SOUTHWEST: 'South-west',
+    W: 'W', WEST: 'West',
+    NW: 'NW', NORTHWEST: 'North-west',
+    NB: 'NB', NORTHBOUND: 'Northbound',
+    NEB: 'NEB', NORTHEASTBOUND: 'North-eastbound',
+    EB: 'EB', EASTBOUND: 'Eastbound',
+    SEB: 'SEB', SOUTHEASTBOUND: 'South-eastbound',
+    SB: 'SB', SOUTHBOUND: 'Southbound',
+    SWB: 'SWB', SOUTHWESTBOUND: 'South-westbound',
+    WB: 'WB', WESTBOUND: 'Westbound',
+    NWB: 'NWB', NORTHWESTBOUND: 'North-westbound',
+  };
+  return labels[d] || raw;
+}
+
+function cameraDirectionLabel(cam) {
+  if (!cam) return '';
+  const trusted = trustedCameraHeading(cam);
+  if (trusted !== null) return `${DIR_NAMES[trusted]} · ${Math.round(trustedCameraBearing(cam))}°`;
+
+  const candidates = [cam.direction, cam.viewLabel, cam.angleName].filter(Boolean);
+  for (const c of candidates) {
+    const label = cleanDirectionLabel(c);
+    if (label) return label;
+  }
+  return '';
 }
 
 function headingFromText(text) {
   const t = String(text || '').toUpperCase().replace(/[()_]/g, ' ');
   if (!t.trim()) return null;
 
-  // Explicit camera/view phrasing only. Do not greedily read every road name or
-  // provider direction field here; those are handled separately below.
+  // Display-only helper. It intentionally does not treat NB/SB/EB/WB as
+  // trustworthy camera bearings. Those are road/carraigeway labels in many
+  // feeds and are now rendered as text badges only unless a numeric bearing is
+  // present.
   const explicitPatterns = [
     [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(NORTH\s*EAST|NORTHEAST|NE)\b/, 45],
     [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(SOUTH\s*EAST|SOUTHEAST|SE)\b/, 135],
     [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(SOUTH\s*WEST|SOUTHWEST|SW)\b/, 225],
     [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(NORTH\s*WEST|NORTHWEST|NW)\b/, 315],
-    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(NORTH|N|NORTHBOUND|NB)\b/, 0],
-    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(EAST|E|EASTBOUND|EB)\b/, 90],
-    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(SOUTH|S|SOUTHBOUND|SB)\b/, 180],
-    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(WEST|W|WESTBOUND|WB)\b/, 270],
+    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(NORTH|N)\b/, 0],
+    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(EAST|E)\b/, 90],
+    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(SOUTH|S)\b/, 180],
+    [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(WEST|W)\b/, 270],
   ];
   for (const [rx, deg] of explicitPatterns) if (rx.test(t)) return deg;
 
-  // Common camera naming convention: final suffix after a separator, e.g.
-  // "Camera - South". This is used as a fallback only, because some feeds have
-  // better structured direction values than their display names.
-  const suffix = t.match(/(?:^|[-–—/|,\[]\s*)(NORTH\s*EAST|NORTHEAST|NE|SOUTH\s*EAST|SOUTHEAST|SE|SOUTH\s*WEST|SOUTHWEST|SW|NORTH\s*WEST|NORTHWEST|NW|NORTHBOUND|SOUTHBOUND|EASTBOUND|WESTBOUND|NB|SB|EB|WB|NORTH|SOUTH|EAST|WEST|N|S|E|W)\s*(?:$|\]|[-–—/|,])/);
-  if (suffix) return directionValueToHeading(suffix[1]);
+  const suffix = t.match(/(?:^|[-–—/|,\[]\s*)(NORTH\s*EAST|NORTHEAST|NE|SOUTH\s*EAST|SOUTHEAST|SE|SOUTH\s*WEST|SOUTHWEST|SW|NORTH\s*WEST|NORTHWEST|NW|NORTH|SOUTH|EAST|WEST|N|S|E|W)\s*(?:$|\]|[-–—/|,])/);
+  if (suffix) return directionValueToHeading(suffix[1], { allowBound: false });
 
   return null;
 }
@@ -3131,34 +3221,20 @@ function headingFromFeedUrl(url) {
   const u = String(url || '').toUpperCase();
   if (!u) return null;
   const file = u.split(/[/?#]/).filter(Boolean).pop() || u;
-  const token = file.match(/(?:^|[-_])(NORTHWEST|NORTH_EAST|NORTHEAST|SOUTHWEST|SOUTH_EAST|SOUTHEAST|NORTH|SOUTH|EAST|WEST|NW|NE|SW|SE|NB|SB|EB|WB)(?:[-_.]|$)/);
-  return token ? directionValueToHeading(token[1]) : null;
+  const token = file.match(/(?:^|[-_])(NORTHWEST|NORTH_EAST|NORTHEAST|SOUTHWEST|SOUTH_EAST|SOUTHEAST|NORTH|SOUTH|EAST|WEST|NW|NE|SW|SE)(?:[-_.]|$)/);
+  return token ? directionValueToHeading(token[1], { allowBound: false }) : null;
 }
 
 function inferHeading(cam) {
-  // Highest priority: an active view label such as "Facing West". This is only
-  // present when a specific camera view button is selected.
-  const viewHeading = headingFromText([cam.angleName || '', cam.viewLabel || ''].join(' '));
-  if (viewHeading !== null) return viewHeading;
+  // Backwards-compatible name used throughout the app. It now returns only a
+  // trusted numeric orientation derived from bearing/azimuth/heading columns.
+  // It deliberately ignores NB/SB/EB/WB and other "bound" direction labels.
+  return trustedCameraHeading(cam);
+}
 
-  // Structured provider direction is the best source for the uploaded QLD-style
-  // records: { direction: "North" | "South" | "East" | "West" | ... }.
-  const directionHeading = directionValueToHeading(cam.direction);
-  if (directionHeading !== null) return directionHeading;
-
-  // Numeric heading from the dataset/frustum-generation pipeline, if present.
-  if (typeof cam.heading === 'number' && isFinite(cam.heading)) {
-    return (Math.round(cam.heading / 45) * 45 + 360) % 360;
-  }
-
-  // Filename is often reliable for QLD-style image feeds, but only use it after
-  // structured fields because some providers put road/destination text here.
-  const urlHeading = headingFromFeedUrl(cam.imageUrl || cam.videoUrl || '');
-  if (urlHeading !== null) return urlHeading;
-
-  // Finally fall back to camera name/location suffixes. Avoid description/roadway
-  // here because they frequently contain district, road, or cross-street text.
-  return headingFromText([cam.location || '', cam.name || ''].join(' '));
+function displayHeadingFromText(cam) {
+  if (!cam) return null;
+  return headingFromText([cam.angleName || '', cam.viewLabel || '', cam.direction || '', cam.location || '', cam.name || ''].join(' '));
 }
 
 function getDirColor(heading) {
@@ -4154,11 +4230,16 @@ function populateSidePanel(cam) {
   badgesEl.innerHTML = '';
 
   const heading = inferHeading(cam);
+  const bearing = trustedCameraBearing(cam);
   if (heading !== null) {
-    badgesEl.innerHTML += `<span class="badge badge-dir" title="Camera facing direction">Facing ${DIR_NAMES[heading]} · ${heading}°</span>`;
+    badgesEl.innerHTML += `<span class="badge badge-dir" title="Trusted numeric bearing from the database">Bearing ${DIR_NAMES[heading]} · ${Math.round(bearing)}°</span>`;
+  } else {
+    const label = cameraDirectionLabel(cam);
+    if (label) badgesEl.innerHTML += `<span class="badge badge-dir" title="Road/view direction label only — not used for arrows or frustums">${escapeHtml(label)}</span>`;
   }
-  if (cam._source) {
-    badgesEl.innerHTML += `<span class="badge badge-src">${cam._source.replace('-cameras.json','').replace('.json','')}</span>`;
+  const sourceLabel = cam.source_file || cam._source || cam.provider;
+  if (sourceLabel) {
+    badgesEl.innerHTML += `<span class="badge badge-src">${escapeHtml(String(sourceLabel).replace('-cameras.json','').replace('.json',''))}</span>`;
   }
   if (cam.feedType) {
     badgesEl.innerHTML += `<span class="badge badge-type">${cam.feedType}</span>`;
@@ -4180,7 +4261,10 @@ function populateSidePanel(cam) {
         btn.classList.add('active');
         setImage(v.imageUrl);
         removeFrustum();
-        if (frustumsEnabled) showFrustum({ ...cam, heading: undefined, direction: undefined, angleName: v.angleName || '', viewLabel: v.label || '', description: v.angleName || v.label || cam.description });
+        const viewBearing = parseNullableNumber(v.bearing);
+        if (frustumsEnabled && viewBearing !== null) {
+          showFrustum({ ...cam, bearing: viewBearing, heading: null, azimuth: null, angleName: v.angleName || '', viewLabel: v.label || '', description: v.angleName || v.label || cam.description });
+        }
       };
       viewList.appendChild(btn);
     });
@@ -4199,7 +4283,14 @@ function populateSidePanel(cam) {
     cam.county   && ['County',   cam.county],
     cam.road     && ['Road',     cam.road],
     cam.roadway  && cam.roadway !== cam.road && ['Area',     cam.roadway],
+    cam.suburb   && ['Suburb',   cam.suburb],
+    cam.neighbourhood && ['Local', cam.neighbourhood],
     cam.postcode && ['Postcode', cam.postcode],
+    cam.direction && ['Direction', cleanDirectionLabel(cam.direction)],
+    bearing !== null && ['Bearing', `${Math.round(bearing)}°`, 'accent'],
+    cam.provider && ['Provider', cam.provider],
+    cam.source_file && ['Source', cam.source_file],
+    cam.display_name && ['Address', cam.display_name],
     cam.id       && ['ID',       cam.id],
   ].filter(Boolean);
 
@@ -4214,7 +4305,15 @@ function populateSidePanel(cam) {
   if (feedUrl) {
     const div = document.createElement('div');
     div.className = 'dataRow';
-    div.innerHTML = `<span class="dataKey">URL</span><span class="dataVal"><a href="${feedUrl}" target="_blank" rel="noopener" style="color:var(--c-accent);text-decoration:none;word-break:break-all;font-size:11px;" title="${feedUrl}">${feedUrl.length > 42 ? feedUrl.slice(0,42)+'…' : feedUrl}</a></span>`;
+    div.innerHTML = `<span class="dataKey">Feed</span><span class="dataVal"><a href="${escapeHtml(feedUrl)}" target="_blank" rel="noopener" style="color:var(--c-accent);text-decoration:none;word-break:break-all;font-size:11px;" title="${escapeHtml(feedUrl)}">${escapeHtml(feedUrl.length > 42 ? feedUrl.slice(0,42)+'…' : feedUrl)}</a></span>`;
+    rows.appendChild(div);
+  }
+
+  const sourceUrl = cam.pageUrl || cam.sourceUrl || cam.originalUrl || null;
+  if (sourceUrl) {
+    const div = document.createElement('div');
+    div.className = 'dataRow';
+    div.innerHTML = `<span class="dataKey">Source</span><span class="dataVal"><a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener" style="color:var(--c-accent);text-decoration:none;word-break:break-all;font-size:11px;" title="${escapeHtml(sourceUrl)}">${escapeHtml(sourceUrl.length > 42 ? sourceUrl.slice(0,42)+'…' : sourceUrl)}</a></span>`;
     rows.appendChild(div);
   }
 
@@ -4642,9 +4741,9 @@ async function runLocationSearch(query) {
     const item = document.createElement('div');
     item.className = 'sr-item';
     const distStr = dist < 1 ? `${(dist * 1000).toFixed(0)} m` : `${dist.toFixed(1)} km`;
-    const heading  = inferHeading(cam);
-    const dirBadge = heading !== null
-      ? `<span class="sr-dir">${['N','NE','E','SE','S','SW','W','NW'][heading/45]}</span>`
+    const label = cameraDirectionLabel(cam);
+    const dirBadge = label
+      ? `<span class="sr-dir">${escapeHtml(label)}</span>`
       : '';
     const exists = dashboardState.cameras.includes(String(cam.id));
     const full = false;
@@ -5258,7 +5357,10 @@ function promoteDashboardCamera(id) {
 
 function dashboardDirectionBadge(cam) {
   const heading = inferHeading(cam);
-  return heading !== null ? `<span class="dash-dir">${DIR_NAMES[heading]} ${heading}°</span>` : `<span class="dash-dir">UNK</span>`;
+  const bearing = trustedCameraBearing(cam);
+  if (heading !== null) return `<span class="dash-dir" title="Trusted numeric bearing">${DIR_NAMES[heading]} ${Math.round(bearing)}°</span>`;
+  const label = cameraDirectionLabel(cam);
+  return label ? `<span class="dash-dir" title="Direction label only">${escapeHtml(label)}</span>` : `<span class="dash-dir">NO BEARING</span>`;
 }
 
 function updateDashboardMediaFitButton() {
@@ -5357,7 +5459,9 @@ function renderDashboard() {
 function dashboardCardHtml(cam, idx) {
   const title = escapeHtml(cameraTitle(cam));
   const heading = inferHeading(cam);
-  const dir = heading !== null ? `${DIR_NAMES[heading]} · ${heading}°` : 'Direction unknown';
+  const bearing = trustedCameraBearing(cam);
+  const directionLabel = cameraDirectionLabel(cam);
+  const dir = heading !== null ? `${DIR_NAMES[heading]} · ${Math.round(bearing)}°` : (directionLabel ? `${directionLabel} · label only` : 'No bearing');
   const updated = dashboardLastRefresh.get(String(cam.id));
   const refreshText = updated ? `Updated ${new Date(updated).toLocaleTimeString()}` : 'Waiting for refresh';
   const isFocusMain = dashboardState.layout === 'focus' && String(cam.id) === String(dashboardState.focusCameraId);
@@ -5656,7 +5760,9 @@ function dashboardFrustumLatLngs(cam) {
 
 function mapPopupHtml(cam, added=false) {
   const heading = inferHeading(cam);
-  const dir = heading !== null ? `${DIR_NAMES[heading]} ${heading}°` : 'Direction unknown';
+  const bearing = trustedCameraBearing(cam);
+  const label = cameraDirectionLabel(cam);
+  const dir = heading !== null ? `${DIR_NAMES[heading]} ${Math.round(bearing)}°` : (label ? `${label} · label only` : 'No bearing');
   const full = false;
   return `<div class="dashboard-map-popup">
     <div class="dashboard-map-popup-title">${escapeHtml(cameraTitle(cam))}</div>
@@ -8505,52 +8611,128 @@ window.startBillingPortal = startBillingPortal;
     return Array.isArray(data) ? data : [];
   }
 
+  function parseJsonMaybe(value, fallback) {
+    if (value === null || value === undefined || value === '') return fallback;
+    if (typeof value === 'string') {
+      try { return JSON.parse(value); } catch (_) { return fallback; }
+    }
+    return value;
+  }
+
+  function firstNonEmpty(...values) {
+    for (const v of values) {
+      if (v !== null && v !== undefined && String(v).trim() !== '') return v;
+    }
+    return null;
+  }
+
   function toCamelCamera(row) {
     if (!row) return null;
-    const id = row.id == null ? null : String(row.id);
-    const lat = Number(row.latitude ?? row.lat);
-    const lng = Number(row.longitude ?? row.lng);
-    if (!id || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const meta = parseJsonMaybe(row.metadata, {}) || {};
+    const id = firstNonEmpty(row.id, meta.id);
+    const cameraId = id == null ? null : String(id);
+    const lat = Number(firstNonEmpty(row.latitude, row.lat, meta.latitude, meta.lat));
+    const lng = Number(firstNonEmpty(row.longitude, row.lng, row.lon, meta.longitude, meta.lng, meta.lon));
+    if (!cameraId || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
+    const imageUrl = firstNonEmpty(row.image_url, row.imageUrl, meta.image_url, meta.imageUrl);
+    const videoUrl = firstNonEmpty(row.video_url, row.videoUrl, meta.video_url, meta.videoUrl);
+    const feedType = firstNonEmpty(row.feed_type, row.feedType, meta.feed_type, meta.feedType, videoUrl ? 'video' : imageUrl ? 'image' : null);
+
+    const rawViews = parseJsonMaybe(row.views, null) || parseJsonMaybe(row.angles, null) || parseJsonMaybe(meta.views, null) || parseJsonMaybe(meta.angles, null) || [];
     let views = [];
-    if (Array.isArray(row.views)) {
-      views = row.views.map(v => ({
-        angleName: v.angleName || v.label || 'View',
-        imageUrl: v.imageUrl || v.image_url || null,
-        videoUrl: v.videoUrl || v.video_url || null,
-        feedType: v.feedType || v.feed_type || (v.videoUrl || v.video_url ? 'video' : 'image'),
-      })).filter(v => v.imageUrl || v.videoUrl);
+    if (Array.isArray(rawViews)) {
+      views = rawViews.map((v, i) => {
+        const viewImage = firstNonEmpty(v.imageUrl, v.image_url, v.url, v.snapshotUrl, v.snapshot_url);
+        const viewVideo = firstNonEmpty(v.videoUrl, v.video_url, v.streamUrl, v.stream_url, v.hlsUrl, v.hls_url);
+        const viewLabel = firstNonEmpty(v.angleName, v.label, v.name, v.direction, v.caption, `View ${i + 1}`);
+        return {
+          angleName: viewLabel || `View ${i + 1}`,
+          label: viewLabel || `View ${i + 1}`,
+          direction: firstNonEmpty(v.direction, null),
+          bearing: parseNullableNumber(firstNonEmpty(v.bearing, v.azimuth, v.heading)),
+          imageUrl: viewImage || null,
+          videoUrl: viewVideo || null,
+          feedType: firstNonEmpty(v.feedType, v.feed_type, viewVideo ? 'video' : 'image'),
+          raw: v,
+        };
+      }).filter(v => v.imageUrl || v.videoUrl);
     }
 
-    const imageUrl = row.image_url || row.imageUrl || null;
-    const videoUrl = row.video_url || row.videoUrl || null;
     if (!views.length && (imageUrl || videoUrl)) {
-      views = [{ angleName: row.direction || 'Default', imageUrl, videoUrl, feedType: row.feed_type || row.feedType || (videoUrl ? 'video' : 'image') }];
+      views = [{
+        angleName: firstNonEmpty(row.direction, meta.direction, 'Default'),
+        label: firstNonEmpty(row.direction, meta.direction, 'Default'),
+        direction: firstNonEmpty(row.direction, meta.direction),
+        bearing: parseNullableNumber(firstNonEmpty(row.bearing, row.azimuth, row.heading, meta.bearing, meta.azimuth, meta.heading)),
+        imageUrl: imageUrl || null,
+        videoUrl: videoUrl || null,
+        feedType: feedType || (videoUrl ? 'video' : 'image'),
+      }];
     }
+
+    const provider = firstNonEmpty(row.provider, meta.provider, row.source, meta.source, row.source_file, meta._source);
+    const sourceFile = firstNonEmpty(row.source_file, row._source, meta.source_file, meta._source);
+    const sourceUrl = firstNonEmpty(row.source_url, row.sourceUrl, meta.source_url, meta.sourceUrl);
+    const pageUrl = firstNonEmpty(row.page_url, row.pageUrl, meta.page_url, meta.pageUrl);
+    const originalUrl = firstNonEmpty(row.original_url, row.originalUrl, meta.original_url, meta.originalUrl);
+    const roadway = firstNonEmpty(row.roadway, meta.roadway);
+    const road = firstNonEmpty(row.road, meta.road, roadway);
+    const name = firstNonEmpty(row.name, row.location, meta.name, meta.location, cameraId);
+    const description = firstNonEmpty(row.description, meta.description, row.caption, meta.caption, row.display_name, meta.display_name);
+
+    const bearing = parseNullableNumber(firstNonEmpty(row.bearing, meta.bearing));
+    const heading = parseNullableNumber(firstNonEmpty(row.heading, meta.heading));
+    const azimuth = parseNullableNumber(firstNonEmpty(row.azimuth, meta.azimuth));
 
     return {
-      id,
-      location: row.name || row.location || id,
-      name: row.name || row.location || id,
+      id: cameraId,
+      location: name,
+      name,
       lat,
       lng,
-      provider: row.provider || row._source || null,
-      _source: row.provider || row._source || null,
-      roadway: row.roadway || row.road || null,
-      road: row.roadway || row.road || null,
-      country: row.country || null,
-      country_code: row.country_code || null,
-      state: row.state || null,
-      county: row.county || null,
-      city: row.city || null,
-      direction: row.direction || null,
-      bearing: row.bearing == null ? null : Number(row.bearing),
-      feedType: row.feed_type || row.feedType || (videoUrl ? 'video' : 'image'),
-      imageUrl,
-      videoUrl,
+      provider: provider || null,
+      source_file: sourceFile || null,
+      _source: sourceFile || provider || null,
+      sourceUrl: sourceUrl || null,
+      pageUrl: pageUrl || null,
+      originalUrl: originalUrl || null,
+      externalCameraId: firstNonEmpty(row.external_camera_id, row.externalCameraId, meta.external_camera_id, meta.externalCameraId),
+      roadway: roadway || null,
+      road: road || null,
+      country: firstNonEmpty(row.country, meta.country),
+      country_code: firstNonEmpty(row.country_code, meta.country_code),
+      state: firstNonEmpty(row.state, meta.state),
+      county: firstNonEmpty(row.county, meta.county),
+      city: firstNonEmpty(row.city, meta.city),
+      suburb: firstNonEmpty(row.suburb, meta.suburb),
+      neighbourhood: firstNonEmpty(row.neighbourhood, row.neighborhood, meta.neighbourhood, meta.neighborhood),
+      postcode: firstNonEmpty(row.postcode, meta.postcode),
+      description: description || '',
+      display_name: firstNonEmpty(row.display_name, row.displayName, meta.display_name, meta.displayName),
+      iso_3166_2: firstNonEmpty(row.iso_3166_2, meta.iso_3166_2),
+      direction: firstNonEmpty(row.direction, meta.direction),
+      bearing,
+      heading,
+      azimuth,
+      feedType,
+      imageUrl: imageUrl || null,
+      videoUrl: videoUrl || null,
+      streamCode: firstNonEmpty(row.stream_code, row.streamCode, meta.stream_code, meta.streamCode),
+      youtubeVideoId: firstNonEmpty(row.youtube_video_id, row.youtubeVideoId, meta.youtube_video_id, meta.youtubeVideoId),
+      streamProvider: firstNonEmpty(row.stream_provider, row.streamProvider, meta.stream_provider, meta.streamProvider),
+      hasMultipleViews: Boolean(row.has_multiple_views ?? row.hasMultipleViews ?? meta.hasMultipleViews ?? views.length > 1),
       views,
-      metadata: row.metadata || {},
-      _apiSummary: !imageUrl && !videoUrl && !views.length,
+      status: firstNonEmpty(row.status, meta.status),
+      isOnline: row.is_online ?? row.isOnline ?? meta.is_online ?? meta.isOnline ?? null,
+      isActive: row.is_active ?? row.isActive ?? meta.is_active ?? meta.isActive ?? null,
+      isAvailable: row.is_available ?? row.isAvailable ?? meta.is_available ?? meta.isAvailable ?? null,
+      riverSystem: firstNonEmpty(row.river_system, row.riverSystem, meta.river_system, meta.riverSystem),
+      riverName: firstNonEmpty(row.river_name, row.riverName, meta.river_name, meta.riverName),
+      managementOffice: firstNonEmpty(row.management_office, row.managementOffice, meta.management_office, meta.managementOffice),
+      town: firstNonEmpty(row.town, meta.town),
+      metadata: meta,
+      _apiSummary: !(imageUrl || videoUrl || views.length),
       _apiDetailLoaded: !!(imageUrl || videoUrl || views.length),
     };
   }
