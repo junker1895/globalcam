@@ -4303,6 +4303,7 @@ function refitCameraToResolvedAnchor(cam, groundHeight, bearing = null) {
   const destination = Cesium.Cartesian3.add(origin, offsetECEF, new Cesium.Cartesian3());
 
   try {
+    suspendCameraFloorGuardForProgrammaticMove('selected-camera-refit');
     if (resolvedBearing !== null) {
       viewer.camera.flyTo({
         destination,
@@ -4313,6 +4314,8 @@ function refitCameraToResolvedAnchor(cam, groundHeight, bearing = null) {
         },
         duration: 0.65,
         easingFunction: Cesium.EasingFunction.CUBIC_OUT,
+        complete: () => resumeCameraFloorGuardAfterProgrammaticMove('selected-camera-refit-complete'),
+        cancel: () => resumeCameraFloorGuardAfterProgrammaticMove('selected-camera-refit-cancel'),
       });
     } else {
       const direction = Cesium.Cartesian3.normalize(
@@ -4325,6 +4328,8 @@ function refitCameraToResolvedAnchor(cam, groundHeight, bearing = null) {
         orientation: { direction, up },
         duration: 0.65,
         easingFunction: Cesium.EasingFunction.CUBIC_OUT,
+        complete: () => resumeCameraFloorGuardAfterProgrammaticMove('selected-camera-refit-complete'),
+        cancel: () => resumeCameraFloorGuardAfterProgrammaticMove('selected-camera-refit-cancel'),
       });
     }
   } catch (_) {}
@@ -4491,6 +4496,8 @@ const CAMERA_3D_NEAR_SURFACE_LIMIT_M = 260;
 const CAMERA_3D_MAX_UPWARD_PITCH_DEG = -2;
 
 let cameraFloorGuardApplying = false;
+let cameraFloorGuardSuspended = false;
+let cameraFloorGuardProgrammaticBaseline = null;
 let lastCameraFloorSampleKey = '';
 let lastCameraFloorSampleHeight = null;
 let lastCameraFloorSampleMs = 0;
@@ -4501,6 +4508,7 @@ function isCameraFloorGuardActive() {
     viewer.scene &&
     viewer.camera &&
     google3DEnabled &&
+    !cameraFloorGuardSuspended &&
     !document.body.classList.contains('dashboard-active')
   );
 }
@@ -4546,6 +4554,85 @@ function getRenderedCameraFloorHeight(carto) {
   return h;
 }
 
+
+function cameraFloorGuardDistanceMeters(aLon, aLat, bLon, bLat) {
+  try {
+    const geodesic = new Cesium.EllipsoidGeodesic(
+      new Cesium.Cartographic(aLon, aLat),
+      new Cesium.Cartographic(bLon, bLat)
+    );
+    return Math.abs(Number(geodesic.surfaceDistance) || 0);
+  } catch (_) {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function seedCameraFloorGuardFromCurrentPose(reason = 'programmatic') {
+  if (!viewer || !viewer.camera) return;
+  try {
+    const carto = Cesium.Cartographic.fromCartesian(viewer.camera.positionWC || viewer.camera.position);
+    if (!carto) return;
+    cameraFloorGuardProgrammaticBaseline = {
+      longitude: carto.longitude,
+      latitude: carto.latitude,
+      height: Number(carto.height),
+      pitch: Number(viewer.camera.pitch),
+      heading: Number(viewer.camera.heading),
+      roll: Number(viewer.camera.roll),
+      reason,
+      createdAt: performance.now(),
+      // Keep the baseline local to the selected-camera inspection area. This
+      // allows the intentional close-up pose to be treated as valid, but does
+      // not globally disable the floor guard after the user navigates away.
+      radiusMeters: 380,
+      ttlMs: 90000,
+    };
+  } catch (_) {}
+}
+
+function suspendCameraFloorGuardForProgrammaticMove(reason = 'programmatic') {
+  cameraFloorGuardSuspended = true;
+}
+
+function resumeCameraFloorGuardAfterProgrammaticMove(reason = 'programmatic') {
+  // Wait a couple of frames so Cesium commits the final flyTo pose before we
+  // promote it to the guard's local baseline.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      seedCameraFloorGuardFromCurrentPose(reason);
+      cameraFloorGuardSuspended = false;
+    });
+  });
+}
+
+function adjustedCameraFloorMinHeight(carto, nativeMinEyeH) {
+  const baseline = cameraFloorGuardProgrammaticBaseline;
+  if (!baseline || !carto) return nativeMinEyeH;
+  const now = performance.now();
+  if ((now - baseline.createdAt) > baseline.ttlMs) {
+    cameraFloorGuardProgrammaticBaseline = null;
+    return nativeMinEyeH;
+  }
+  const dist = cameraFloorGuardDistanceMeters(carto.longitude, carto.latitude, baseline.longitude, baseline.latitude);
+  if (!Number.isFinite(dist) || dist > baseline.radiusMeters) return nativeMinEyeH;
+
+  // The inspection flyTo can intentionally settle closer to the 3D tile mesh
+  // than the manual guard would normally allow. Treat that exact settled eye
+  // height as the local lower boundary, so re-enabling the guard does not snap
+  // the camera. Manual movement can continue from there, but not deeper.
+  if (Number.isFinite(baseline.height)) {
+    return Math.min(nativeMinEyeH, baseline.height);
+  }
+  return nativeMinEyeH;
+}
+
+function adjustedCameraFloorMaxPitch(nativeMaxPitch) {
+  const baseline = cameraFloorGuardProgrammaticBaseline;
+  if (!baseline || !Number.isFinite(baseline.pitch)) return nativeMaxPitch;
+  if ((performance.now() - baseline.createdAt) > baseline.ttlMs) return nativeMaxPitch;
+  return Math.max(nativeMaxPitch, baseline.pitch);
+}
+
 function enforceCesiumCameraFloorLimit() {
   if (cameraFloorGuardApplying || !isCameraFloorGuardActive()) return;
 
@@ -4561,10 +4648,11 @@ function enforceCesiumCameraFloorLimit() {
   const floorH = getRenderedCameraFloorHeight(carto);
   if (!Number.isFinite(floorH)) return;
 
-  const minEyeH = floorH + CAMERA_3D_EYE_CLEARANCE_M;
+  const nativeMinEyeH = floorH + CAMERA_3D_EYE_CLEARANCE_M;
+  const minEyeH = adjustedCameraFloorMinHeight(carto, nativeMinEyeH);
   const eyeH = Number(carto.height);
   const nearSurface = eyeH < (floorH + CAMERA_3D_NEAR_SURFACE_LIMIT_M);
-  const maxPitch = Cesium.Math.toRadians(CAMERA_3D_MAX_UPWARD_PITCH_DEG);
+  const maxPitch = adjustedCameraFloorMaxPitch(Cesium.Math.toRadians(CAMERA_3D_MAX_UPWARD_PITCH_DEG));
 
   const needsHeightClamp = eyeH < minEyeH;
   const needsPitchClamp = nearSurface && camera.pitch > maxPitch;
@@ -5217,6 +5305,7 @@ async function selectCamera(cam) {
     const offsetECEF = Cesium.Matrix4.multiplyByPointAsVector(enuToWorld, offsetENU, new Cesium.Cartesian3());
     const viewerPos  = Cesium.Cartesian3.add(camPos, offsetECEF, new Cesium.Cartesian3());
 
+    suspendCameraFloorGuardForProgrammaticMove('selected-camera-initial-flight');
     viewer.camera.flyTo({
       destination: viewerPos,
       orientation: {
@@ -5227,10 +5316,12 @@ async function selectCamera(cam) {
       duration: 1.55,
       easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
       complete: () => {
+        resumeCameraFloorGuardAfterProgrammaticMove('selected-camera-initial-flight-complete');
         markCameraFlyCompleteAndWaitForTiles(tilesLoadToken);
         notifyApiSelectionFlightSettled();
       },
       cancel: () => {
+        resumeCameraFloorGuardAfterProgrammaticMove('selected-camera-initial-flight-cancel');
         hideCameraTilesLoader(tilesLoadToken, true);
         notifyApiSelectionFlightSettled();
       },
