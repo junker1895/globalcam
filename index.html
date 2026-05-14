@@ -2578,7 +2578,7 @@ let frustumTilt  = 15;
 // uses a deliberately conservative screen-visible 3D display altitude and disables
 // depth testing. This prioritises operational visibility over exact mesh contact.
 const CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M = 0;
-const CAMERA_3D_NORMAL_VISUAL_HEIGHT_M = 30;
+const CAMERA_3D_NORMAL_VISUAL_HEIGHT_M = 220;
 const CAMERA_3D_MARKER_LIFT_M = 0;
 const CAMERA_3D_SELECTED_LIFT_M = 3.0;
 const CAMERA_3D_FRUSTUM_LIFT_M = 3.0;
@@ -2613,6 +2613,13 @@ function saneSurfaceHeight(h) {
 function updateCameraPoleForEntity(entity, lng, lat, topHeight, options = {}) {
   if (!entity || !entity.polyline) return;
   try {
+    // Resolved selected cameras must never show the approximate locator beam.
+    // This guard protects against later refresh/restyle paths accidentally
+    // re-enabling the unselected beam after the sampled 3D anchor has resolved.
+    if (isCurrentSelectedCameraEntity(entity) && hasResolvedSelectedCameraAnchor()) {
+      entity.polyline.show = false;
+      return;
+    }
     const is3D = !!google3DEnabled;
     const isSelected = !!options.selected;
     const bottomHeight = Number.isFinite(Number(options.bottomHeight)) ? Number(options.bottomHeight) : CAMERA_3D_POLE_BASE_HEIGHT_M;
@@ -4772,6 +4779,7 @@ async function createCameraEntities(cams) {
       entity._bfp       = entity.position.getValue(Cesium.JulianDate.now());
       entity._searchOff = false;
       raiseCesiumCameraEntityToSurface(entity, cam.lng, cam.lat, CAMERA_3D_MARKER_LIFT_M);
+      applyResolvedSelectedCameraEntityIfNeeded(entity);
     });
 
     done += chunk.length;
@@ -9922,6 +9930,7 @@ window.startBillingPortal = startBillingPortal;
     entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
     entity._searchOff = false;
     raiseCesiumCameraEntityToSurface(entity, cam.lng, cam.lat, CAMERA_3D_MARKER_LIFT_M);
+    applyResolvedSelectedCameraEntityIfNeeded(entity);
   }
 
   function renderApiEntities(items, mode) {
