@@ -2622,17 +2622,21 @@ function updateCameraPoleForEntity(entity, lng, lat, topHeight, options = {}) {
     if (!is3D) return;
 
     entity.polyline.positions = [
+      // This is an approximate locator beam, not a sampled 3D-tile mast. The
+      // depth-fail material intentionally keeps the line visible even where the
+      // ellipsoid/zero-height base is behind photogrammetry. That gives the user
+      // a reliable ground reference without doing per-camera height queries.
       Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), bottomHeight),
       Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), top),
     ];
-    entity.polyline.width = isSelected ? 2.2 : 1.8;
+    entity.polyline.width = isSelected ? 2.2 : 2.0;
     entity.polyline.material = (isSelected
       ? Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.82)
-      : Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.38));
+      : Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.46));
     entity.polyline.depthFailMaterial = (isSelected
       ? Cesium.Color.fromCssColorString('#60a5fa').withAlpha(0.45)
-      : Cesium.Color.fromCssColorString('#60a5fa').withAlpha(0.32));
-    entity.polyline.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, isSelected ? 250000 : 900000);
+      : Cesium.Color.fromCssColorString('#60a5fa').withAlpha(0.72));
+    entity.polyline.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, isSelected ? 250000 : 1200000);
   } catch (_) {}
 }
 
@@ -3050,27 +3054,65 @@ async function applySelectedCameraEntityStyle(cam) {
 
   const heading = inferHeading(cam);
   const colour = heading === null ? Cesium.Color.fromCssColorString('#2563eb') : getDirColor(heading);
-  // First-click placement must be immediate. Use cached/globe fallback now, then
-  // refine against the loaded 3D tile surface after the inspection flight settles.
+  // First-click flight still needs an approximate target, but the visible
+  // selected marker must not be shown until the rendered 3D surface has been
+  // sampled and validated. In 3D mode we therefore keep the normal pole/dot
+  // symbol visible during resolving, then replace it with the selected beacon.
   const groundH = google3DEnabled ? selectedGroundHeightFastFallback(cam.lng, cam.lat) : 0;
-  const selectedHeight = google3DEnabled ? selectedCameraHeight(groundH, CAMERA_3D_SELECTED_LIFT_M) : 0;
 
   try {
     selectedCameraEntityId = cam.id;
     entity._selectedHidden = false;
-    entity._selectedStyled = true;
+    entity._selectedStyled = google3DEnabled ? 'pending-resolution' : true;
     entity.show = true;
+
+    if (google3DEnabled) {
+      // Do not move the entity to a guessed selected height. Keep the normal
+      // visual camera symbol and its locator beam in place until the strict
+      // selected-surface resolver produces the authoritative anchor.
+      setCameraEntityVisualPosition(entity, cam.lng, cam.lat, CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, CAMERA_3D_MARKER_LIFT_M);
+
+      if (entity.point) {
+        entity.point.show = true;
+        entity.point.pixelSize = 7;
+        entity.point.color = colour;
+        entity.point.outlineColor = Cesium.Color.WHITE.withAlpha(0.8);
+        entity.point.outlineWidth = 1;
+        entity.point.scaleByDistance = new Cesium.NearFarScalar(300, 1.8, 400000, 0.6);
+        entity.point.heightReference = Cesium.HeightReference.NONE;
+        entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+      }
+      if (entity.billboard) {
+        entity.billboard.show = heading !== null;
+        entity.billboard.width = 20;
+        entity.billboard.height = 20;
+        entity.billboard.pixelOffset = new Cesium.Cartesian2(0, -13);
+        entity.billboard.scaleByDistance = new Cesium.NearFarScalar(300, 1.25, 400000, 0.5);
+        entity.billboard.heightReference = Cesium.HeightReference.NONE;
+        entity.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+      }
+      if (entity.label) {
+        entity.label.show = false;
+        entity.label.heightReference = Cesium.HeightReference.NONE;
+        entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+      }
+      if (entity.polyline) {
+        entity.polyline.show = true;
+        updateCameraPoleForEntity(entity, cam.lng, cam.lat, visualCameraHeight(CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, CAMERA_3D_MARKER_LIFT_M));
+      }
+      return groundH;
+    }
+
+    // Non-3D mode has no photogrammetry surface to wait for, so the selected
+    // styling can remain immediate.
+    const selectedHeight = 0;
     entity.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), selectedHeight));
     entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
     updateCameraPoleForEntity(entity, cam.lng, cam.lat, selectedHeight, { selected: true });
-    // While the selected FOV anchor is unresolved, do not show a guessed 3D
-    // selected marker or selected pole. They reappear together once the sampled
-    // rendered-surface height has been validated.
-    if (google3DEnabled && entity.polyline) entity.polyline.show = false;
 
     if (entity.point) {
-      entity.point.show = !google3DEnabled;
-      entity.point.pixelSize = google3DEnabled ? 14 : 12;
+      entity.point.show = true;
+      entity.point.pixelSize = 12;
       entity.point.color = colour.withAlpha ? colour.withAlpha(1) : colour;
       entity.point.outlineColor = Cesium.Color.WHITE;
       entity.point.outlineWidth = 3;
@@ -3079,15 +3121,15 @@ async function applySelectedCameraEntityStyle(cam) {
       entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
     if (entity.billboard) {
-      entity.billboard.show = false; // selected state uses one dot only, not dot + arrow overlay
+      entity.billboard.show = false;
       entity.billboard.heightReference = Cesium.HeightReference.NONE;
       entity.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
     if (entity.label) {
-      entity.label.show = !google3DEnabled;
+      entity.label.show = true;
       entity.label.text = cam.location || cam.name || cam.id || 'Camera';
       entity.label.pixelOffset = new Cesium.Cartesian2(0, -18);
-      entity.label.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, google3DEnabled ? 8000 : 250000);
+      entity.label.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, 250000);
       entity.label.heightReference = Cesium.HeightReference.NONE;
       entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
