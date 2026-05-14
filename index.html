@@ -2826,16 +2826,17 @@ function hasResolvedSelectedCameraAnchor() {
 }
 
 function hidePendingSelectedCameraEntity(entity) {
-  // During the selected-camera resolving phase, do not show either the old
-  // approximate 30 m locator marker/beam or the resolved selected marker. This
-  // prevents the user seeing a misleading dot/beam before the rendered 3D tile
-  // surface height has been validated. The entity remains logically selected;
-  // its visible graphics are restored only after resolution or on deselect.
+  // During selected-camera resolving, the selected camera's normal 30 m locator
+  // symbol must disappear completely. Do not merely hide point/polyline graphics:
+  // Cesium entity clustering / restyling can still briefly re-show those
+  // graphics during flight and tile-streaming. Hiding the entity itself is the
+  // authoritative pending state. It is restored only after the sampled 3D anchor
+  // resolves, or when the camera is deselected.
   if (!entity) return false;
   try {
     entity._selectedHidden = true;
     entity._selectedStyled = 'pending-resolution';
-    entity.show = true;
+    entity.show = false;
     if (entity.point) entity.point.show = false;
     if (entity.billboard) entity.billboard.show = false;
     if (entity.label) entity.label.show = false;
