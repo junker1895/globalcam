@@ -2757,6 +2757,22 @@ function selectedGroundHeightFastFallback(lng, lat) {
 
 function positionSelectedCameraEntityAtGround(cam, entity, groundH) {
   if (!cam || !entity) return;
+
+  // Safety gate: in Google 3D mode this function must never promote the
+  // selected marker from a guessed/fast-fallback height. The selected beacon is
+  // only allowed after refineSelectedCameraSurfaceAfterTiles() has stored a
+  // validated rendered-surface sample in selectedCameraResolvedSurfaceHeight.
+  if (google3DEnabled) {
+    const resolvedH = saneSurfaceHeight(selectedCameraResolvedSurfaceHeight);
+    if (resolvedH === null) {
+      renderUnselectedCameraEntity(entity, cam);
+      return;
+    }
+    renderResolvedSelectedCameraEntity(entity, cam, resolvedH);
+    suppressResolvedSelectedBeams(cam);
+    return;
+  }
+
   renderResolvedSelectedCameraEntity(entity, cam, groundH);
   suppressResolvedSelectedBeams(cam);
 }
@@ -2928,14 +2944,14 @@ function hasResolvedSelectedCameraAnchor() {
 }
 
 function hidePendingSelectedCameraEntity(entity) {
-  // Compatibility no-op. The previous implementation hid the selected camera
-  // immediately during pending 3D resolution, which caused the selected marker
-  // lifecycle to diverge from the intended behaviour. Pending selection must be
-  // visually unchanged: keep the unselected elevated dot + beam until the exact
-  // sampled anchor has resolved. Sampling itself temporarily hides the camera
-  // layer inside getCameraSurfaceHeightStrict(), then restores it.
+  // Compatibility shim. Pending selection is not a hidden/grounded selected
+  // marker; it is explicitly the normal elevated locator symbol. Re-render it
+  // here so stale selected/ground positions from an earlier path cannot survive
+  // while Google 3D tiles are still resolving.
   if (!entity) return false;
   try {
+    const cam = findCameraById(entity.id) || selectedCamera;
+    if (cam && google3DEnabled) renderUnselectedCameraEntity(entity, cam);
     entity._selectedHidden = false;
     entity._selectedStyled = 'pending-resolution';
     entity.show = true;
@@ -3187,13 +3203,16 @@ async function applySelectedCameraEntityStyle(cam) {
     entity.show = true;
 
     if (google3DEnabled) {
-      // Pending selected state is a strict visual no-op. Do not move the entity,
-      // do not restyle it as selected, and do not hide the locator beam yet.
-      // The clicked camera remains exactly as the normal elevated dot + beam
-      // until refineSelectedCameraSurfaceAfterTiles() obtains a validated
-      // rendered 3D-tile height and applyResolvedSelectedCameraEntityIfNeeded()
-      // promotes it to the selected beacon/frustum anchor.
+      // Pending selected state is forced back to the normal elevated locator
+      // symbol. This is intentionally stronger than a no-op: if any earlier
+      // selection/API-rebuild path left the entity at a ground/ellipsoid anchor,
+      // we immediately lift it back to the safe beam-top position and keep the
+      // locator beam visible. The selected beacon/frustum is created only after
+      // refineSelectedCameraSurfaceAfterTiles() stores a validated 3D surface
+      // height and applyResolvedSelectedCameraEntityIfNeeded() promotes it.
       restoreSuppressedSelectedBeams();
+      selectedCameraResolvedSurfaceHeight = null;
+      renderUnselectedCameraEntity(entity, cam);
       entity._selectedHidden = false;
       entity._selectedStyled = 'pending-resolution';
       entity.show = true;
