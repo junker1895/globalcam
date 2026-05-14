@@ -2671,7 +2671,7 @@ function visualCameraHeight(baseHeight = 0, extraLift = 0) {
 function selectedCameraHeight(baseHeight = 0, extraLift = CAMERA_3D_SELECTED_LIFT_M) {
   const base = Number(baseHeight);
   if (google3DEnabled) {
-    const safeBase = Number.isFinite(base) ? base : CAMERA_3D_SELECTED_FALLBACK_HEIGHT_M;
+    const safeBase = Number.isFinite(base) ? base : CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M;
     // Accuracy-first placement for selected cameras/frustums. Do not apply the
     // high visibility floor used by background markers; selected cameras should
     // read as a plausible roadside/infrastructure camera roughly 3 m above the
@@ -2935,12 +2935,13 @@ async function refineSelectedCameraSurfaceAfterTiles(expectedTilesToken = null) 
   const entity = dataSource.entities.getById(cam.id);
   if (!entity) return;
 
-  // Professional rule: no guessed 3D frustum. The selected FOV is drawn only
-  // after the rendered 3D tile surface height is resolved and validated.
+  // Professional rule: no guessed 3D frustum. The selected 3D anchor is resolved
+  // first. If a bearing exists, the frustum is drawn from that anchor; if no
+  // bearing exists, the resolved selected dot still replaces the globe marker.
   removeFrustum();
-  if (frustumsEnabled && trustedCameraBearing(cam) !== null) {
-    setFovLoadingState('Positioning field of view…');
-  }
+  setFovLoadingState(frustumsEnabled && trustedCameraBearing(cam) !== null
+    ? 'Positioning field of view…'
+    : 'Positioning camera location…');
 
   const h = await resolveSelectedCameraSurfaceHeight(cam, entity, refineToken);
   if (refineToken !== selectedCameraSurfaceRefineToken) return;
@@ -2948,9 +2949,7 @@ async function refineSelectedCameraSurfaceAfterTiles(expectedTilesToken = null) 
   if (expectedTilesToken !== null && expectedTilesToken !== cameraTilesLoadToken) return;
 
   if (h === null) {
-    if (frustumsEnabled && trustedCameraBearing(cam) !== null) {
-      setFovErrorState('Field of view unavailable — 3D surface height could not be resolved.');
-    }
+    setFovErrorState('Camera position unavailable — 3D surface height could not be resolved.');
     return;
   }
 
@@ -2966,17 +2965,29 @@ async function refineSelectedCameraSurfaceAfterTiles(expectedTilesToken = null) 
     selectedCameraHeight(h, CAMERA_3D_FRUSTUM_LIFT_M)
   );
 
-  if (frustumsEnabled) {
+  const resolvedBearing = trustedCameraBearing(cam);
+  if (frustumsEnabled && resolvedBearing !== null) {
     showFrustum(cam, {
       groundHeight: h,
       resolved: true,
       originCartesian: resolvedFovAnchor,
     });
-    const resolvedBearing = trustedCameraBearing(cam);
-    if (resolvedBearing !== null) {
-      setTimeout(() => refitCameraToResolvedFrustum(cam, h, resolvedBearing), 80);
-    }
+  } else {
+    clearFovLoadingState();
+    removeFrustum();
+    const status = document.getElementById('statusFrustum');
+    const statusText = document.getElementById('statusFrustumText');
+    if (status) status.style.display = 'flex';
+    if (statusText) statusText.textContent = resolvedBearing === null ? 'FOV: no bearing' : 'FOV: off';
+    const fi = document.getElementById('frustumInfo');
+    const ft = document.getElementById('frustumInfoText');
+    if (fi) fi.style.display = 'block';
+    if (ft) ft.textContent = resolvedBearing === null
+      ? 'Camera positioned — no field-of-view bearing is available for this camera.'
+      : 'Camera positioned.';
   }
+
+  setTimeout(() => refitCameraToResolvedAnchor(cam, h, resolvedBearing), 80);
   try { viewer.scene.requestRender(); } catch (_) {}
 }
 
@@ -3970,26 +3981,46 @@ function buildFrustumPolylines(lng, lat, groundHeight, heading, originOverride =
   return coll;
 }
 
-function refitCameraToResolvedFrustum(cam, groundHeight, bearing) {
+function bearingFromAnchorToCurrentCamera(originCartographic) {
+  try {
+    if (!viewer || !viewer.camera || !originCartographic) return null;
+    const camCarto = viewer.camera.positionCartographic;
+    if (!camCarto) return null;
+
+    const lat1 = originCartographic.latitude;
+    const lat2 = camCarto.latitude;
+    const dLon = camCarto.longitude - originCartographic.longitude;
+    const y = Math.sin(dLon) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+    const bearing = Cesium.Math.toDegrees(Math.atan2(y, x));
+    return normaliseBearingDegrees(bearing);
+  } catch (_) {
+    return null;
+  }
+}
+
+function refitCameraToResolvedAnchor(cam, groundHeight, bearing = null) {
   if (!google3DEnabled || !viewer || !viewer.camera) return;
   if (!cam || !Number.isFinite(Number(cam.lng)) || !Number.isFinite(Number(cam.lat))) return;
-
-  const resolvedBearing = normaliseBearingDegrees(bearing);
-  if (resolvedBearing === null) return;
 
   const origin = Cesium.Cartesian3.fromDegrees(
     Number(cam.lng),
     Number(cam.lat),
     selectedCameraHeight(Number(groundHeight), CAMERA_3D_FRUSTUM_LIFT_M)
   );
+  const originCartographic = Cesium.Cartographic.fromDegrees(Number(cam.lng), Number(cam.lat), selectedCameraHeight(Number(groundHeight), CAMERA_3D_FRUSTUM_LIFT_M));
   const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
 
   // After the physical 3D tile anchor is known, make a small professional
-  // correction to the view. The first fly-to gets the user near the camera;
-  // this second, short move frames the resolved FOV origin/frustum instead of
-  // the earlier approximate fallback marker position.
-  const backAngle = (resolvedBearing + 180) % 360;
-  const hRad = Cesium.Math.toRadians(backAngle);
+  // correction to the view. If a frustum bearing exists, frame the resolved FOV.
+  // If no frustum bearing exists, still frame the resolved selected dot so the
+  // app transitions away from the original visibility marker location.
+  const resolvedBearing = normaliseBearingDegrees(bearing);
+  const viewBearing = resolvedBearing !== null
+    ? (resolvedBearing + 180) % 360
+    : (bearingFromAnchorToCurrentCamera(originCartographic) ?? 210);
+
+  const hRad = Cesium.Math.toRadians(viewBearing);
   const offsetENU = new Cesium.Cartesian3(
     Math.sin(hRad) * 245,
     Math.cos(hRad) * 245,
@@ -3999,17 +4030,37 @@ function refitCameraToResolvedFrustum(cam, groundHeight, bearing) {
   const destination = Cesium.Cartesian3.add(origin, offsetECEF, new Cesium.Cartesian3());
 
   try {
-    viewer.camera.flyTo({
-      destination,
-      orientation: {
-        heading: Cesium.Math.toRadians(resolvedBearing),
-        pitch: Cesium.Math.toRadians(-26),
-        roll: 0,
-      },
-      duration: 0.65,
-      easingFunction: Cesium.EasingFunction.CUBIC_OUT,
-    });
+    if (resolvedBearing !== null) {
+      viewer.camera.flyTo({
+        destination,
+        orientation: {
+          heading: Cesium.Math.toRadians(resolvedBearing),
+          pitch: Cesium.Math.toRadians(-26),
+          roll: 0,
+        },
+        duration: 0.65,
+        easingFunction: Cesium.EasingFunction.CUBIC_OUT,
+      });
+    } else {
+      const direction = Cesium.Cartesian3.normalize(
+        Cesium.Cartesian3.subtract(origin, destination, new Cesium.Cartesian3()),
+        new Cesium.Cartesian3()
+      );
+      const up = Cesium.Cartesian3.normalize(destination, new Cesium.Cartesian3());
+      viewer.camera.flyTo({
+        destination,
+        orientation: { direction, up },
+        duration: 0.65,
+        easingFunction: Cesium.EasingFunction.CUBIC_OUT,
+      });
+    }
   } catch (_) {}
+}
+
+function refitCameraToResolvedFrustum(cam, groundHeight, bearing) {
+  // Compatibility wrapper for older call sites. New code should call
+  // refitCameraToResolvedAnchor(), which also handles no-FOV cameras.
+  refitCameraToResolvedAnchor(cam, groundHeight, bearing);
 }
 
 async function showFrustum(cam, options = {}) {
