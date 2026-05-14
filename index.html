@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Vigil — Global Camera Intelligence</title>
-<!-- Patch: professional selected-FOV resolver. Background 3D markers are visibility symbols; selected frustum renders only after rendered 3D tile height is validated. -->
+<!-- Patch: professional selected-FOV resolver. Normal 3D cameras are fixed-height symbols with persistent locator beams; selected beacon/frustum appears only after rendered 3D tile height is validated. -->
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
@@ -2783,10 +2783,10 @@ function positionSelectedCameraEntityAtGround(cam, entity, groundH) {
     );
     entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
     setCameraEntityHeightReference(entity, Cesium.HeightReference.NONE);
-    updateCameraPoleForEntity(entity, cam.lng, cam.lat, selectedHeight, {
-      selected: true,
-      bottomHeight: google3DEnabled ? Number(groundH) || 0 : 0,
-    });
+    // Once the selected camera has a resolved surface anchor, it is no longer a
+    // normal 30 m locator symbol. Hide its approximate locator beam and show only
+    // the resolved selected beacon/frustum. The beam is restored on deselect.
+    if (entity.polyline) entity.polyline.show = false;
     if (entity.point) {
       entity.point.show = true;
       entity.point.heightReference = Cesium.HeightReference.NONE;
@@ -4605,6 +4605,27 @@ async function enableGoogle3DTiles(ionToken) {
     viewer.scene.globe.show = false;
     viewer.imageryLayers.removeAll();
     google3DEnabled = true;
+    // Existing camera entities may have been created before 3D was enabled.
+    // Re-apply the normal 3D symbol style here so every unselected camera gets
+    // its fixed-height dot and persistent locator beam immediately.
+    try {
+      if (dataSource && dataSource.entities) {
+        dataSource.entities.values.forEach(e => {
+          if (!e || e._serverCluster || String(e.id || '').startsWith('cluster:')) return;
+          const cam = findCameraById(e.id);
+          if (!cam) return;
+          if (selectedCamera && String(selectedCamera.id) === String(cam.id)) {
+            if (saneSurfaceHeight(selectedCameraResolvedSurfaceHeight) !== null) {
+              applyResolvedSelectedCameraEntityIfNeeded(e);
+            } else {
+              setCameraEntityVisualPosition(e, cam.lng, cam.lat, CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, CAMERA_3D_MARKER_LIFT_M);
+            }
+          } else {
+            setCameraEntityVisualPosition(e, cam.lng, cam.lat, CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, CAMERA_3D_MARKER_LIFT_M);
+          }
+        });
+      }
+    } catch (_) {}
     setStatus('Google Photorealistic 3D Tiles active', 'var(--c-success)');
     if (btn) {
       btn.textContent = '✓ 3D Active';
@@ -4684,10 +4705,13 @@ async function createCameraEntities(cams) {
           scaleByDistance: new Cesium.NearFarScalar(300, 1.8, 400000, 0.6),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
           eyeOffset: new Cesium.Cartesian3(0, 0, -80),
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          heightReference: google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND,
         },
         polyline: {
-          show: false,
+          // Always visible for normal/unselected 3D camera symbols. This is an
+          // approximate locator beam down to the zero-height base, not a sampled
+          // 3D tile mast.
+          show: !!google3DEnabled,
           positions: [
             Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), CAMERA_3D_POLE_BASE_HEIGHT_M),
             Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), CAMERA_3D_NORMAL_VISUAL_HEIGHT_M),
@@ -4695,7 +4719,7 @@ async function createCameraEntities(cams) {
           width: CAMERA_3D_POLE_WIDTH_PX,
           material: Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.38),
           depthFailMaterial: Cesium.Color.fromCssColorString('#60a5fa').withAlpha(0.32),
-          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 900000),
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1200000),
         },
       };
 
@@ -4712,7 +4736,7 @@ async function createCameraEntities(cams) {
           scaleByDistance: new Cesium.NearFarScalar(300, 1.25, 400000, 0.5),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
           eyeOffset: new Cesium.Cartesian3(0, 0, -80),
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          heightReference: google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND,
         };
       }
 
@@ -4730,7 +4754,7 @@ async function createCameraEntities(cams) {
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
           eyeOffset: new Cesium.Cartesian3(0, 0, -80),
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          heightReference: google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND,
           show: false,
         },
       });
@@ -9841,15 +9865,18 @@ window.startBillingPortal = startBillingPortal;
         heightReference: Cesium.HeightReference.NONE,
       },
       polyline: {
-        show: false,
+        // Always visible for normal/unselected 3D camera symbols. This is an
+        // approximate locator beam down to the zero-height base, not a sampled
+        // 3D tile mast.
+        show: !!google3DEnabled,
         positions: [
           Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), CAMERA_3D_POLE_BASE_HEIGHT_M),
           Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), CAMERA_3D_NORMAL_VISUAL_HEIGHT_M),
         ],
         width: CAMERA_3D_POLE_WIDTH_PX,
-        material: Cesium.Color.fromCssColorString('#475569').withAlpha(0.42),
-        depthFailMaterial: Cesium.Color.fromCssColorString('#94a3b8').withAlpha(0.24),
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 650000),
+        material: Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.46),
+        depthFailMaterial: Cesium.Color.fromCssColorString('#60a5fa').withAlpha(0.72),
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1200000),
       },
       label: {
         text: cam.location || cam.name || cam.id,
