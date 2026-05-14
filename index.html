@@ -4962,6 +4962,98 @@ async function fetchProCesiumToken() {
 }
 window.fetchProCesiumToken = fetchProCesiumToken;
 
+function restoreDefaultCesiumImageryLayer() {
+  if (!viewer || !viewer.imageryLayers) return;
+  try { viewer.imageryLayers.removeAll(); } catch (_) {}
+  try {
+    const layer = Cesium.ImageryLayer.fromProviderAsync(
+      Cesium.ArcGisMapServerImageryProvider.fromUrl(
+        'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer',
+        { credit: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community' }
+      )
+    );
+    viewer.imageryLayers.add(layer);
+    try { layer.brightness = 1.0; layer.saturation = 0.85; } catch (_) {}
+  } catch (_) {}
+}
+
+function refreshAllCameraEntityStylesForCurrentMode() {
+  try {
+    if (!dataSource || !dataSource.entities) return;
+    dataSource.entities.values.forEach(e => {
+      if (!e || e._serverCluster || String(e.id || '').startsWith('cluster:')) return;
+      const cam = findCameraById(e.id);
+      if (!cam) return;
+      if (selectedCamera && String(selectedCamera.id) === String(cam.id)) {
+        positionSelectedCameraEntityAtGround(cam, e, 0);
+      } else {
+        renderUnselectedCameraEntity(e, cam);
+      }
+    });
+  } catch (_) {}
+}
+
+function update3DButtonState() {
+  const btn = document.getElementById('applyGoogleKey');
+  const topBtn = document.getElementById('btnSettings');
+  if (btn) {
+    btn.disabled = false;
+    if (google3DEnabled) {
+      btn.textContent = 'Turn off photorealistic 3D';
+      btn.style.background = 'var(--c-danger)';
+    } else {
+      btn.textContent = 'Enable photorealistic 3D';
+      btn.style.background = '';
+    }
+  }
+  if (topBtn) {
+    topBtn.classList.toggle('active', !!google3DEnabled);
+    topBtn.title = google3DEnabled ? 'Turn off 3D and return to the standard 2D globe' : 'Open 3D settings';
+  }
+}
+
+function disableGoogle3DTiles() {
+  if (!viewer) return false;
+
+  if (googleTilesLoadProgressRemove) {
+    try { googleTilesLoadProgressRemove(); } catch (_) {}
+    googleTilesLoadProgressRemove = null;
+  }
+
+  if (googleTileset) {
+    try { viewer.scene.primitives.remove(googleTileset); } catch (_) {}
+    googleTileset = null;
+  }
+
+  google3DEnabled = false;
+  cameraTilesLoadState.active = false;
+  cameraFloorGuardSuspended = false;
+  cameraFloorGuardProgrammaticBaseline = null;
+  selectedCameraResolvedSurfaceHeight = null;
+  hideCameraTilesLoadOverlay();
+
+  try { viewer.scene.globe.show = true; } catch (_) {}
+  restoreDefaultCesiumImageryLayer();
+  restoreSuppressedSelectedBeams();
+  removeFrustum();
+  refreshAllCameraEntityStylesForCurrentMode();
+  if (selectedCamera && frustumsEnabled) {
+    try { showFrustum(selectedCamera); } catch (_) {}
+  }
+
+  const status = document.getElementById('googleStatus');
+  if (status) {
+    status.style.display = 'block';
+    status.style.color = 'var(--c-text2)';
+    status.textContent = 'Photorealistic 3D off — standard 2D globe active';
+  }
+  update3DButtonState();
+
+  try { requestVisibleCamerasRefresh({ reason: '3d-disabled', force: true }); } catch (_) {}
+  return true;
+}
+window.disableGoogle3DTiles = disableGoogle3DTiles;
+
 // ==========================================================
 //  GOOGLE 3D TILES
 // ==========================================================
@@ -5044,11 +5136,7 @@ async function enableGoogle3DTiles(ionToken) {
       }
     } catch (_) {}
     setStatus('Google Photorealistic 3D Tiles active', 'var(--c-success)');
-    if (btn) {
-      btn.textContent = '✓ 3D Active';
-      btn.style.background = 'var(--c-success)';
-      btn.disabled = true;
-    }
+    update3DButtonState();
   };
 
   if (tileset.readyPromise) {
@@ -8601,8 +8689,17 @@ window.startBillingPortal = startBillingPortal;
     }
   };
 
-  // Settings
+  // Settings / 3D toggle. If 3D is active, clicking the 3D button turns it off.
+  // If 3D is inactive, the same button opens the Pro 3D panel.
   document.getElementById('btnSettings').onclick = function () {
+    if (google3DEnabled) {
+      disableGoogle3DTiles();
+      settingsPanelOpen = false;
+      document.getElementById('settingsPanel').style.display = 'none';
+      update3DButtonState();
+      return;
+    }
+
     settingsPanelOpen = !settingsPanelOpen;
     this.classList.toggle('active', settingsPanelOpen);
     document.getElementById('settingsPanel').style.display = settingsPanelOpen ? 'block' : 'none';
@@ -8621,11 +8718,7 @@ window.startBillingPortal = startBillingPortal;
     const status = document.getElementById('googleStatus');
 
     if (google3DEnabled) {
-      if (status) {
-        status.style.display = 'block';
-        status.style.color = 'var(--c-success)';
-        status.textContent = 'Photorealistic 3D is already active';
-      }
+      disableGoogle3DTiles();
       return;
     }
 
@@ -8652,6 +8745,7 @@ window.startBillingPortal = startBillingPortal;
         btn.disabled = false;
         btn.textContent = 'Enable photorealistic 3D';
       }
+      update3DButtonState();
     }
   };
 
