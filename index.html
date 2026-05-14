@@ -2564,6 +2564,11 @@ let cameraTilesLoadState = {
 let lastOcclusionCheck = 0;
 let globeZoomControlsReady = false;
 let suppressGlobeZoomSliderSync = false;
+let cameraGroundGuardReady = false;
+let cameraGroundGuardTimer = null;
+let cameraGroundGuardApplying = false;
+let cameraGroundGuardLastCorrectionAt = 0;
+
 
 // Frustum parameters
 let frustumFovH = 92;
@@ -4429,8 +4434,10 @@ function setGlobeCameraHeight(height) {
     destination: Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, height),
     orientation: {
       heading: viewer.camera.heading,
-      pitch: viewer.camera.pitch,
-      roll: viewer.camera.roll
+      // The zoom slider is a deliberate reset control: keep it bird's-eye so it
+      // cannot preserve a bad low/tilted under-tile viewing angle.
+      pitch: Cesium.Math.toRadians(-90),
+      roll: 0
     }
   });
 }
@@ -4463,6 +4470,95 @@ function setupGlobeZoomControls() {
 
   viewer.camera.changed.addEventListener(syncGlobeZoomSlider);
   syncGlobeZoomSlider();
+}
+
+// ==========================================================
+//  LOW-ALTITUDE / UNDER-TILE CAMERA GUARD
+// ==========================================================
+// Google Photorealistic 3D Tiles can visually sit above the ellipsoid/globe
+// height that Cesium exposes for the camera. Sampling tile heights on every
+// mouse move would be expensive, so this guard uses only cheap camera state:
+// cartographic height + pitch. It runs on camera.changed with a short throttle
+// and only corrects when the user gets into the known glitch zone.
+const CAMERA_GROUND_GUARD_MIN_HEIGHT_M = 120;
+const CAMERA_GROUND_GUARD_RESET_HEIGHT_M = 185;
+const CAMERA_GROUND_GUARD_MIN_PITCH_RAD = Cesium.Math.toRadians(-14);
+const CAMERA_GROUND_GUARD_RESET_PITCH_RAD = Cesium.Math.toRadians(-28);
+const CAMERA_GROUND_GUARD_THROTTLE_MS = 110;
+
+function clampCameraAbove3DTiles(reason = 'camera-change') {
+  if (!viewer || !viewer.camera || cameraGroundGuardApplying) return;
+  // Only needed in 3D globe mode. Dashboard/2D modes and non-Google globe
+  // views should not get surprise camera corrections.
+  if (!google3DEnabled || activeView === 'dashboard') return;
+
+  const cam = viewer.camera;
+  const carto = cam.positionCartographic;
+  if (!carto) return;
+
+  const height = Number(carto.height);
+  const pitch = Number(cam.pitch);
+  if (!Number.isFinite(height) || !Number.isFinite(pitch)) return;
+
+  const tooLow = height < CAMERA_GROUND_GUARD_MIN_HEIGHT_M;
+  // In Cesium, pitch is negative when looking down. Near-zero or positive pitch
+  // at low altitude is where users can end up below/inside the 3D mesh looking up.
+  const tooFlatOrUp = pitch > CAMERA_GROUND_GUARD_MIN_PITCH_RAD && height < CAMERA_GROUND_GUARD_RESET_HEIGHT_M * 1.75;
+  if (!tooLow && !tooFlatOrUp) return;
+
+  const now = Date.now();
+  if (now - cameraGroundGuardLastCorrectionAt < CAMERA_GROUND_GUARD_THROTTLE_MS) return;
+  cameraGroundGuardLastCorrectionAt = now;
+
+  const safeHeight = Math.max(height, CAMERA_GROUND_GUARD_RESET_HEIGHT_M);
+  const safePitch = tooFlatOrUp ? CAMERA_GROUND_GUARD_RESET_PITCH_RAD : pitch;
+
+  cameraGroundGuardApplying = true;
+  try {
+    cam.setView({
+      destination: Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, safeHeight),
+      orientation: {
+        heading: cam.heading,
+        pitch: safePitch,
+        roll: 0
+      }
+    });
+  } catch (_) {
+    // Non-critical visual guard; never allow this to break map interaction.
+  } finally {
+    requestAnimationFrame(() => { cameraGroundGuardApplying = false; });
+  }
+}
+
+function scheduleCameraGroundGuard(reason = 'camera-change') {
+  if (cameraGroundGuardTimer) return;
+  cameraGroundGuardTimer = setTimeout(() => {
+    cameraGroundGuardTimer = null;
+    clampCameraAbove3DTiles(reason);
+  }, CAMERA_GROUND_GUARD_THROTTLE_MS);
+}
+
+function setupCesiumCameraGroundGuard() {
+  if (!viewer || cameraGroundGuardReady) return;
+  cameraGroundGuardReady = true;
+
+  const controller = viewer.scene && viewer.scene.screenSpaceCameraController;
+  if (controller) {
+    // Cheap native limits first. The custom guard below handles the Google 3D
+    // mesh-specific visual glitch without continuous tile/terrain sampling.
+    controller.enableCollisionDetection = true;
+    controller.minimumZoomDistance = CAMERA_GROUND_GUARD_MIN_HEIGHT_M;
+    // Keep tilt usable for close inspection, but avoid extreme under-surface
+    // orbit angles. Cesium treats this as a controller constraint, not a sampler.
+    try { controller.maximumTiltAngle = Cesium.Math.toRadians(88); } catch (_) {}
+  }
+
+  viewer.camera.changed.addEventListener(() => scheduleCameraGroundGuard('camera-change'));
+  viewer.scene.postRender.addEventListener(() => {
+    // One cheap follow-up after render catches programmatic setView/flyTo endings
+    // and cases where camera.changed did not fire at the exact final frame.
+    if (google3DEnabled && activeView !== 'dashboard') scheduleCameraGroundGuard('post-render');
+  });
 }
 
 // ==========================================================
@@ -4520,6 +4616,7 @@ function initCesium() {
 
   setupClickHandler();
   setupGlobeZoomControls();
+  setupCesiumCameraGroundGuard();
 
   viewer.scene.preRender.addEventListener(function () {
     if (!dataSource) return;
