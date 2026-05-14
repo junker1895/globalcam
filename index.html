@@ -2643,10 +2643,11 @@ function updateCameraPoleForEntity(entity, lng, lat, topHeight, options = {}) {
 function setCameraEntityVisualPosition(entity, lng, lat, surfaceHeight = 0, lift = CAMERA_3D_MARKER_LIFT_M) {
   if (!entity) return;
   if (applyResolvedSelectedCameraEntityIfNeeded(entity)) return;
-  if (google3DEnabled && isCurrentSelectedCameraEntity(entity) && !hasResolvedSelectedCameraAnchor()) {
-    hidePendingSelectedCameraEntity(entity);
-    return;
-  }
+  // Pending selected cameras intentionally keep their normal unselected 30 m
+  // locator dot + beam until the sampled 3D surface anchor resolves. Do not
+  // hide or restyle the entity here; normal refreshes should remain visually
+  // identical to the unselected state until positionSelectedCameraEntityAtGround()
+  // replaces it with the resolved selected beacon/frustum.
   try {
     if (google3DEnabled) {
       const h = visualCameraHeight(surfaceHeight, lift);
@@ -2826,21 +2827,17 @@ function hasResolvedSelectedCameraAnchor() {
 }
 
 function hidePendingSelectedCameraEntity(entity) {
-  // During selected-camera resolving, the selected camera's normal 30 m locator
-  // symbol must disappear completely. Do not merely hide point/polyline graphics:
-  // Cesium entity clustering / restyling can still briefly re-show those
-  // graphics during flight and tile-streaming. Hiding the entity itself is the
-  // authoritative pending state. It is restored only after the sampled 3D anchor
-  // resolves, or when the camera is deselected.
+  // Compatibility no-op. The previous implementation hid the selected camera
+  // immediately during pending 3D resolution, which caused the selected marker
+  // lifecycle to diverge from the intended behaviour. Pending selection must be
+  // visually unchanged: keep the unselected elevated dot + beam until the exact
+  // sampled anchor has resolved. Sampling itself temporarily hides the camera
+  // layer inside getCameraSurfaceHeightStrict(), then restores it.
   if (!entity) return false;
   try {
-    entity._selectedHidden = true;
+    entity._selectedHidden = false;
     entity._selectedStyled = 'pending-resolution';
-    entity.show = false;
-    if (entity.point) entity.point.show = false;
-    if (entity.billboard) entity.billboard.show = false;
-    if (entity.label) entity.label.show = false;
-    if (entity.polyline) entity.polyline.show = false;
+    entity.show = true;
     return true;
   } catch (_) {
     return false;
@@ -3105,14 +3102,15 @@ async function applySelectedCameraEntityStyle(cam) {
     entity.show = true;
 
     if (google3DEnabled) {
-      // Selected 3D camera lifecycle:
-      // 1) immediately suppress the approximate unselected locator dot/beam;
-      // 2) resolve the rendered 3D tile surface height;
-      // 3) then show the resolved selected dot/frustum.
-      // This avoids the confusing pre-resolve marker flash below/inside the 3D
-      // mesh while also ensuring the unselected beam stays gone until deselect.
+      // Pending selected state is intentionally visual no-op. Keep the normal
+      // unselected elevated dot + beam visible while the exact 3D tile surface
+      // anchor is being resolved. Only after resolution do we replace this base
+      // marker with the selected dot/frustum and remove the beam.
+      entity._selectedHidden = false;
+      entity._selectedStyled = 'pending-resolution';
+      entity.show = true;
       setCameraEntityHeightReference(entity, Cesium.HeightReference.NONE);
-      hidePendingSelectedCameraEntity(entity);
+      raiseCesiumCameraEntityToSurface(entity, cam.lng, cam.lat, CAMERA_3D_MARKER_LIFT_M);
       return groundH;
     }
 
@@ -4372,7 +4370,7 @@ function initCesium() {
     const entities = dataSource.entities.values;
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
-      if (e._searchOff || e._selectedHidden) { e.show = false; continue; }
+      if (e._searchOff) { e.show = false; continue; }
       if (!e._bfp)      { e.show = true;  continue; }
       e.show = (cx * e._bfp.x + cy * e._bfp.y + cz * e._bfp.z) > 0;
     }
