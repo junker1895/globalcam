@@ -2566,7 +2566,7 @@ let globeZoomControlsReady = false;
 let suppressGlobeZoomSliderSync = false;
 
 // Frustum parameters
-let frustumFovH = 58;
+let frustumFovH = 92;
 let frustumRange = 85;
 let frustumTilt  = 15;
 
@@ -2972,6 +2972,10 @@ async function refineSelectedCameraSurfaceAfterTiles(expectedTilesToken = null) 
       resolved: true,
       originCartesian: resolvedFovAnchor,
     });
+    const resolvedBearing = trustedCameraBearing(cam);
+    if (resolvedBearing !== null) {
+      setTimeout(() => refitCameraToResolvedFrustum(cam, h, resolvedBearing), 80);
+    }
   }
   try { viewer.scene.requestRender(); } catch (_) {}
 }
@@ -3966,6 +3970,48 @@ function buildFrustumPolylines(lng, lat, groundHeight, heading, originOverride =
   return coll;
 }
 
+function refitCameraToResolvedFrustum(cam, groundHeight, bearing) {
+  if (!google3DEnabled || !viewer || !viewer.camera) return;
+  if (!cam || !Number.isFinite(Number(cam.lng)) || !Number.isFinite(Number(cam.lat))) return;
+
+  const resolvedBearing = normaliseBearingDegrees(bearing);
+  if (resolvedBearing === null) return;
+
+  const origin = Cesium.Cartesian3.fromDegrees(
+    Number(cam.lng),
+    Number(cam.lat),
+    selectedCameraHeight(Number(groundHeight), CAMERA_3D_FRUSTUM_LIFT_M)
+  );
+  const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
+
+  // After the physical 3D tile anchor is known, make a small professional
+  // correction to the view. The first fly-to gets the user near the camera;
+  // this second, short move frames the resolved FOV origin/frustum instead of
+  // the earlier approximate fallback marker position.
+  const backAngle = (resolvedBearing + 180) % 360;
+  const hRad = Cesium.Math.toRadians(backAngle);
+  const offsetENU = new Cesium.Cartesian3(
+    Math.sin(hRad) * 245,
+    Math.cos(hRad) * 245,
+    118
+  );
+  const offsetECEF = Cesium.Matrix4.multiplyByPointAsVector(enuToWorld, offsetENU, new Cesium.Cartesian3());
+  const destination = Cesium.Cartesian3.add(origin, offsetECEF, new Cesium.Cartesian3());
+
+  try {
+    viewer.camera.flyTo({
+      destination,
+      orientation: {
+        heading: Cesium.Math.toRadians(resolvedBearing),
+        pitch: Cesium.Math.toRadians(-26),
+        roll: 0,
+      },
+      duration: 0.65,
+      easingFunction: Cesium.EasingFunction.CUBIC_OUT,
+    });
+  } catch (_) {}
+}
+
 async function showFrustum(cam, options = {}) {
   removeFrustum();
   if (!frustumsEnabled) return;
@@ -4001,7 +4047,7 @@ async function showFrustum(cam, options = {}) {
   const fi = document.getElementById('frustumInfo');
   const ft = document.getElementById('frustumInfoText');
   fi.style.display = 'block';
-  ft.textContent   = `${DIR_NAMES[heading]} (${Math.round(bearing)}°)  ·  58° H × 33° V  ·  85 m range`;
+  ft.textContent   = `${DIR_NAMES[heading]} (${Math.round(bearing)}°)  ·  ${Math.round(frustumFovH)}° H × ${Math.round(frustumFovH * 9 / 16)}° V  ·  ${Math.round(frustumRange)} m range`;
 
   document.getElementById('statusFrustum').style.display = 'flex';
   document.getElementById('statusFrustumText').textContent =
