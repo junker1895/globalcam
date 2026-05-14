@@ -2943,6 +2943,29 @@ function hasResolvedSelectedCameraAnchor() {
   return saneSurfaceHeight(selectedCameraResolvedSurfaceHeight) !== null;
 }
 
+function isCameraTilesLoadingVisible() {
+  try {
+    const overlay = document.getElementById('tilesLoadOverlay');
+    return !!(
+      google3DEnabled && (
+        cameraTilesLoadState.active ||
+        document.body.classList.contains('tiles-view-loading') ||
+        (overlay && !overlay.classList.contains('hidden'))
+      )
+    );
+  } catch (_) {
+    return !!(google3DEnabled && cameraTilesLoadState && cameraTilesLoadState.active);
+  }
+}
+
+function canPromoteSelectedCameraEntity() {
+  // Hard visual invariant: while the 3D inspection loader is visible, no selected
+  // ground/beacon marker is allowed to exist. The selected camera must remain
+  // the normal elevated locator dot + beam until the loader has actually cleared
+  // and a validated post-load surface sample has been stored.
+  return !google3DEnabled || (!isCameraTilesLoadingVisible() && hasResolvedSelectedCameraAnchor());
+}
+
 function hidePendingSelectedCameraEntity(entity) {
   // Compatibility shim. Pending selection is not a hidden/grounded selected
   // marker; it is explicitly the normal elevated locator symbol. Re-render it
@@ -2963,6 +2986,15 @@ function hidePendingSelectedCameraEntity(entity) {
 
 function applyResolvedSelectedCameraEntityIfNeeded(entity) {
   if (!google3DEnabled || !isCurrentSelectedCameraEntity(entity)) return false;
+
+  // Do not allow the low/ground selected marker to flash during the loading
+  // phase. If a caller tries to promote early, force the entity back to the
+  // safe elevated locator symbol and leave the beam visible.
+  if (!canPromoteSelectedCameraEntity()) {
+    hidePendingSelectedCameraEntity(entity);
+    return false;
+  }
+
   const h = saneSurfaceHeight(selectedCameraResolvedSurfaceHeight);
   if (h === null) return false;
   try {
@@ -3119,6 +3151,17 @@ async function refineSelectedCameraSurfaceAfterTiles(expectedTilesToken = null) 
   const initialEntity = dataSource.entities.getById(cam.id);
   if (!initialEntity) return;
 
+  // If the broad 3D loading overlay is still visible, do not sample/promote yet.
+  // Cesium can report zero pending tiles for a frame while photogrammetry is
+  // still visually settling; sampling in that window is exactly what produces
+  // the underground selected dot. Keep the normal elevated marker and retry
+  // after the loader has cleared.
+  if (isCameraTilesLoadingVisible()) {
+    hidePendingSelectedCameraEntity(initialEntity);
+    setTimeout(() => refineSelectedCameraSurfaceAfterTiles(expectedTilesToken), 220);
+    return;
+  }
+
   // Professional rule: no guessed 3D frustum. The selected 3D anchor is resolved
   // first. If a bearing exists, the frustum is drawn from that anchor; if no
   // bearing exists, the resolved selected dot still replaces the globe marker.
@@ -3138,6 +3181,22 @@ async function refineSelectedCameraSurfaceAfterTiles(expectedTilesToken = null) 
   }
 
   selectedCameraResolvedSurfaceHeight = h;
+
+  // One final frame gate after storing the resolved height. This keeps the
+  // selected beacon from appearing under the tiles if the overlay was just
+  // removed and Cesium has not presented the final photogrammetry frame yet.
+  await waitForCesiumPostRenderFrame();
+  await waitForCesiumPostRenderFrame();
+  if (refineToken !== selectedCameraSurfaceRefineToken) return;
+  if (!selectedCamera || selectedCamera.id !== cam.id) return;
+  if (expectedTilesToken !== null && expectedTilesToken !== cameraTilesLoadToken) return;
+  if (isCameraTilesLoadingVisible()) {
+    const retryEntity = dataSource && dataSource.entities ? dataSource.entities.getById(cam.id) : initialEntity;
+    if (retryEntity) hidePendingSelectedCameraEntity(retryEntity);
+    setTimeout(() => refineSelectedCameraSurfaceAfterTiles(expectedTilesToken), 220);
+    return;
+  }
+
   // Re-acquire the live entity after the async tile/sample wait. In API mode the
   // visible camera layer can be rebuilt while the resolver is running; styling
   // the stale pre-rebuild entity leaves the newly visible normal beam in place.
@@ -4562,21 +4621,24 @@ function hideCameraTilesLoader(token, timedOut = false) {
   const refineToken = token || cameraTilesLoadToken;
   if (!timedOut) {
     setTilesLoaderProgress(100, '3D view ready');
-    setTimeout(() => refineSelectedCameraSurfaceAfterTiles(refineToken), 80);
-  } else {
-    // Even if the broad tile loader times out, keep the FOV-specific resolver
-    // running. It will either place the frustum accurately or show a clear
-    // unavailable message instead of silently failing.
-    setTimeout(() => refineSelectedCameraSurfaceAfterTiles(refineToken), 80);
   }
   const overlay = document.getElementById('tilesLoadOverlay');
-  setTimeout(() => {
+  const clearDelay = timedOut ? 0 : 260;
+  setTimeout(async () => {
     if (!cameraTilesLoadState.active) {
       if (overlay) overlay.classList.add('hidden');
       document.body.classList.remove('tiles-view-loading');
       setTilesLoaderProgress(18, 'Streaming nearby photorealistic tiles');
+
+      // Only now start the selected-marker resolver. This guarantees the
+      // selected dot/frustum cannot appear while the loading overlay is still
+      // on screen, and gives Cesium a couple of presented frames with the final
+      // nearby tiles before we sample and promote the marker.
+      await waitForCesiumPostRenderFrame();
+      await waitForCesiumPostRenderFrame();
+      setTimeout(() => refineSelectedCameraSurfaceAfterTiles(refineToken), timedOut ? 160 : 80);
     }
-  }, timedOut ? 0 : 260);
+  }, clearDelay);
 }
 
 function markCameraFlyCompleteAndWaitForTiles(token) {
