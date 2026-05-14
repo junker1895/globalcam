@@ -2616,7 +2616,7 @@ function updateCameraPoleForEntity(entity, lng, lat, topHeight, options = {}) {
     // Resolved selected cameras must never show the approximate locator beam.
     // This guard protects against later refresh/restyle paths accidentally
     // re-enabling the unselected beam after the sampled 3D anchor has resolved.
-    if (isCurrentSelectedCameraEntity(entity) && hasResolvedSelectedCameraAnchor()) {
+    if (selectedResolvedBeamSuppressionIds.has(String(entity.id)) || (isCurrentSelectedCameraEntity(entity) && hasResolvedSelectedCameraAnchor())) {
       entity.polyline.show = false;
       return;
     }
@@ -2730,6 +2730,7 @@ function raiseCesiumCameraEntityToSurface(entity, lng, lat, lift = CAMERA_3D_MAR
 
 function restoreCameraEntityStyle(cam) {
   if (cam && selectedCamera && String(cam.id) === String(selectedCamera.id)) {
+    restoreSuppressedSelectedBeams();
     selectedCameraResolvedSurfaceHeight = null;
   }
   if (!cam || !dataSource) return;
@@ -2774,6 +2775,45 @@ function restoreCameraEntityStyle(cam) {
 }
 
 
+function applyNormalUnselectedCameraVisual(entity, cam) {
+  if (!entity || !cam) return;
+  const heading = inferHeading(cam);
+  const color = getDirColor(heading);
+  try {
+    entity.show = true;
+    entity._selectedHidden = false;
+    setCameraEntityVisualPosition(entity, cam.lng, cam.lat, CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, CAMERA_3D_MARKER_LIFT_M);
+    if (entity.point) {
+      entity.point.show = true;
+      entity.point.pixelSize = 7;
+      entity.point.color = color;
+      entity.point.outlineColor = Cesium.Color.WHITE.withAlpha(0.8);
+      entity.point.outlineWidth = 1;
+      entity.point.scaleByDistance = new Cesium.NearFarScalar(300, 1.8, 400000, 0.6);
+      entity.point.heightReference = google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND;
+      entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+    }
+    if (entity.billboard) {
+      entity.billboard.show = heading !== null;
+      entity.billboard.width = 20;
+      entity.billboard.height = 20;
+      entity.billboard.pixelOffset = new Cesium.Cartesian2(0, -13);
+      entity.billboard.scaleByDistance = new Cesium.NearFarScalar(300, 1.25, 400000, 0.5);
+      entity.billboard.heightReference = google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND;
+      entity.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+    }
+    if (entity.label) {
+      entity.label.show = false;
+      entity.label.pixelOffset = new Cesium.Cartesian2(0, -10);
+      entity.label.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, 3000);
+      entity.label.heightReference = google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND;
+      entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+    }
+    if (entity.polyline) entity.polyline.show = !!google3DEnabled;
+  } catch (_) {}
+}
+
+
 function selectedGroundHeightFastFallback(lng, lat) {
   // Used only to aim the inspection flight before the real selected FOV anchor
   // has been resolved. The selected frustum itself is not drawn from this value.
@@ -2798,9 +2838,10 @@ function positionSelectedCameraEntityAtGround(cam, entity, groundH) {
     entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
     setCameraEntityHeightReference(entity, Cesium.HeightReference.NONE);
     // Once the selected camera has a resolved surface anchor, it is no longer a
-    // normal 30 m locator symbol. Hide its approximate locator beam and show only
+    // normal locator symbol. Hide its approximate locator beam and show only
     // the resolved selected beacon/frustum. The beam is restored on deselect.
     if (entity.polyline) entity.polyline.show = false;
+    suppressResolvedSelectedBeams(cam);
     if (entity.point) {
       entity.point.show = true;
       entity.point.heightReference = Cesium.HeightReference.NONE;
@@ -2820,6 +2861,51 @@ function positionSelectedCameraEntityAtGround(cam, entity, groundH) {
 
 let selectedCameraSurfaceRefineToken = 0;
 let selectedCameraResolvedSurfaceHeight = null;
+const selectedResolvedBeamSuppressionIds = new Set();
+
+function findCameraEntityById(id) {
+  try { return dataSource && dataSource.entities ? dataSource.entities.getById(id) : null; } catch (_) { return null; }
+}
+
+function sameCameraLocation(a, b) {
+  if (!a || !b) return false;
+  const alat = Number(a.lat), alng = Number(a.lng), blat = Number(b.lat), blng = Number(b.lng);
+  return Number.isFinite(alat) && Number.isFinite(alng) && Number.isFinite(blat) && Number.isFinite(blng)
+    && Math.abs(alat - blat) < 0.0000015
+    && Math.abs(alng - blng) < 0.0000015;
+}
+
+function restoreSuppressedSelectedBeams() {
+  try {
+    selectedResolvedBeamSuppressionIds.forEach(id => {
+      const entity = findCameraEntityById(id);
+      const cam = findCameraById(id);
+      if (entity && cam && entity.polyline) {
+        entity.polyline.show = !!google3DEnabled;
+        if (google3DEnabled) updateCameraPoleForEntity(entity, cam.lng, cam.lat, visualCameraHeight(CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, CAMERA_3D_MARKER_LIFT_M));
+      }
+    });
+  } catch (_) {}
+  selectedResolvedBeamSuppressionIds.clear();
+}
+
+function suppressResolvedSelectedBeams(cam) {
+  if (!cam || !dataSource || !dataSource.entities) return;
+  try {
+    dataSource.entities.values.forEach(entity => {
+      if (!entity || !entity.polyline || entity._serverCluster || String(entity.id || '').startsWith('cluster:')) return;
+      const ecam = findCameraById(entity.id);
+      if (!ecam) return;
+      // Hide the selected entity beam and any exact duplicate locator beam at the same coordinate.
+      // Duplicate providers/cameras can share the same lon/lat, and leaving one duplicate beam visible
+      // makes it look like the selected camera still has a mast after resolution.
+      if (String(entity.id) === String(cam.id) || sameCameraLocation(ecam, cam)) {
+        entity.polyline.show = false;
+        selectedResolvedBeamSuppressionIds.add(String(entity.id));
+      }
+    });
+  } catch (_) {}
+}
 
 function isCurrentSelectedCameraEntity(entity) {
   return !!(
@@ -3109,15 +3195,16 @@ async function applySelectedCameraEntityStyle(cam) {
     entity.show = true;
 
     if (google3DEnabled) {
-      // Pending selected state is intentionally visual no-op. Keep the normal
-      // unselected elevated dot + beam visible while the exact 3D tile surface
-      // anchor is being resolved. Only after resolution do we replace this base
-      // marker with the selected dot/frustum and remove the beam.
+      // Pending selected state is intentionally a visual no-op. Keep the normal
+      // unselected elevated dot + beam at the top of the locator while the exact
+      // 3D tile surface anchor is being resolved. Do not show the resolved blue
+      // selected beacon until positionSelectedCameraEntityAtGround() runs.
+      restoreSuppressedSelectedBeams();
       entity._selectedHidden = false;
       entity._selectedStyled = 'pending-resolution';
       entity.show = true;
       setCameraEntityHeightReference(entity, Cesium.HeightReference.NONE);
-      raiseCesiumCameraEntityToSurface(entity, cam.lng, cam.lat, CAMERA_3D_MARKER_LIFT_M);
+      applyNormalUnselectedCameraVisual(entity, cam);
       return groundH;
     }
 
@@ -4847,6 +4934,8 @@ async function selectCamera(cam) {
 
   if (selectedCamera && selectedCamera.id !== cam.id) {
     restoreCameraEntityStyle(selectedCamera);
+  } else if (selectedCamera && selectedCamera.id === cam.id) {
+    restoreSuppressedSelectedBeams();
   }
 
   selectedCamera = cam;
