@@ -4470,38 +4470,141 @@ function setupGlobeZoomControls() {
 }
 
 // ==========================================================
-//  NATIVE CESIUM CAMERA HARD LIMITS
+//  GOOGLE 3D CAMERA FLOOR LIMIT
 // ==========================================================
-// Previous versions used a post-move guard that restored the last safe camera
-// pose after the user crossed into an under-tile viewing angle. That prevented
-// the underground glitch, but it felt like a bounce because the camera was
-// allowed to enter the bad pose before being corrected.
+// Native Cesium collision/tilt limits are not enough for Google Photorealistic
+// 3D Tiles: the controller can still move the eye underneath the rendered mesh
+// because the tiles are not treated as a normal terrain collision surface.
 //
-// This version does not run any camera.changed / moveEnd correction loop. It
-// only configures Cesium's ScreenSpaceCameraController so user input is clamped
-// at the interaction layer. The result is a hard movement limit: the user can
-// push against the boundary, but the app does not setView/flyTo/snap them back.
-const CAMERA_NATIVE_MIN_ZOOM_DISTANCE_M = 70;
-const CAMERA_NATIVE_MAX_TILT_DEG = 82;
+// This guard is deliberately small and local. It does not fly, zoom, or restore
+// an old camera pose. On each render while 3D tiles are active, it only prevents
+// the eye from existing below the currently rendered surface at the camera's
+// lon/lat. If the user pushes into the floor, the camera is held a few metres
+// above that same spot and the view heading is preserved. This should feel like
+// a collision plane, not a bounce to another view.
+const CAMERA_NATIVE_MIN_ZOOM_DISTANCE_M = 18;
+const CAMERA_NATIVE_MAX_TILT_DEG = 84;
+const CAMERA_3D_EYE_CLEARANCE_M = 7.5;
+const CAMERA_3D_EYE_FALLBACK_FLOOR_M = 2;
+const CAMERA_3D_FLOOR_SAMPLE_WIDTH_PX = 0.45;
+const CAMERA_3D_NEAR_SURFACE_LIMIT_M = 260;
+const CAMERA_3D_MAX_UPWARD_PITCH_DEG = -2;
+
+let cameraFloorGuardApplying = false;
+let lastCameraFloorSampleKey = '';
+let lastCameraFloorSampleHeight = null;
+let lastCameraFloorSampleMs = 0;
+
+function isCameraFloorGuardActive() {
+  return !!(
+    viewer &&
+    viewer.scene &&
+    viewer.camera &&
+    google3DEnabled &&
+    !document.body.classList.contains('dashboard-active')
+  );
+}
+
+function getRenderedCameraFloorHeight(carto) {
+  if (!viewer || !viewer.scene || !carto) return null;
+
+  // Quantise/cache because this runs from preRender. At close range the camera
+  // cartographic position changes by tiny amounts on every mouse movement; we
+  // do not need to resample for every sub-metre jitter.
+  const lonDeg = Cesium.Math.toDegrees(carto.longitude);
+  const latDeg = Cesium.Math.toDegrees(carto.latitude);
+  const key = `${Math.round(lonDeg * 2000) / 2000},${Math.round(latDeg * 2000) / 2000}`;
+  const now = performance.now();
+  if (key === lastCameraFloorSampleKey && lastCameraFloorSampleHeight !== null && (now - lastCameraFloorSampleMs) < 120) {
+    return lastCameraFloorSampleHeight;
+  }
+
+  let sampled = null;
+  try {
+    if (typeof viewer.scene.sampleHeight === 'function') {
+      sampled = viewer.scene.sampleHeight(carto, undefined, CAMERA_3D_FLOOR_SAMPLE_WIDTH_PX);
+    }
+  } catch (_) {
+    sampled = null;
+  }
+
+  let h = saneSurfaceHeight(sampled);
+  if (h === null) {
+    try {
+      if (viewer.scene.globe && typeof viewer.scene.globe.getHeight === 'function') {
+        h = saneSurfaceHeight(viewer.scene.globe.getHeight(carto));
+      }
+    } catch (_) {
+      h = null;
+    }
+  }
+  if (h === null) h = CAMERA_3D_EYE_FALLBACK_FLOOR_M;
+
+  lastCameraFloorSampleKey = key;
+  lastCameraFloorSampleHeight = h;
+  lastCameraFloorSampleMs = now;
+  return h;
+}
+
+function enforceCesiumCameraFloorLimit() {
+  if (cameraFloorGuardApplying || !isCameraFloorGuardActive()) return;
+
+  const camera = viewer.camera;
+  let carto;
+  try {
+    carto = Cesium.Cartographic.fromCartesian(camera.positionWC || camera.position);
+  } catch (_) {
+    return;
+  }
+  if (!carto) return;
+
+  const floorH = getRenderedCameraFloorHeight(carto);
+  if (!Number.isFinite(floorH)) return;
+
+  const minEyeH = floorH + CAMERA_3D_EYE_CLEARANCE_M;
+  const eyeH = Number(carto.height);
+  const nearSurface = eyeH < (floorH + CAMERA_3D_NEAR_SURFACE_LIMIT_M);
+  const maxPitch = Cesium.Math.toRadians(CAMERA_3D_MAX_UPWARD_PITCH_DEG);
+
+  const needsHeightClamp = eyeH < minEyeH;
+  const needsPitchClamp = nearSurface && camera.pitch > maxPitch;
+  if (!needsHeightClamp && !needsPitchClamp) return;
+
+  cameraFloorGuardApplying = true;
+  try {
+    const safeHeight = needsHeightClamp ? minEyeH : eyeH;
+    const safePitch = needsPitchClamp ? maxPitch : camera.pitch;
+    camera.setView({
+      destination: Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, safeHeight),
+      orientation: {
+        heading: camera.heading,
+        pitch: safePitch,
+        roll: camera.roll
+      }
+    });
+  } catch (_) {
+    // Non-critical guard only.
+  } finally {
+    cameraFloorGuardApplying = false;
+  }
+}
 
 function setupCesiumCameraGroundGuard() {
   if (!viewer || cameraGroundGuardReady) return;
   cameraGroundGuardReady = true;
 
   const controller = viewer.scene && viewer.scene.screenSpaceCameraController;
-  if (!controller) return;
-
-  controller.enableCollisionDetection = true;
-  controller.minimumZoomDistance = CAMERA_NATIVE_MIN_ZOOM_DISTANCE_M;
-
-  // Native tilt clamp only. No custom camera restore loop. Lower values are
-  // stricter; 82° keeps close oblique views usable while preventing the
-  // below-photogrammetry / looking-up glitch.
-  try {
-    controller.maximumTiltAngle = Cesium.Math.toRadians(CAMERA_NATIVE_MAX_TILT_DEG);
-  } catch (_) {
-    // Non-critical; older Cesium builds may ignore this property.
+  if (controller) {
+    controller.enableCollisionDetection = true;
+    controller.minimumZoomDistance = CAMERA_NATIVE_MIN_ZOOM_DISTANCE_M;
+    try {
+      controller.maximumTiltAngle = Cesium.Math.toRadians(CAMERA_NATIVE_MAX_TILT_DEG);
+    } catch (_) {}
   }
+
+  try {
+    viewer.scene.preRender.addEventListener(enforceCesiumCameraFloorLimit);
+  } catch (_) {}
 }
 
 // ==========================================================
