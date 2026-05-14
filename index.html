@@ -4498,6 +4498,7 @@ const CAMERA_3D_MAX_UPWARD_PITCH_DEG = -2;
 let cameraFloorGuardApplying = false;
 let cameraFloorGuardSuspended = false;
 let cameraFloorGuardProgrammaticBaseline = null;
+let cameraFloorGuardSuppressApiUntil = 0;
 let lastCameraFloorSampleKey = '';
 let lastCameraFloorSampleHeight = null;
 let lastCameraFloorSampleMs = 0;
@@ -4511,6 +4512,10 @@ function isCameraFloorGuardActive() {
     !cameraFloorGuardSuspended &&
     !document.body.classList.contains('dashboard-active')
   );
+}
+
+function isCameraFloorGuardSuppressingViewportRefresh() {
+  return Date.now() < cameraFloorGuardSuppressApiUntil;
 }
 
 function getRenderedCameraFloorHeight(carto) {
@@ -4659,6 +4664,7 @@ function enforceCesiumCameraFloorLimit() {
   if (!needsHeightClamp && !needsPitchClamp) return;
 
   cameraFloorGuardApplying = true;
+  cameraFloorGuardSuppressApiUntil = Date.now() + 320;
   try {
     const safeHeight = needsHeightClamp ? minEyeH : eyeH;
     const safePitch = needsPitchClamp ? maxPitch : camera.pitch;
@@ -10398,6 +10404,7 @@ window.startBillingPortal = startBillingPortal;
 
   async function refreshApiViewport(force = false) {
     if (!API_MODE || !apiState.booted || !viewer || activeView === 'dashboard') return;
+    if (!force && typeof isCameraFloorGuardSuppressingViewportRefresh === 'function' && isCameraFloorGuardSuppressingViewportRefresh()) return;
 
     const desiredMode = chooseApiLayerMode();
     const key = requestKey(desiredMode);
@@ -10431,6 +10438,7 @@ window.startBillingPortal = startBillingPortal;
 
   function scheduleApiViewportRefresh(force = false, delay = null) {
     if (!API_MODE) return;
+    if (!force && typeof isCameraFloorGuardSuppressingViewportRefresh === 'function' && isCameraFloorGuardSuppressingViewportRefresh()) return;
     clearTimeout(apiState.moveTimer);
     const wait = delay == null ? (force ? 35 : 140) : delay;
     apiState.moveTimer = setTimeout(() => refreshApiViewport(force), wait);
@@ -10458,6 +10466,7 @@ window.startBillingPortal = startBillingPortal;
 
   function recoverApiViewport(reason = 'recover', options = {}) {
     if (!API_MODE || !apiState.booted || !viewer || activeView === 'dashboard') return;
+    if (options.force !== true && typeof isCameraFloorGuardSuppressingViewportRefresh === 'function' && isCameraFloorGuardSuppressingViewportRefresh()) return;
     const force = options.force !== false;
     apiState.isMoving = false;
     apiState.pendingMode = 'idle';
@@ -10472,6 +10481,7 @@ window.startBillingPortal = startBillingPortal;
 
   function runViewportRecoverySequence(reason = 'recover-sequence') {
     if (!API_MODE || !apiState.booted || !viewer || activeView === 'dashboard') return;
+    if (typeof isCameraFloorGuardSuppressingViewportRefresh === 'function' && isCameraFloorGuardSuppressingViewportRefresh()) return;
     const now = Date.now();
     // Do not let repeated camera.changed events spam API calls, but always allow
     // explicit flight/search/moveEnd recovery to start a fresh sequence.
@@ -10748,11 +10758,13 @@ window.startBillingPortal = startBillingPortal;
 
     viewer.camera.moveEnd.addEventListener(() => {
       setApiLayerMoving(false);
+      if (typeof isCameraFloorGuardSuppressingViewportRefresh === 'function' && isCameraFloorGuardSuppressingViewportRefresh()) return;
       runViewportRecoverySequence('moveEnd');
     });
 
     viewer.camera.changed.addEventListener(() => {
       updateClusterVisibilityForCurrentCamera();
+      if (typeof isCameraFloorGuardSuppressingViewportRefresh === 'function' && isCameraFloorGuardSuppressingViewportRefresh()) return;
       // Zoom threshold crossings should update immediately; ordinary same-mode
       // viewport movement remains lightly throttled.
       const desired = chooseApiLayerMode();
@@ -10767,6 +10779,7 @@ window.startBillingPortal = startBillingPortal;
 
     viewer.scene.postRender.addEventListener(() => {
       if (!apiState.booted) return;
+      if (typeof isCameraFloorGuardSuppressingViewportRefresh === 'function' && isCameraFloorGuardSuppressingViewportRefresh()) return;
       const now = Date.now();
       const desiredMode = chooseApiLayerMode();
       const modeMismatch = desiredMode !== apiState.lastDesiredMode || desiredMode !== apiState.lastRenderedMode;
