@@ -2554,6 +2554,8 @@ let google3DEnabled = false;
 let googleTileset = null;
 let google3DModeRequestId = 0;
 let googleTilesLoadProgressRemove = null;
+let default2DImageryLayer = null;
+let default2DImageryRestoreToken = 0;
 let cameraTilesLoadToken = 0;
 let cameraTilesLoadState = {
   active: false,
@@ -4717,14 +4719,9 @@ function initCesium() {
 
   viewer = new Cesium.Viewer('cesiumContainer', {
     // Satellite fallback before the user enables Google Photorealistic 3D Tiles.
-    // Use Cesium's ArcGIS provider rather than a raw tile template; the raw /tile/{z}/{y}/{x}
-    // template can render as a plain blue globe in Cesium in some browser/CORS/cache states.
-    baseLayer: Cesium.ImageryLayer.fromProviderAsync(
-      Cesium.ArcGisMapServerImageryProvider.fromUrl(
-        'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer',
-        { credit: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community' }
-      )
-    ),
+    // Created synchronously so the 2D globe is always restorable after toggling
+    // out of photorealistic 3D.
+    baseLayer: createDefault2DImageryLayer(),
     terrainProvider: new Cesium.EllipsoidTerrainProvider(),
     baseLayerPicker: false,
     navigationHelpButton: false,
@@ -4740,6 +4737,7 @@ function initCesium() {
   });
 
   viewer.scene.globe.depthTestAgainstTerrain = false;
+  try { default2DImageryLayer = viewer.imageryLayers.get(0) || null; } catch (_) {}
 
   const applyImageryStyle = () => {
     const layer = viewer.imageryLayers.get(0);
@@ -4967,19 +4965,61 @@ async function fetchProCesiumToken() {
 }
 window.fetchProCesiumToken = fetchProCesiumToken;
 
+function createDefault2DImageryLayer() {
+  // Immediate, deterministic Esri World Imagery fallback. This is the same
+  // satellite globe the app opens with, but created synchronously so switching
+  // back from photorealistic 3D never leaves the globe with no imagery while an
+  // async provider is still resolving.
+  const provider = new Cesium.UrlTemplateImageryProvider({
+    url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    credit: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+    maximumLevel: 19,
+    tilingScheme: new Cesium.WebMercatorTilingScheme()
+  });
+  const layer = new Cesium.ImageryLayer(provider);
+  try { layer.brightness = 1.0; layer.saturation = 0.85; } catch (_) {}
+  return layer;
+}
+
 function restoreDefaultCesiumImageryLayer() {
-  if (!viewer || !viewer.imageryLayers) return;
-  try { viewer.imageryLayers.removeAll(); } catch (_) {}
+  if (!viewer || !viewer.imageryLayers) return null;
+  const token = ++default2DImageryRestoreToken;
+
+  // Remove only imagery layers, never the data source or camera entities.
+  // Then install a synchronous layer immediately. The earlier async-only restore
+  // could leave the globe visible but textureless/black after a 3D -> 2D switch.
+  try { viewer.imageryLayers.removeAll(false); } catch (_) {
+    try { viewer.imageryLayers.removeAll(); } catch (__) {}
+  }
+
   try {
-    const layer = Cesium.ImageryLayer.fromProviderAsync(
-      Cesium.ArcGisMapServerImageryProvider.fromUrl(
-        'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer',
-        { credit: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community' }
-      )
+    default2DImageryLayer = createDefault2DImageryLayer();
+    viewer.imageryLayers.add(default2DImageryLayer);
+  } catch (e) {
+    console.warn('Immediate 2D imagery restore failed:', e);
+    default2DImageryLayer = null;
+  }
+
+  // Also attempt the official ArcGIS provider path. When it resolves, replace
+  // the fallback only if no newer mode switch has happened.
+  try {
+    const providerPromise = Cesium.ArcGisMapServerImageryProvider.fromUrl(
+      'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer',
+      { credit: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community' }
     );
-    viewer.imageryLayers.add(layer);
-    try { layer.brightness = 1.0; layer.saturation = 0.85; } catch (_) {}
+    Promise.resolve(providerPromise).then(provider => {
+      if (token !== default2DImageryRestoreToken || google3DEnabled || !viewer || !viewer.imageryLayers) return;
+      const layer = new Cesium.ImageryLayer(provider);
+      try { layer.brightness = 1.0; layer.saturation = 0.85; } catch (_) {}
+      try { viewer.imageryLayers.removeAll(false); } catch (_) { try { viewer.imageryLayers.removeAll(); } catch (__) {} }
+      viewer.imageryLayers.add(layer);
+      default2DImageryLayer = layer;
+      try { viewer.scene.requestRender && viewer.scene.requestRender(); } catch (_) {}
+    }).catch(e => console.warn('Async 2D imagery provider restore failed:', e));
   } catch (_) {}
+
+  try { viewer.scene.requestRender && viewer.scene.requestRender(); } catch (_) {}
+  return default2DImageryLayer;
 }
 
 function refreshAllCameraEntityStylesForCurrentMode() {
@@ -5149,7 +5189,9 @@ async function enableGoogle3DTiles(ionToken) {
       return;
     }
     viewer.scene.globe.show = false;
-    viewer.imageryLayers.removeAll();
+    // Keep the 2D imagery layer in memory while 3D is active. The globe is
+    // hidden, so it has no visual cost, and switching back to 2D becomes a
+    // simple globe.show=true operation instead of rebuilding a textureless globe.
     google3DEnabled = true;
     // Existing camera entities may have been created before 3D was enabled.
     // Re-apply the normal 3D symbol style here so every unselected camera gets
