@@ -2565,11 +2565,6 @@ let lastOcclusionCheck = 0;
 let globeZoomControlsReady = false;
 let suppressGlobeZoomSliderSync = false;
 let cameraGroundGuardReady = false;
-let cameraGroundGuardTimer = null;
-let cameraGroundGuardApplying = false;
-let cameraGroundGuardLastCorrectionAt = 0;
-let cameraGroundGuardLastSafePose = null;
-let cameraGroundGuardRaf = 0;
 
 
 // Frustum parameters
@@ -4475,141 +4470,38 @@ function setupGlobeZoomControls() {
 }
 
 // ==========================================================
-//  LOW-ALTITUDE / UNDER-TILE CAMERA GUARD
+//  NATIVE CESIUM CAMERA HARD LIMITS
 // ==========================================================
-// Google Photorealistic 3D Tiles can visually sit above the ellipsoid/globe
-// height that Cesium exposes for the camera. Sampling tile heights on every
-// mouse move would be expensive, so this guard uses only cheap camera state.
+// Previous versions used a post-move guard that restored the last safe camera
+// pose after the user crossed into an under-tile viewing angle. That prevented
+// the underground glitch, but it felt like a bounce because the camera was
+// allowed to enter the bad pose before being corrected.
 //
-// Important UX rule: this is a boundary, not a bounce. We continuously remember
-// the last valid camera pose and restore exactly that pose if the user crosses
-// into the under-tile glitch zone. That prevents the old behaviour where the app
-// shot the camera upward to a new height/pitch.
-const CAMERA_GROUND_GUARD_MIN_HEIGHT_M = 65;
-const CAMERA_GROUND_GUARD_MIN_PITCH_RAD = Cesium.Math.toRadians(-10);
-const CAMERA_GROUND_GUARD_LOW_PITCH_WINDOW_M = 230;
-
-function cloneCameraGuardPose() {
-  if (!viewer || !viewer.camera) return null;
-  const cam = viewer.camera;
-  return {
-    destination: Cesium.Cartesian3.clone(cam.positionWC),
-    heading: cam.heading,
-    pitch: cam.pitch,
-    roll: cam.roll || 0
-  };
-}
-
-function isCameraPoseUnderTileRisk() {
-  if (!viewer || !viewer.camera) return false;
-  const cam = viewer.camera;
-  const carto = cam.positionCartographic;
-  if (!carto) return false;
-
-  const height = Number(carto.height);
-  const pitch = Number(cam.pitch);
-  if (!Number.isFinite(height) || !Number.isFinite(pitch)) return false;
-
-  const tooLow = height < CAMERA_GROUND_GUARD_MIN_HEIGHT_M;
-  // In Cesium, pitch is negative when looking down. Near-zero/positive pitch at
-  // low altitude is where users can slip visually under the photogrammetry mesh.
-  const tooFlatOrUpAtLowAltitude =
-    height < CAMERA_GROUND_GUARD_LOW_PITCH_WINDOW_M &&
-    pitch > CAMERA_GROUND_GUARD_MIN_PITCH_RAD;
-
-  return tooLow || tooFlatOrUpAtLowAltitude;
-}
-
-function restoreCameraGroundGuardBoundaryPose() {
-  if (!viewer || !viewer.camera || !cameraGroundGuardLastSafePose) return;
-  cameraGroundGuardApplying = true;
-  try {
-    viewer.camera.setView({
-      destination: Cesium.Cartesian3.clone(cameraGroundGuardLastSafePose.destination),
-      orientation: {
-        heading: cameraGroundGuardLastSafePose.heading,
-        pitch: cameraGroundGuardLastSafePose.pitch,
-        roll: cameraGroundGuardLastSafePose.roll
-      }
-    });
-  } catch (_) {
-    // Non-critical visual guard; never allow this to break map interaction.
-  } finally {
-    requestAnimationFrame(() => { cameraGroundGuardApplying = false; });
-  }
-}
-
-function clampCameraAbove3DTiles(reason = 'camera-change') {
-  if (!viewer || !viewer.camera || cameraGroundGuardApplying) return;
-  // Only needed in 3D globe mode. Dashboard/2D modes and non-Google globe
-  // views should not get surprise camera corrections.
-  if (!google3DEnabled || activeView === 'dashboard') return;
-
-  if (isCameraPoseUnderTileRisk()) {
-    // Boundary behaviour: return to the last valid pose, not to a computed
-    // artificial height/pitch. This feels like the camera simply cannot move
-    // farther through the tile surface.
-    if (cameraGroundGuardLastSafePose) {
-      restoreCameraGroundGuardBoundaryPose();
-      return;
-    }
-
-    // Fallback only for the rare case where the user starts inside the risk
-    // zone before a safe pose has been recorded. Keep the current lon/lat and
-    // heading; make the smallest possible correction.
-    const cam = viewer.camera;
-    const carto = cam.positionCartographic;
-    if (!carto) return;
-    const safeHeight = Math.max(Number(carto.height) || 0, CAMERA_GROUND_GUARD_MIN_HEIGHT_M);
-    const safePitch = Math.min(Number(cam.pitch) || CAMERA_GROUND_GUARD_MIN_PITCH_RAD, CAMERA_GROUND_GUARD_MIN_PITCH_RAD);
-    cameraGroundGuardApplying = true;
-    try {
-      cam.setView({
-        destination: Cesium.Cartesian3.fromRadians(carto.longitude, carto.latitude, safeHeight),
-        orientation: { heading: cam.heading, pitch: safePitch, roll: cam.roll || 0 }
-      });
-      cameraGroundGuardLastSafePose = cloneCameraGuardPose();
-    } catch (_) {
-      // Non-critical visual guard; never allow this to break map interaction.
-    } finally {
-      requestAnimationFrame(() => { cameraGroundGuardApplying = false; });
-    }
-    return;
-  }
-
-  cameraGroundGuardLastSafePose = cloneCameraGuardPose();
-}
-
-function scheduleCameraGroundGuard(reason = 'camera-change') {
-  if (cameraGroundGuardRaf) return;
-  cameraGroundGuardRaf = requestAnimationFrame(() => {
-    cameraGroundGuardRaf = 0;
-    clampCameraAbove3DTiles(reason);
-  });
-}
+// This version does not run any camera.changed / moveEnd correction loop. It
+// only configures Cesium's ScreenSpaceCameraController so user input is clamped
+// at the interaction layer. The result is a hard movement limit: the user can
+// push against the boundary, but the app does not setView/flyTo/snap them back.
+const CAMERA_NATIVE_MIN_ZOOM_DISTANCE_M = 70;
+const CAMERA_NATIVE_MAX_TILT_DEG = 82;
 
 function setupCesiumCameraGroundGuard() {
   if (!viewer || cameraGroundGuardReady) return;
   cameraGroundGuardReady = true;
 
   const controller = viewer.scene && viewer.scene.screenSpaceCameraController;
-  if (controller) {
-    // Cheap native limits first. The custom guard below is a last-known-good
-    // boundary, not a height sampler and not a bounce animation.
-    controller.enableCollisionDetection = true;
-    controller.minimumZoomDistance = CAMERA_GROUND_GUARD_MIN_HEIGHT_M;
-    try { controller.maximumTiltAngle = Cesium.Math.toRadians(88); } catch (_) {}
+  if (!controller) return;
+
+  controller.enableCollisionDetection = true;
+  controller.minimumZoomDistance = CAMERA_NATIVE_MIN_ZOOM_DISTANCE_M;
+
+  // Native tilt clamp only. No custom camera restore loop. Lower values are
+  // stricter; 82° keeps close oblique views usable while preventing the
+  // below-photogrammetry / looking-up glitch.
+  try {
+    controller.maximumTiltAngle = Cesium.Math.toRadians(CAMERA_NATIVE_MAX_TILT_DEG);
+  } catch (_) {
+    // Non-critical; older Cesium builds may ignore this property.
   }
-
-  cameraGroundGuardLastSafePose = cloneCameraGuardPose();
-
-  viewer.camera.moveStart.addEventListener(() => {
-    if (!google3DEnabled || activeView === 'dashboard') return;
-    if (!isCameraPoseUnderTileRisk()) cameraGroundGuardLastSafePose = cloneCameraGuardPose();
-  });
-
-  viewer.camera.changed.addEventListener(() => scheduleCameraGroundGuard('camera-change'));
-  viewer.camera.moveEnd.addEventListener(() => scheduleCameraGroundGuard('move-end'));
 }
 
 // ==========================================================
