@@ -2275,7 +2275,7 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
 <div id="settingsPanel">
   <div class="panel-header">
     Pro 3D
-    <button onclick="document.getElementById('settingsPanel').style.display='none';document.getElementById('btnSettings').classList.remove('active');settingsPanelOpen=false;" style="background:none;border:none;cursor:pointer;color:var(--c-text3);font-size:18px;line-height:1;">×</button>
+    <button onclick="document.getElementById('settingsPanel').style.display='none';settingsPanelOpen=false;if(window.updateGlobeModeButtons)window.updateGlobeModeButtons();" style="background:none;border:none;cursor:pointer;color:var(--c-text3);font-size:18px;line-height:1;">×</button>
   </div>
   <div class="panel-body">
     <button class="field-btn" id="applyGoogleKey">Enable photorealistic 3D</button>
@@ -2551,6 +2551,8 @@ let searchTimer = null;
 let settingsPanelOpen = false;
 let legendOpen = false;
 let google3DEnabled = false;
+let globeRenderMode = '2d'; // authoritative UI/render mode: '2d' | '3d'
+let google3DLoading = false;
 let googleTileset = null;
 let google3DModeRequestId = 0;
 let googleTilesLoadProgressRemove = null;
@@ -5029,8 +5031,15 @@ function refreshAllCameraEntityStylesForCurrentMode() {
       if (!e || e._serverCluster || String(e.id || '').startsWith('cluster:')) return;
       const cam = findCameraById(e.id);
       if (!cam) return;
+
       if (selectedCamera && String(selectedCamera.id) === String(cam.id)) {
-        positionSelectedCameraEntityAtGround(cam, e, 0);
+        if (globeRenderMode === '3d' && google3DEnabled) {
+          const resolvedH = saneSurfaceHeight(selectedCameraResolvedSurfaceHeight);
+          if (resolvedH !== null) applyResolvedSelectedCameraEntityIfNeeded(e);
+          else renderUnselectedCameraEntity(e, cam); // pending selection remains beam-top marker in 3D
+        } else {
+          positionSelectedCameraEntityAtGround(cam, e, 0); // 2D selected style only
+        }
       } else {
         renderUnselectedCameraEntity(e, cam);
       }
@@ -5038,39 +5047,51 @@ function refreshAllCameraEntityStylesForCurrentMode() {
   } catch (_) {}
 }
 
-function update3DButtonState() {
+function updateGlobeModeButtons() {
   const enableBtn = document.getElementById('applyGoogleKey');
   const btn2D = document.getElementById('btn2DMode');
   const btn3D = document.getElementById('btnSettings');
+  const is2D = globeRenderMode !== '3d';
+  const is3D = globeRenderMode === '3d';
 
   if (enableBtn) {
-    enableBtn.disabled = !!google3DEnabled;
-    enableBtn.textContent = google3DEnabled ? 'Photorealistic 3D is active' : 'Enable photorealistic 3D';
+    enableBtn.disabled = is3D && (google3DEnabled || google3DLoading);
+    enableBtn.textContent = google3DLoading
+      ? 'Loading photorealistic 3D…'
+      : is3D && google3DEnabled
+        ? 'Photorealistic 3D is active'
+        : 'Enable photorealistic 3D';
     enableBtn.style.background = '';
   }
 
   if (btn2D) {
-    btn2D.classList.toggle('active', !google3DEnabled);
-    btn2D.title = google3DEnabled
-      ? 'Switch back to the standard 2D satellite globe'
-      : 'Standard 2D satellite globe active';
+    btn2D.classList.toggle('active', is2D);
+    btn2D.setAttribute('aria-pressed', is2D ? 'true' : 'false');
+    btn2D.disabled = false;
+    btn2D.title = is2D
+      ? 'Standard 2D satellite globe active'
+      : 'Switch back to the standard 2D satellite globe';
   }
 
   if (btn3D) {
-    btn3D.classList.toggle('active', !!google3DEnabled);
-    btn3D.title = google3DEnabled
-      ? 'Google Photorealistic 3D Tiles active'
+    btn3D.classList.toggle('active', is3D);
+    btn3D.setAttribute('aria-pressed', is3D ? 'true' : 'false');
+    btn3D.disabled = !!google3DLoading;
+    btn3D.title = is3D
+      ? (google3DLoading ? 'Loading Google Photorealistic 3D Tiles…' : 'Google Photorealistic 3D Tiles active')
       : 'Switch to Google Photorealistic 3D Tiles — Pro only';
   }
 }
+window.updateGlobeModeButtons = updateGlobeModeButtons;
 
-function switchTo2DGlobe(reason = 'manual') {
-  if (!viewer) return false;
+// Backwards-compatible name used by older call sites. It now updates from the
+// authoritative render mode, not from google3DEnabled.
+function update3DButtonState() {
+  updateGlobeModeButtons();
+}
 
-  // Invalidate any in-flight Google 3D enable request. Without this, an older
-  // tileset readyPromise can fire after the user switches to 2D and hide the
-  // globe/imagery again, which is what caused the invisible-earth failure.
-  google3DModeRequestId++;
+function deactivateGoogle3DTiles() {
+  if (!viewer) return;
 
   if (googleTilesLoadProgressRemove) {
     try { googleTilesLoadProgressRemove(); } catch (_) {}
@@ -5082,18 +5103,34 @@ function switchTo2DGlobe(reason = 'manual') {
     googleTileset = null;
   }
 
+  try { viewer.scene.globe.show = true; } catch (_) {}
   google3DEnabled = false;
+  google3DLoading = false;
+}
+
+async function switchTo2DGlobe(reason = 'manual', token = ++google3DModeRequestId) {
+  if (!viewer) {
+    globeRenderMode = '2d';
+    google3DEnabled = false;
+    google3DLoading = false;
+    updateGlobeModeButtons();
+    return false;
+  }
+
+  globeRenderMode = '2d';
+  google3DLoading = false;
+  updateGlobeModeButtons();
+
+  deactivateGoogle3DTiles();
+
   cameraTilesLoadState.active = false;
   cameraFloorGuardSuspended = false;
   cameraFloorGuardProgrammaticBaseline = null;
   selectedCameraResolvedSurfaceHeight = null;
   hideCameraTilesLoadOverlay();
 
-  try { viewer.scene.globe.show = true; } catch (_) {}
   restoreDefaultCesiumImageryLayer();
 
-  // Return selected/unselected camera graphics to their non-3D style and restore
-  // field-of-view state using the 2D anchor rules.
   restoreSuppressedSelectedBeams();
   removeFrustum();
   refreshAllCameraEntityStylesForCurrentMode();
@@ -5107,26 +5144,77 @@ function switchTo2DGlobe(reason = 'manual') {
     status.style.color = 'var(--c-success)';
     status.textContent = 'Standard 2D satellite globe active';
   }
-  update3DButtonState();
 
+  updateGlobeModeButtons();
   try { viewer.scene.requestRender && viewer.scene.requestRender(); } catch (_) {}
   try { requestVisibleCamerasRefresh({ reason: reason || '2d-mode', force: true }); } catch (_) {}
-  return true;
+  return token === google3DModeRequestId;
 }
 window.switchTo2DGlobe = switchTo2DGlobe;
 
-// Backwards-compatible alias for older inline references.
 function disableGoogle3DTiles() {
-  return switchTo2DGlobe('3d-disabled');
+  return setGlobeRenderMode('2d', '3d-disabled');
 }
 window.disableGoogle3DTiles = disableGoogle3DTiles;
+
+async function setGlobeRenderMode(mode, reason = 'manual') {
+  const nextMode = mode === '3d' ? '3d' : '2d';
+  const token = ++google3DModeRequestId;
+  globeRenderMode = nextMode;
+  google3DLoading = nextMode === '3d' && !google3DEnabled;
+  updateGlobeModeButtons();
+
+  if (nextMode === '2d') {
+    return switchTo2DGlobe(reason, token);
+  }
+
+  if (!requirePro3D()) {
+    globeRenderMode = google3DEnabled ? '3d' : '2d';
+    google3DLoading = false;
+    updateGlobeModeButtons();
+    const panel = document.getElementById('settingsPanel');
+    if (panel) panel.style.display = 'block';
+    settingsPanelOpen = true;
+    return false;
+  }
+
+  const status = document.getElementById('googleStatus');
+  if (status) {
+    status.style.display = 'block';
+    status.style.color = 'var(--c-text2)';
+    status.textContent = 'Requesting secure 3D access…';
+  }
+
+  let ionToken = null;
+  try {
+    ionToken = await fetchProCesiumToken();
+  } catch (e) {
+    console.error('3D token request failed:', e);
+  }
+
+  if (token !== google3DModeRequestId || globeRenderMode !== '3d') return false;
+
+  if (!ionToken) {
+    globeRenderMode = google3DEnabled ? '3d' : '2d';
+    google3DLoading = false;
+    updateGlobeModeButtons();
+    return false;
+  }
+
+  return enableGoogle3DTiles(ionToken, token);
+}
+window.setGlobeRenderMode = setGlobeRenderMode;
 
 // ==========================================================
 //  GOOGLE 3D TILES
 // ==========================================================
-async function enableGoogle3DTiles(ionToken) {
+async function enableGoogle3DTiles(ionToken, requestId = google3DModeRequestId) {
+  if (!viewer) return false;
   if (!requirePro3D()) return false;
-  const requestId = ++google3DModeRequestId;
+  if (requestId !== google3DModeRequestId || globeRenderMode !== '3d') return false;
+
+  google3DLoading = true;
+  updateGlobeModeButtons();
 
   const status = document.getElementById('googleStatus');
   const btn    = document.getElementById('applyGoogleKey');
@@ -5156,24 +5244,31 @@ async function enableGoogle3DTiles(ionToken) {
       : msg.includes('401') || msg.includes('403')
       ? 'Token invalid or expired'
       : msg;
-    setStatus('Error: ' + hint, 'var(--c-danger)');
-    if (btn) {
-      btn.textContent = 'Retry';
-      btn.disabled = false;
+    if (requestId === google3DModeRequestId && globeRenderMode === '3d') {
+      setStatus('Error: ' + hint, 'var(--c-danger)');
+      globeRenderMode = google3DEnabled ? '3d' : '2d';
+      google3DLoading = false;
+      if (btn) btn.disabled = false;
+      updateGlobeModeButtons();
     }
     return false;
   }
 
-  // Replace any previous in-flight/active photorealistic tileset cleanly.
-  if (googleTileset) {
+  if (requestId !== google3DModeRequestId || globeRenderMode !== '3d') {
+    try { viewer.scene.primitives.remove(tileset); } catch (_) {}
+    google3DLoading = false;
+    updateGlobeModeButtons();
+    return false;
+  }
+
+  if (googleTileset && googleTileset !== tileset) {
     try { viewer.scene.primitives.remove(googleTileset); } catch (_) {}
-    googleTileset = null;
   }
   viewer.scene.primitives.add(tileset);
   googleTileset = tileset;
 
   if (googleTilesLoadProgressRemove) {
-    googleTilesLoadProgressRemove();
+    try { googleTilesLoadProgressRemove(); } catch (_) {}
     googleTilesLoadProgressRemove = null;
   }
   if (tileset.loadProgress && typeof tileset.loadProgress.addEventListener === 'function') {
@@ -5183,19 +5278,17 @@ async function enableGoogle3DTiles(ionToken) {
     });
   }
 
-  const onReady = () => {
-    if (requestId !== google3DModeRequestId || googleTileset !== tileset) {
+  const activateTileset = () => {
+    if (requestId !== google3DModeRequestId || globeRenderMode !== '3d' || googleTileset !== tileset) {
       try { viewer.scene.primitives.remove(tileset); } catch (_) {}
-      return;
+      if (googleTileset === tileset) googleTileset = null;
+      return false;
     }
-    viewer.scene.globe.show = false;
-    // Keep the 2D imagery layer in memory while 3D is active. The globe is
-    // hidden, so it has no visual cost, and switching back to 2D becomes a
-    // simple globe.show=true operation instead of rebuilding a textureless globe.
+
     google3DEnabled = true;
-    // Existing camera entities may have been created before 3D was enabled.
-    // Re-apply the normal 3D symbol style here so every unselected camera gets
-    // its fixed-height dot and persistent locator beam immediately.
+    google3DLoading = false;
+    try { viewer.scene.globe.show = false; } catch (_) {}
+
     try {
       if (dataSource && dataSource.entities) {
         dataSource.entities.values.forEach(e => {
@@ -5206,32 +5299,35 @@ async function enableGoogle3DTiles(ionToken) {
             if (saneSurfaceHeight(selectedCameraResolvedSurfaceHeight) !== null) {
               applyResolvedSelectedCameraEntityIfNeeded(e);
             } else {
-              setCameraEntityVisualPosition(e, cam.lng, cam.lat, CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, CAMERA_3D_MARKER_LIFT_M);
+              renderUnselectedCameraEntity(e, cam);
             }
           } else {
-            setCameraEntityVisualPosition(e, cam.lng, cam.lat, CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, CAMERA_3D_MARKER_LIFT_M);
+            renderUnselectedCameraEntity(e, cam);
           }
         });
       }
     } catch (_) {}
+
     setStatus('Google Photorealistic 3D Tiles active', 'var(--c-success)');
-    update3DButtonState();
+    updateGlobeModeButtons();
+    try { viewer.scene.requestRender && viewer.scene.requestRender(); } catch (_) {}
+    return true;
   };
 
-  if (tileset.readyPromise) {
-    tileset.readyPromise.then(onReady).catch(e => {
-      try { viewer.scene.primitives.remove(tileset); } catch (_) {}
-      if (googleTileset === tileset) googleTileset = null;
-      if (requestId === google3DModeRequestId) {
-        setStatus('Tileset failed to load: ' + (e.message || 'unknown error'), 'var(--c-danger)');
-        update3DButtonState();
-      }
-    });
-  } else {
-    onReady();
+  try {
+    if (tileset.readyPromise) await tileset.readyPromise;
+    return activateTileset();
+  } catch (e) {
+    try { viewer.scene.primitives.remove(tileset); } catch (_) {}
+    if (googleTileset === tileset) googleTileset = null;
+    if (requestId === google3DModeRequestId && globeRenderMode === '3d') {
+      google3DLoading = false;
+      setStatus('Tileset failed to load: ' + (e.message || 'unknown error'), 'var(--c-danger)');
+      globeRenderMode = google3DEnabled ? '3d' : '2d';
+      updateGlobeModeButtons();
+    }
+    return false;
   }
-
-  return true;
 }
 
 // ==========================================================
@@ -6592,7 +6688,7 @@ function switchView(view) {
     document.getElementById('legend').style.display = 'none';
     document.getElementById('settingsPanel').style.display = 'none';
     document.getElementById('btnLegend').classList.remove('active');
-    document.getElementById('btnSettings').classList.remove('active');
+    if (window.updateGlobeModeButtons) window.updateGlobeModeButtons();
     document.getElementById('dashboardAddPanel').classList.remove('open');
     initDashboardMap();
     renderDashboard();
@@ -8766,93 +8862,40 @@ window.startBillingPortal = startBillingPortal;
     document.getElementById('legend').style.display = legendOpen ? 'block' : 'none';
     if (legendOpen) {
       document.getElementById('settingsPanel').style.display = 'none';
-      document.getElementById('btnSettings').classList.remove('active');
+      if (window.updateGlobeModeButtons) window.updateGlobeModeButtons();
       settingsPanelOpen = false;
     }
   };
 
-  // 2D / 3D mode switch. 2D is always available. 3D is Pro-only and uses
-  // Google Photorealistic 3D Tiles. The top buttons are mode selectors, not a
-  // single red toggle hidden inside the Pro panel.
+  // 2D / 3D mode switch. These are now authoritative render-mode selectors.
+  // 2D is always available. 3D is Pro-only and uses Google Photorealistic 3D Tiles.
   const btn2DMode = document.getElementById('btn2DMode');
   if (btn2DMode) {
     btn2DMode.onclick = function () {
       settingsPanelOpen = false;
       document.getElementById('settingsPanel').style.display = 'none';
-      switchTo2DGlobe('2d-button');
+      setGlobeRenderMode('2d', '2d-button');
     };
   }
 
-  document.getElementById('btnSettings').onclick = async function () {
-    if (google3DEnabled) {
+  const btn3DMode = document.getElementById('btnSettings');
+  if (btn3DMode) {
+    btn3DMode.onclick = function () {
       settingsPanelOpen = false;
       document.getElementById('settingsPanel').style.display = 'none';
-      update3DButtonState();
-      return;
-    }
+      setGlobeRenderMode('3d', '3d-button');
+    };
+  }
 
-    if (!requirePro3D()) {
-      settingsPanelOpen = true;
-      this.classList.add('active');
-      document.getElementById('settingsPanel').style.display = 'block';
-      update3DButtonState();
-      return;
-    }
+  // Legacy Pro-panel button now delegates to the same render-mode controller.
+  const applyGoogleKeyButton = document.getElementById('applyGoogleKey');
+  if (applyGoogleKeyButton) {
+    applyGoogleKeyButton.onclick = function () {
+      setGlobeRenderMode('3d', 'settings-panel');
+    };
+  }
 
-    settingsPanelOpen = false;
-    document.getElementById('settingsPanel').style.display = 'none';
-    const btn = document.getElementById('applyGoogleKey');
-    try {
-      if (btn) { btn.disabled = true; btn.textContent = 'Requesting secure 3D access…'; }
-      const ionToken = await fetchProCesiumToken();
-      if (!ionToken) { update3DButtonState(); return; }
-      if (btn) btn.textContent = 'Loading 3D…';
-      await enableGoogle3DTiles(ionToken);
-    } finally {
-      update3DButtonState();
-    }
-  };
-
-  // Load Pro 3D tiles via secure Worker-issued Cesium token.
-  document.getElementById('applyGoogleKey').onclick = async () => {
-    if (!viewer) return;
-
-    const btn = document.getElementById('applyGoogleKey');
-    const status = document.getElementById('googleStatus');
-
-    if (google3DEnabled) {
-      update3DButtonState();
-      return;
-    }
-
-    if (!requirePro3D()) {
-      btn.textContent = 'Enable photorealistic 3D';
-      return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = 'Requesting secure 3D access…';
-
-    try {
-      const ionToken = await fetchProCesiumToken();
-      if (!ionToken) {
-        btn.disabled = false;
-        btn.textContent = 'Enable photorealistic 3D';
-        return;
-      }
-
-      btn.textContent = 'Loading 3D…';
-      await enableGoogle3DTiles(ionToken);
-    } finally {
-      if (!google3DEnabled) {
-        btn.disabled = false;
-        btn.textContent = 'Enable photorealistic 3D';
-      }
-      update3DButtonState();
-    }
-  };
-
-  update3DButtonState();
+  updateGlobeModeButtons();
 
   // Fit
   document.getElementById('btnFit').onclick = fitToData;
