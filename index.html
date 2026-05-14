@@ -3187,16 +3187,18 @@ async function applySelectedCameraEntityStyle(cam) {
     entity.show = true;
 
     if (google3DEnabled) {
-      // Pending selected state is intentionally a visual no-op. Keep the normal
-      // unselected elevated dot + beam at the top of the locator while the exact
-      // 3D tile surface anchor is being resolved. Do not show the resolved blue
-      // selected beacon until positionSelectedCameraEntityAtGround() runs.
+      // Pending selected state is a strict visual no-op. Do not move the entity,
+      // do not restyle it as selected, and do not hide the locator beam yet.
+      // The clicked camera remains exactly as the normal elevated dot + beam
+      // until refineSelectedCameraSurfaceAfterTiles() obtains a validated
+      // rendered 3D-tile height and applyResolvedSelectedCameraEntityIfNeeded()
+      // promotes it to the selected beacon/frustum anchor.
       restoreSuppressedSelectedBeams();
       entity._selectedHidden = false;
       entity._selectedStyled = 'pending-resolution';
       entity.show = true;
-      setCameraEntityHeightReference(entity, Cesium.HeightReference.NONE);
-      applyNormalUnselectedCameraVisual(entity, cam);
+      if (entity.polyline) entity.polyline.show = true;
+      try { viewer.scene.requestRender(); } catch (_) {}
       return groundH;
     }
 
@@ -4970,7 +4972,14 @@ async function selectCamera(cam) {
   };
   const backAngle = (cameraHeading + 180) % 360;
   const hRad      = Cesium.Math.toRadians(backAngle);
-  const camPos    = selectedCameraEntityPosition(cam.lng, cam.lat, groundH, CAMERA_3D_SELECTED_LIFT_M);
+  // Before the 3D surface resolver completes, never use the unresolved
+  // selected-camera ground anchor as the inspection-flight origin. Using that
+  // early value can put the camera/view under photogrammetry while tiles stream.
+  // Aim the initial flight from the normal elevated marker anchor, then refit
+  // to the validated selected anchor after refineSelectedCameraSurfaceAfterTiles().
+  const camPos = google3DEnabled
+    ? cameraEntityPosition(cam.lng, cam.lat, CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, CAMERA_3D_MARKER_LIFT_M)
+    : selectedCameraEntityPosition(cam.lng, cam.lat, groundH, CAMERA_3D_SELECTED_LIFT_M);
   const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(camPos);
 
   if (google3DEnabled) {
