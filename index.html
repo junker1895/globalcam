@@ -2643,6 +2643,10 @@ function updateCameraPoleForEntity(entity, lng, lat, topHeight, options = {}) {
 function setCameraEntityVisualPosition(entity, lng, lat, surfaceHeight = 0, lift = CAMERA_3D_MARKER_LIFT_M) {
   if (!entity) return;
   if (applyResolvedSelectedCameraEntityIfNeeded(entity)) return;
+  if (google3DEnabled && isCurrentSelectedCameraEntity(entity) && !hasResolvedSelectedCameraAnchor()) {
+    hidePendingSelectedCameraEntity(entity);
+    return;
+  }
   try {
     if (google3DEnabled) {
       const h = visualCameraHeight(surfaceHeight, lift);
@@ -2778,6 +2782,8 @@ function positionSelectedCameraEntityAtGround(cam, entity, groundH) {
   if (!cam || !entity) return;
   const selectedHeight = google3DEnabled ? selectedCameraHeight(groundH, CAMERA_3D_SELECTED_LIFT_M) : 0;
   try {
+    entity._selectedHidden = false;
+    entity._selectedStyled = true;
     entity.position = new Cesium.ConstantPositionProperty(
       Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), selectedHeight)
     );
@@ -2813,6 +2819,31 @@ function isCurrentSelectedCameraEntity(entity) {
     String(entity.id) === String(selectedCamera.id) &&
     String(selectedCameraEntityId) === String(selectedCamera.id)
   );
+}
+
+function hasResolvedSelectedCameraAnchor() {
+  return saneSurfaceHeight(selectedCameraResolvedSurfaceHeight) !== null;
+}
+
+function hidePendingSelectedCameraEntity(entity) {
+  // During the selected-camera resolving phase, do not show either the old
+  // approximate 30 m locator marker/beam or the resolved selected marker. This
+  // prevents the user seeing a misleading dot/beam before the rendered 3D tile
+  // surface height has been validated. The entity remains logically selected;
+  // its visible graphics are restored only after resolution or on deselect.
+  if (!entity) return false;
+  try {
+    entity._selectedHidden = true;
+    entity._selectedStyled = 'pending-resolution';
+    entity.show = true;
+    if (entity.point) entity.point.show = false;
+    if (entity.billboard) entity.billboard.show = false;
+    if (entity.label) entity.label.show = false;
+    if (entity.polyline) entity.polyline.show = false;
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 function applyResolvedSelectedCameraEntityIfNeeded(entity) {
@@ -3015,7 +3046,7 @@ async function refineSelectedCameraSurfaceAfterTiles(expectedTilesToken = null) 
   }
 
   selectedCameraResolvedSurfaceHeight = h;
-  positionSelectedCameraEntityAtGround(cam, entity, h);
+  applyResolvedSelectedCameraEntityIfNeeded(entity);
 
   // Use the resolved sampled surface height as the single authoritative FOV
   // anchor. Do not re-read the entity position here: the selected entity is
@@ -3073,39 +3104,14 @@ async function applySelectedCameraEntityStyle(cam) {
     entity.show = true;
 
     if (google3DEnabled) {
-      // Do not move the entity to a guessed selected height. Keep the normal
-      // visual camera symbol and its locator beam in place until the strict
-      // selected-surface resolver produces the authoritative anchor.
-      setCameraEntityVisualPosition(entity, cam.lng, cam.lat, CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, CAMERA_3D_MARKER_LIFT_M);
-
-      if (entity.point) {
-        entity.point.show = true;
-        entity.point.pixelSize = 7;
-        entity.point.color = colour;
-        entity.point.outlineColor = Cesium.Color.WHITE.withAlpha(0.8);
-        entity.point.outlineWidth = 1;
-        entity.point.scaleByDistance = new Cesium.NearFarScalar(300, 1.8, 400000, 0.6);
-        entity.point.heightReference = Cesium.HeightReference.NONE;
-        entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
-      }
-      if (entity.billboard) {
-        entity.billboard.show = heading !== null;
-        entity.billboard.width = 20;
-        entity.billboard.height = 20;
-        entity.billboard.pixelOffset = new Cesium.Cartesian2(0, -13);
-        entity.billboard.scaleByDistance = new Cesium.NearFarScalar(300, 1.25, 400000, 0.5);
-        entity.billboard.heightReference = Cesium.HeightReference.NONE;
-        entity.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
-      }
-      if (entity.label) {
-        entity.label.show = false;
-        entity.label.heightReference = Cesium.HeightReference.NONE;
-        entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
-      }
-      if (entity.polyline) {
-        entity.polyline.show = true;
-        updateCameraPoleForEntity(entity, cam.lng, cam.lat, visualCameraHeight(CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, CAMERA_3D_MARKER_LIFT_M));
-      }
+      // Selected 3D camera lifecycle:
+      // 1) immediately suppress the approximate unselected locator dot/beam;
+      // 2) resolve the rendered 3D tile surface height;
+      // 3) then show the resolved selected dot/frustum.
+      // This avoids the confusing pre-resolve marker flash below/inside the 3D
+      // mesh while also ensuring the unselected beam stays gone until deselect.
+      setCameraEntityHeightReference(entity, Cesium.HeightReference.NONE);
+      hidePendingSelectedCameraEntity(entity);
       return groundH;
     }
 
