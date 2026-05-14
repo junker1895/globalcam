@@ -2616,7 +2616,11 @@ function updateCameraPoleForEntity(entity, lng, lat, topHeight, options = {}) {
     // Resolved selected cameras must never show the approximate locator beam.
     // This guard protects against later refresh/restyle paths accidentally
     // re-enabling the unselected beam after the sampled 3D anchor has resolved.
-    if (selectedResolvedBeamSuppressionIds.has(String(entity.id)) || (isCurrentSelectedCameraEntity(entity) && hasResolvedSelectedCameraAnchor())) {
+    const selectedAnchorResolved = hasResolvedSelectedCameraAnchor();
+    const sameResolvedSelectedLocation = !!(selectedAnchorResolved && selectedCamera &&
+      Math.abs(Number(lng) - Number(selectedCamera.lng)) < 0.0000015 &&
+      Math.abs(Number(lat) - Number(selectedCamera.lat)) < 0.0000015);
+    if (selectedResolvedBeamSuppressionIds.has(String(entity.id)) || (isCurrentSelectedCameraEntity(entity) && selectedAnchorResolved) || sameResolvedSelectedLocation) {
       entity.polyline.show = false;
       return;
     }
@@ -2650,6 +2654,13 @@ function updateCameraPoleForEntity(entity, lng, lat, topHeight, options = {}) {
 function setCameraEntityVisualPosition(entity, lng, lat, surfaceHeight = 0, lift = CAMERA_3D_MARKER_LIFT_M) {
   if (!entity) return;
   if (applyResolvedSelectedCameraEntityIfNeeded(entity)) return;
+  if (google3DEnabled && selectedCamera && hasResolvedSelectedCameraAnchor() &&
+      Math.abs(Number(lng) - Number(selectedCamera.lng)) < 0.0000015 &&
+      Math.abs(Number(lat) - Number(selectedCamera.lat)) < 0.0000015) {
+    if (entity.polyline) entity.polyline.show = false;
+    selectedResolvedBeamSuppressionIds.add(String(entity.id));
+    return;
+  }
   // Pending selected cameras intentionally keep their normal unselected 30 m
   // locator dot + beam until the sampled 3D surface anchor resolves. Do not
   // hide or restyle the entity here; normal refreshes should remain visually
@@ -2777,6 +2788,13 @@ function restoreCameraEntityStyle(cam) {
 
 function applyNormalUnselectedCameraVisual(entity, cam) {
   if (!entity || !cam) return;
+  // Once a selected camera has resolved, normal marker styling must not be able
+  // to re-enable its locator beam/dot at the approximate visual height.
+  if (google3DEnabled && selectedCamera && hasResolvedSelectedCameraAnchor() && sameCameraLocation(cam, selectedCamera)) {
+    selectedResolvedBeamSuppressionIds.add(String(entity.id));
+    applyResolvedSelectedCameraEntityIfNeeded(entity);
+    return;
+  }
   const heading = inferHeading(cam);
   const color = getDirColor(heading);
   try {
@@ -3115,8 +3133,8 @@ async function refineSelectedCameraSurfaceAfterTiles(expectedTilesToken = null) 
 
   const refineToken = ++selectedCameraSurfaceRefineToken;
   const cam = selectedCamera;
-  const entity = dataSource.entities.getById(cam.id);
-  if (!entity) return;
+  const initialEntity = dataSource.entities.getById(cam.id);
+  if (!initialEntity) return;
 
   // Professional rule: no guessed 3D frustum. The selected 3D anchor is resolved
   // first. If a bearing exists, the frustum is drawn from that anchor; if no
@@ -3126,7 +3144,7 @@ async function refineSelectedCameraSurfaceAfterTiles(expectedTilesToken = null) 
     ? 'Positioning field of view…'
     : 'Positioning camera location…');
 
-  const h = await resolveSelectedCameraSurfaceHeight(cam, entity, refineToken);
+  const h = await resolveSelectedCameraSurfaceHeight(cam, initialEntity, refineToken);
   if (refineToken !== selectedCameraSurfaceRefineToken) return;
   if (!selectedCamera || selectedCamera.id !== cam.id) return;
   if (expectedTilesToken !== null && expectedTilesToken !== cameraTilesLoadToken) return;
@@ -3137,7 +3155,14 @@ async function refineSelectedCameraSurfaceAfterTiles(expectedTilesToken = null) 
   }
 
   selectedCameraResolvedSurfaceHeight = h;
-  applyResolvedSelectedCameraEntityIfNeeded(entity);
+  // Re-acquire the live entity after the async tile/sample wait. In API mode the
+  // visible camera layer can be rebuilt while the resolver is running; styling
+  // the stale pre-rebuild entity leaves the newly visible normal beam in place.
+  const liveEntity = dataSource && dataSource.entities ? dataSource.entities.getById(cam.id) : initialEntity;
+  if (liveEntity) {
+    selectedCameraEntityId = cam.id;
+    applyResolvedSelectedCameraEntityIfNeeded(liveEntity);
+  }
 
   // Use the resolved sampled surface height as the single authoritative FOV
   // anchor. Do not re-read the entity position here: the selected entity is
