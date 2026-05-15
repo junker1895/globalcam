@@ -11866,5 +11866,238 @@ window.startBillingPortal = startBillingPortal;
 })();
 </script>
 
+
+<script>
+// ==========================================================
+//  PATCH: saved dashboards should be independent of currently loaded cameras
+//  Fixes:
+//  - saved dashboard menu hanging on "Loading saved dashboards…" after tab focus changes
+//  - saved dashboard restore filtering out camera IDs that are not already in cameraMap
+//  - false "Dashboard partly loaded" warnings in API mode
+// ==========================================================
+(function () {
+  'use strict';
+
+  const SAVED_DASHBOARD_LOAD_TIMEOUT_MS = 15000;
+  const SAVED_DASHBOARD_HYDRATE_BATCH = 6;
+
+  function savedDashIdList(state) {
+    const raw = state && Array.isArray(state.cameras) ? state.cameras : [];
+    const out = [];
+    const seen = new Set();
+    raw.forEach(id => {
+      if (id === null || id === undefined || id === '') return;
+      const key = String(id);
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(key);
+    });
+    return out;
+  }
+
+  function savedDashIdExistsInState(ids, id) {
+    if (id === null || id === undefined || id === '') return false;
+    return ids.includes(String(id));
+  }
+
+  function coerceSavedDashboardState(state) {
+    const base = state && typeof state === 'object' ? state : {};
+    const ids = savedDashIdList(base);
+    const layout = ['grid', 'mosaic', 'focus', 'single'].includes(base.layout) ? base.layout : 'grid';
+    const gridSize = ['2x2', '3x3', '4x4'].includes(base.gridSize) ? base.gridSize : '2x2';
+    const focusId = savedDashIdExistsInState(ids, base.focusCameraId) ? String(base.focusCameraId) : (ids[0] || null);
+    const selectedId = savedDashIdExistsInState(ids, base.selectedCameraId) ? String(base.selectedCameraId) : focusId;
+    return {
+      cameras: ids,
+      layout,
+      gridSize,
+      mapVisible: base.mapVisible !== false,
+      focusCameraId: focusId,
+      selectedCameraId: selectedId,
+      mosaic: base.mosaic && typeof base.mosaic === 'object' ? base.mosaic : {},
+      page: Number.isFinite(base.page) ? Math.max(0, Math.floor(base.page)) : 0,
+      pageSize: typeof DASHBOARD_PAGE_SIZE !== 'undefined' ? DASHBOARD_PAGE_SIZE : 16,
+      mediaFit: base.mediaFit === 'cover' ? 'cover' : 'contain',
+      mapTileVisible: !!base.mapTileVisible,
+      gridSpans: base.gridSpans && typeof base.gridSpans === 'object' ? base.gridSpans : {}
+    };
+  }
+
+  // Replace the old normaliser. The old version filtered camera IDs through
+  // cameraMap.has(...), which made cloud dashboards dependent on whatever bbox
+  // or search cameras happened to be loaded before the dashboard was opened.
+  window.normaliseSavedDashboardState = coerceSavedDashboardState;
+  try { normaliseSavedDashboardState = coerceSavedDashboardState; } catch (_) {}
+
+  function waitForSavedDashboardViews(promise, timeoutMs = SAVED_DASHBOARD_LOAD_TIMEOUT_MS) {
+    let timer = null;
+    const timeout = new Promise((_, reject) => {
+      timer = window.setTimeout(() => reject(new Error('Saved dashboard request timed out. Refresh the panel and try again.')), timeoutMs);
+    });
+    return Promise.race([promise, timeout]).finally(() => {
+      if (timer) window.clearTimeout(timer);
+      savedDashboardViewsLoading = false;
+      if (typeof updateDashboardSavedViewButtons === 'function') updateDashboardSavedViewButtons(false);
+    });
+  }
+
+  const originalGetSavedDashboardViews = window.getSavedDashboardViews || (typeof getSavedDashboardViews === 'function' ? getSavedDashboardViews : null);
+  if (typeof originalGetSavedDashboardViews === 'function') {
+    window.getSavedDashboardViews = async function getSavedDashboardViewsResilient(forceRefresh = false) {
+      try {
+        return await waitForSavedDashboardViews(originalGetSavedDashboardViews.call(this, forceRefresh));
+      } catch (err) {
+        console.warn('Saved dashboard list load failed or timed out:', err);
+        savedDashboardViewsLoading = false;
+        if (typeof updateDashboardSavedViewButtons === 'function') updateDashboardSavedViewButtons(false);
+        if (typeof showVigilToast === 'function') {
+          showVigilToast('Could not load saved dashboards', err && err.message ? err.message : String(err), 'err', 5200);
+        } else if (typeof notifyApp === 'function') {
+          notifyApp('Could not load saved dashboards', err && err.message ? err.message : String(err), 'err');
+        }
+        return [];
+      }
+    };
+    try { getSavedDashboardViews = window.getSavedDashboardViews; } catch (_) {}
+  }
+
+  function cameraAlreadyHydrated(id) {
+    if (typeof dashboardCameraById !== 'function') return false;
+    const cam = dashboardCameraById(id);
+    if (!cam) return false;
+    const hasCoords = Number.isFinite(Number(cam.lat)) && Number.isFinite(Number(cam.lng));
+    const hasTitle = !!(cam.location || cam.name);
+    const views = Array.isArray(cam.views) ? cam.views : [];
+    const hasFeed = !!(cam.imageUrl || cam.videoUrl || views.some(v => v && (v.imageUrl || v.videoUrl)));
+    return hasCoords && (hasTitle || hasFeed);
+  }
+
+  function putPlaceholderCamera(id) {
+    if (!id || typeof cameraMap === 'undefined' || cameraMap.has(String(id))) return;
+    const cam = {
+      id: String(id),
+      location: 'Camera ' + String(id),
+      name: 'Camera ' + String(id),
+      lat: null,
+      lng: null,
+      views: [],
+      imageUrl: null,
+      videoUrl: null,
+      _dashboardPlaceholder: true
+    };
+    cameraMap.set(String(id), cam);
+  }
+
+  async function hydrateSavedDashboardIds(ids) {
+    const list = (Array.isArray(ids) ? ids : []).map(String).filter(Boolean);
+    if (!list.length || typeof hydrateCameraDetail !== 'function') return [];
+    const results = [];
+    for (let i = 0; i < list.length; i += SAVED_DASHBOARD_HYDRATE_BATCH) {
+      const batch = list.slice(i, i + SAVED_DASHBOARD_HYDRATE_BATCH);
+      const settled = await Promise.allSettled(batch.map(async id => {
+        if (cameraAlreadyHydrated(id)) return dashboardCameraById(id);
+        return await hydrateCameraDetail(id);
+      }));
+      settled.forEach((res, idx) => {
+        const id = batch[idx];
+        if (res.status === 'fulfilled' && res.value) {
+          results.push(res.value);
+        } else {
+          console.warn('Saved dashboard camera detail unavailable:', id, res.reason);
+          putPlaceholderCamera(id);
+        }
+      });
+    }
+    return results;
+  }
+
+  async function loadSavedDashboardRobust(view) {
+    if (!view) return;
+    const restored = coerceSavedDashboardState(view.state);
+
+    // Install the full saved ID list before hydration/rendering. This makes the
+    // saved dashboard the source of truth, not the currently visible map source.
+    dashboardState = {
+      ...dashboardState,
+      ...restored
+    };
+
+    if (!dashboardState.focusCameraId && dashboardState.cameras.length) dashboardState.focusCameraId = dashboardState.cameras[0];
+    if (!dashboardState.selectedCameraId && dashboardState.focusCameraId) dashboardState.selectedCameraId = dashboardState.focusCameraId;
+
+    const maxPageBefore = Math.max(0, Math.ceil((dashboardState.cameras || []).length / (typeof dashboardPageSize === 'function' ? dashboardPageSize() : 16)) - 1);
+    dashboardState.page = Math.min(dashboardState.page || 0, maxPageBefore);
+
+    if (typeof showVigilToast === 'function') showVigilToast('Loading dashboard cameras…', view.name || 'Saved dashboard', 'info', 2200);
+
+    // Fetch authoritative camera details by ID. This is the important part:
+    // no saved dashboard should require the user to have pre-loaded a bbox,
+    // search result, or uploaded source first.
+    await hydrateSavedDashboardIds(dashboardState.cameras);
+
+    const maxPageAfter = Math.max(0, Math.ceil((dashboardState.cameras || []).length / (typeof dashboardPageSize === 'function' ? dashboardPageSize() : 16)) - 1);
+    dashboardState.page = Math.min(dashboardState.page || 0, maxPageAfter);
+
+    if (typeof saveDashboardState === 'function') saveDashboardState();
+    if (typeof updateDashboardBadge === 'function') updateDashboardBadge();
+    if (typeof switchView === 'function') switchView('dashboard');
+    if (typeof renderDashboard === 'function') renderDashboard();
+    if (typeof updateDashboardMapPresentation === 'function') updateDashboardMapPresentation();
+    window.setTimeout(() => {
+      try {
+        if (typeof dashboardMap !== 'undefined' && dashboardMap) {
+          dashboardMap.invalidateSize();
+          if (dashboardState.mapVisible && typeof fitDashboardMap === 'function') fitDashboardMap();
+        }
+      } catch (err) { console.warn('Saved dashboard map fit failed:', err); }
+    }, 140);
+
+    if (typeof showVigilToast === 'function') showVigilToast('Dashboard loaded', view.name || 'Saved dashboard', 'ok');
+  }
+
+  window.loadSavedDashboardViewObject = loadSavedDashboardRobust;
+  try { loadSavedDashboardViewObject = loadSavedDashboardRobust; } catch (_) {}
+
+  window.loadSavedDashboardView = async function loadSavedDashboardViewRobust() {
+    const view = typeof chooseSavedDashboardView === 'function' ? await chooseSavedDashboardView('Load saved dashboard') : null;
+    if (view) await loadSavedDashboardRobust(view);
+  };
+  try { loadSavedDashboardView = window.loadSavedDashboardView; } catch (_) {}
+
+  // Make the saved-dashboard panel fail visibly instead of hanging forever.
+  const originalRenderPanel = window.renderSavedDashboardsPanel || (typeof renderSavedDashboardsPanel === 'function' ? renderSavedDashboardsPanel : null);
+  window.renderSavedDashboardsPanel = async function renderSavedDashboardsPanelResilient(forceRefresh = false) {
+    const panel = typeof ensureSavedDashboardsPanel === 'function' ? ensureSavedDashboardsPanel() : document.getElementById('savedDashboardsPanel');
+    const list = panel ? panel.querySelector('#savedDashboardsList') : null;
+    if (list && forceRefresh) list.innerHTML = '<div class="saved-dash-empty">Loading saved dashboards…</div>';
+    try {
+      if (typeof originalRenderPanel === 'function') {
+        await waitForSavedDashboardViews(Promise.resolve(originalRenderPanel.call(this, forceRefresh)), SAVED_DASHBOARD_LOAD_TIMEOUT_MS + 2000);
+      }
+    } catch (err) {
+      console.warn('Saved dashboards panel render failed:', err);
+      if (list) {
+        list.innerHTML = '<div class="saved-dash-empty"><strong>Could not load saved dashboards.</strong><br>' +
+          (err && err.message ? escapeHtml(err.message) : 'Refresh the panel and try again.') + '</div>';
+      }
+      savedDashboardViewsLoading = false;
+      if (typeof updateDashboardSavedViewButtons === 'function') updateDashboardSavedViewButtons(false);
+    }
+  };
+  try { renderSavedDashboardsPanel = window.renderSavedDashboardsPanel; } catch (_) {}
+
+  // Chrome tab visibility changes can leave the old panel in a stale loading
+  // state. When the user returns to the tab, revalidate the visible panel.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    const panel = document.getElementById('savedDashboardsPanel');
+    if (!panel || panel.style.display === 'none') return;
+    window.setTimeout(() => {
+      if (typeof renderSavedDashboardsPanel === 'function') renderSavedDashboardsPanel(true).catch(err => console.warn('Saved dashboard refocus refresh failed:', err));
+    }, 250);
+  });
+})();
+</script>
+
 </body>
 </html>
