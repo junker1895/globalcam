@@ -3908,6 +3908,49 @@ function firstNonNullBearingFromList(values) {
   return null;
 }
 
+function cameraValueByPossibleKeys(source, possibleKeys) {
+  if (!source || typeof source !== 'object') return null;
+  const wanted = new Set(possibleKeys.map(k => String(k).toLowerCase()));
+  for (const [key, value] of Object.entries(source)) {
+    if (wanted.has(String(key).toLowerCase())) return value;
+  }
+  return null;
+}
+
+function firstNumericBearingFromCamera(cam) {
+  // Highest-priority resolver: any explicit numeric bearing/heading field wins
+  // over direction text such as "South". Field names are matched
+  // case-insensitively because different camera sources/Supabase RPCs expose
+  // names like bearing, BEARING, directionDegrees, Direction_Degrees, etc.
+  const bearingKeys = [
+    'bearing', 'bearing_deg', 'bearing_degrees', 'bearingdegrees', 'bearingdeg',
+    'azimuth', 'azimuth_deg', 'azimuth_degrees',
+    'heading', 'heading_deg', 'heading_degrees', 'headingdegrees', 'headingdeg',
+    'direction_bearing', 'directionbearing', 'direction_bearing_deg',
+    'camera_bearing', 'camerabearing', 'camera_bearing_deg',
+    'view_bearing', 'viewbearing', 'view_bearing_deg',
+    'direction_degrees', 'directiondegrees', 'direction_deg', 'directiondeg',
+    'direction_angle', 'directionangle', 'angle_degrees', 'angledegrees', 'angledeg'
+  ];
+
+  const candidates = [];
+  const pushFrom = (obj) => {
+    const v = cameraValueByPossibleKeys(obj, bearingKeys);
+    if (v !== null && v !== undefined && v !== '') candidates.push(v);
+  };
+
+  pushFrom(cam);
+  pushFrom(cam.properties);
+  pushFrom(cam.attributes);
+  pushFrom(cam.raw);
+
+  if (Array.isArray(cam.views)) {
+    for (const view of cam.views) pushFrom(view);
+  }
+
+  return firstNonNullBearingFromList(candidates);
+}
+
 function explicitCardinalHeadingFromValue(value) {
   // Plain cardinal text is only an approximate camera direction. It is useful
   // enough to visualise, but it must never look as authoritative as a numeric
@@ -3921,20 +3964,7 @@ function explicitCardinalHeadingFromValue(value) {
 function cameraBearingDetails(cam) {
   if (!cam) return { bearing: null, heading: null, confidence: 'none', source: 'none' };
 
-  const measuredNumericCandidates = [
-    cam.bearing,
-    cam.azimuth,
-    cam.heading,
-    cam.direction_bearing,
-    cam.camera_bearing,
-    cam.viewBearing,
-    cam.view_bearing,
-    cam.bearing_degrees,
-    cam.bearingDeg,
-    cam.angleDegrees,
-  ];
-
-  const measured = firstNonNullBearingFromList(measuredNumericCandidates);
+  const measured = firstNumericBearingFromCamera(cam);
   if (measured !== null) {
     return {
       bearing: measured,
@@ -4330,20 +4360,20 @@ function buildFrustumPolylines(lng, lat, groundHeight, heading, originOverride =
     [nc[0], nc[1]], [nc[1], nc[2]], [nc[2], nc[3]], [nc[3], nc[0]],
   ];
 
-  const col      = Cesium.Color.fromCssColorString(approximate ? '#60a5fa' : '#2563eb').withAlpha(approximate ? 0.46 : 0.92);
-  const fadedCol = Cesium.Color.fromCssColorString(approximate ? '#60a5fa' : '#2563eb').withAlpha(approximate ? 0.18 : (google3DEnabled ? 0.52 : 0.12));
+  const col      = Cesium.Color.fromCssColorString(approximate ? '#0284c7' : '#2563eb').withAlpha(approximate ? 0.86 : 0.92);
+  const fadedCol = Cesium.Color.fromCssColorString(approximate ? '#0284c7' : '#2563eb').withAlpha(approximate ? 0.48 : (google3DEnabled ? 0.52 : 0.12));
   const materialType = approximate ? 'PolylineDash' : 'Color';
   const materialOpts = approximate
-    ? { color: col, dashLength: 14.0, dashPattern: 255 }
+    ? { color: col, dashLength: 10.0, dashPattern: 3855 }
     : { color: col };
   const depthMaterialOpts = approximate
-    ? { color: fadedCol, dashLength: 14.0, dashPattern: 255 }
+    ? { color: fadedCol, dashLength: 10.0, dashPattern: 3855 }
     : { color: fadedCol };
   const coll     = new Cesium.PolylineCollection();
   segs.forEach(([s, e]) => {
     coll.add({
       positions: [s, e],
-      width: approximate ? (google3DEnabled ? 1.8 : 1.2) : (google3DEnabled ? 2.4 : 1.5),
+      width: approximate ? (google3DEnabled ? 3.2 : 2.2) : (google3DEnabled ? 2.4 : 1.5),
       material: Cesium.Material.fromType(materialType, materialOpts),
       depthFailMaterial: Cesium.Material.fromType(materialType, depthMaterialOpts),
     });
@@ -4470,7 +4500,7 @@ async function showFrustum(cam, options = {}) {
   const coll = buildFrustumPolylines(cam.lng, cam.lat, groundHeight, heading, originOverride, {
     approximate,
     fovH: approximate ? Math.max(120, frustumFovH) : frustumFovH,
-    range: approximate ? Math.max(frustumRange * 0.82, 55) : frustumRange,
+    range: approximate ? Math.max(frustumRange, 75) : frustumRange,
   });
   viewer.scene.primitives.add(coll);
   currentFrustumPrimitive = coll;
@@ -4480,7 +4510,7 @@ async function showFrustum(cam, options = {}) {
   const ft = document.getElementById('frustumInfoText');
   fi.style.display = 'block';
   const shownFovH = approximate ? Math.max(120, frustumFovH) : frustumFovH;
-  const shownRange = approximate ? Math.max(frustumRange * 0.82, 55) : frustumRange;
+  const shownRange = approximate ? Math.max(frustumRange, 75) : frustumRange;
   const confidenceLabel = approximate ? 'approx. text-derived direction' : (bearingDetails.confidence === 'parsed' ? 'parsed numeric bearing' : 'numeric bearing');
   ft.textContent   = `${approximate ? 'Approx. ' : ''}${DIR_NAMES[heading]} (${Math.round(bearing)}°)  ·  ${Math.round(shownFovH)}° H × ${Math.round(shownFovH * 9 / 16)}° V  ·  ${Math.round(shownRange)} m range  ·  ${confidenceLabel}`;
 
