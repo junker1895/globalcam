@@ -12099,5 +12099,227 @@ window.startBillingPortal = startBillingPortal;
 })();
 </script>
 
+
+<script>
+// ==========================================================
+// PATCH: saved dashboards panel must never hang on loading
+// ==========================================================
+(function savedDashboardsNeverHangPatch(){
+  'use strict';
+
+  const PANEL_TIMEOUT_MS = 6500;
+
+  function sdEscape(value) {
+    if (typeof escapeHtml === 'function') return escapeHtml(value);
+    return String(value == null ? '' : value).replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+  }
+
+  function sdFormatDate(value) {
+    if (!value) return 'unknown date';
+    try { return new Date(value).toLocaleString(); } catch (_) { return 'unknown date'; }
+  }
+
+  function sdWithTimeout(promise, timeoutMs, label) {
+    let timer = null;
+    const timeout = new Promise((_, reject) => {
+      timer = window.setTimeout(() => reject(new Error(label || 'Request timed out')), timeoutMs);
+    });
+    return Promise.race([promise, timeout]).finally(() => {
+      if (timer) window.clearTimeout(timer);
+    });
+  }
+
+  async function fetchSavedDashboardRowsDirect() {
+    if (!currentUser) {
+      savedDashboardViewsCache = [];
+      return [];
+    }
+    const client = typeof initSupabaseClient === 'function' ? initSupabaseClient() : null;
+    if (!client) throw new Error('Supabase is not available.');
+    const query = client
+      .from('dashboards')
+      .select('id,name,dashboard_json,camera_count,created_at,updated_at')
+      .eq('user_id', currentUser.id)
+      .order('updated_at', { ascending: false });
+    const { data, error } = await sdWithTimeout(query, PANEL_TIMEOUT_MS, 'Saved dashboard request timed out. Try Refresh again.');
+    if (error) throw error;
+    const rows = Array.isArray(data) ? data.map(normaliseCloudDashboardRow) : [];
+    savedDashboardViewsCache = rows;
+    return rows.slice();
+  }
+
+  window.getSavedDashboardViews = async function getSavedDashboardViewsNoHang(forceRefresh = false) {
+    if (!currentUser) {
+      savedDashboardViewsCache = [];
+      return [];
+    }
+    if (!forceRefresh && Array.isArray(savedDashboardViewsCache) && savedDashboardViewsCache.length) {
+      return savedDashboardViewsCache.slice();
+    }
+    savedDashboardViewsLoading = true;
+    if (typeof updateDashboardSavedViewButtons === 'function') updateDashboardSavedViewButtons(true);
+    try {
+      return await fetchSavedDashboardRowsDirect();
+    } catch (err) {
+      console.warn('Saved dashboard direct load failed:', err);
+      // Important: do not wipe a known-good cache just because Chrome/Supabase
+      // temporarily stalled after a tab visibility change.
+      if (Array.isArray(savedDashboardViewsCache) && savedDashboardViewsCache.length) {
+        if (typeof showVigilToast === 'function') showVigilToast('Using cached dashboards', err && err.message ? err.message : 'Could not refresh saved dashboards.', 'warn', 4200);
+        return savedDashboardViewsCache.slice();
+      }
+      if (typeof showVigilToast === 'function') showVigilToast('Could not load saved dashboards', err && err.message ? err.message : String(err), 'err', 5200);
+      return [];
+    } finally {
+      savedDashboardViewsLoading = false;
+      if (typeof updateDashboardSavedViewButtons === 'function') updateDashboardSavedViewButtons(false);
+    }
+  };
+  try { getSavedDashboardViews = window.getSavedDashboardViews; } catch (_) {}
+
+  function renderSavedDashboardRowsInto(list, viewsAll) {
+    const searchInput = document.getElementById('savedDashboardsSearch');
+    const query = ((searchInput && searchInput.value) || '').trim().toLowerCase();
+    const views = query ? viewsAll.filter(v => String(v.name || '').toLowerCase().includes(query)) : viewsAll;
+
+    if (!viewsAll.length) {
+      list.innerHTML = '<div class="saved-dash-empty">No saved dashboards yet.<br>Build a dashboard, then click <strong>Save current</strong>. This stores only dashboard state and camera IDs.</div>';
+      return;
+    }
+    if (!views.length) {
+      list.innerHTML = '<div class="saved-dash-empty">No dashboards match your search.</div>';
+      return;
+    }
+
+    list.innerHTML = views.map(v => {
+      const stateCams = v.state && Array.isArray(v.state.cameras) ? v.state.cameras.length : (v.cameraCount || 0);
+      const layout = v.state && v.state.layout ? v.state.layout : 'grid';
+      const grid = v.state && v.state.gridSize ? ' · ' + v.state.gridSize : '';
+      return `
+        <div class="saved-dash-row2" data-id="${sdEscape(v.id)}">
+          <div style="min-width:0;">
+            <div class="saved-dash-name" title="${sdEscape(v.name)}">${sdEscape(v.name)}</div>
+            <div class="saved-dash-meta">${stateCams} camera${stateCams === 1 ? '' : 's'} · ${sdEscape(layout)}${sdEscape(grid)}<br>Updated ${sdEscape(sdFormatDate(v.updatedAt))} · Created ${sdEscape(sdFormatDate(v.createdAt))}</div>
+          </div>
+          <div class="saved-dash-actions2">
+            <button class="saved-dash-action saved-dash-load" type="button">Load</button>
+            <button class="saved-dash-action saved-dash-overwrite" type="button">Overwrite</button>
+            <button class="saved-dash-action saved-dash-rename" type="button">Rename</button>
+            <button class="saved-dash-action saved-dash-duplicate" type="button">Duplicate</button>
+            <button class="saved-dash-action danger saved-dash-delete" type="button">Delete</button>
+          </div>
+        </div>`;
+    }).join('');
+
+    function viewFromButton(btn) {
+      const row = btn.closest('.saved-dash-row2');
+      const id = row ? row.dataset.id : '';
+      return viewsAll.find(v => String(v.id) === String(id));
+    }
+
+    list.querySelectorAll('.saved-dash-load').forEach(btn => btn.onclick = async () => {
+      const view = viewFromButton(btn); if (!view) return;
+      if (typeof closeSavedDashboardsPanel === 'function') closeSavedDashboardsPanel();
+      await loadSavedDashboardViewObject(view);
+    });
+    list.querySelectorAll('.saved-dash-overwrite').forEach(btn => btn.onclick = async () => {
+      const view = viewFromButton(btn); if (!view) return;
+      const ok = typeof confirmDashboardAction === 'function'
+        ? await confirmDashboardAction('Overwrite saved dashboard?', 'Replace "' + view.name + '" with your current dashboard? ' + (typeof currentDashboardSummary === 'function' ? currentDashboardSummary() : ''), 'Overwrite', false)
+        : window.confirm('Overwrite saved dashboard?');
+      if (!ok) return;
+      try { await overwriteSavedDashboardViewObject(view); await renderSavedDashboardsPanel(true); }
+      catch (err) { if (typeof showVigilToast === 'function') showVigilToast('Could not overwrite dashboard', err && err.message ? err.message : String(err), 'err', 5200); }
+    });
+    list.querySelectorAll('.saved-dash-rename').forEach(btn => btn.onclick = async () => {
+      const view = viewFromButton(btn); if (!view) return;
+      const name = typeof requestDashboardName === 'function'
+        ? await requestDashboardName({ title: 'Rename dashboard', note: 'Choose a new name for this saved dashboard.', value: view.name, okText: 'Rename' })
+        : window.prompt('Rename dashboard', view.name);
+      if (!name || name === view.name) return;
+      try { await renameSavedDashboardViewObject(view, name); await renderSavedDashboardsPanel(true); }
+      catch (err) { if (typeof showVigilToast === 'function') showVigilToast('Could not rename dashboard', err && err.message ? err.message : String(err), 'err', 5200); }
+    });
+    list.querySelectorAll('.saved-dash-duplicate').forEach(btn => btn.onclick = async () => {
+      const view = viewFromButton(btn); if (!view) return;
+      const name = typeof requestDashboardName === 'function'
+        ? await requestDashboardName({ title: 'Duplicate dashboard', note: 'Create a new copy of "' + view.name + '".', value: view.name + ' copy', okText: 'Duplicate' })
+        : window.prompt('Duplicate dashboard', view.name + ' copy');
+      if (!name) return;
+      try { await duplicateSavedDashboardViewObject(view, name); await renderSavedDashboardsPanel(true); }
+      catch (err) { if (typeof showVigilToast === 'function') showVigilToast('Could not duplicate dashboard', err && err.message ? err.message : String(err), 'err', 5200); }
+    });
+    list.querySelectorAll('.saved-dash-delete').forEach(btn => btn.onclick = async () => {
+      const view = viewFromButton(btn); if (!view) return;
+      const ok = typeof confirmDashboardAction === 'function'
+        ? await confirmDashboardAction('Delete saved dashboard?', 'Delete "' + view.name + '"? This cannot be undone.', 'Delete', true)
+        : window.confirm('Delete dashboard?');
+      if (!ok) return;
+      try { await deleteSavedDashboardViewObject(view); await renderSavedDashboardsPanel(true); }
+      catch (err) { if (typeof showVigilToast === 'function') showVigilToast('Could not delete dashboard', err && err.message ? err.message : String(err), 'err', 5200); }
+    });
+  }
+
+  window.renderSavedDashboardsPanel = async function renderSavedDashboardsPanelNoHang(forceRefresh = false) {
+    const panel = typeof ensureSavedDashboardsPanel === 'function' ? ensureSavedDashboardsPanel() : document.getElementById('savedDashboardsPanel');
+    if (!panel) return;
+    const list = panel.querySelector('#savedDashboardsList');
+    const planLine = panel.querySelector('#savedDashboardsPlanLine');
+    const pill = panel.querySelector('#savedDashboardsCountPill');
+    if (!list) return;
+
+    const limits = typeof getPlanLimits === 'function' ? getPlanLimits() : { label: 'Pro', maxSavedDashboards: 999 };
+    if (planLine) planLine.textContent = limits.label + ' plan · saved dashboards: ' + (limits.maxSavedDashboards >= 999 ? 'unlimited' : limits.maxSavedDashboards);
+
+    const cached = Array.isArray(savedDashboardViewsCache) ? savedDashboardViewsCache.slice() : [];
+    if (cached.length) {
+      renderSavedDashboardRowsInto(list, cached);
+      if (pill) pill.textContent = cached.length + '/' + (limits.maxSavedDashboards >= 999 ? '∞' : limits.maxSavedDashboards);
+      // Refresh in the background so tab refocus never strands the panel on a loading message.
+      if (forceRefresh) {
+        fetchSavedDashboardRowsDirect().then(rows => {
+          renderSavedDashboardRowsInto(list, rows);
+          if (pill) pill.textContent = rows.length + '/' + (limits.maxSavedDashboards >= 999 ? '∞' : limits.maxSavedDashboards);
+        }).catch(err => console.warn('Background saved dashboard refresh failed:', err));
+      }
+      return;
+    }
+
+    list.innerHTML = '<div class="saved-dash-empty">Loading saved dashboards…</div>';
+    try {
+      const rows = await window.getSavedDashboardViews(true);
+      renderSavedDashboardRowsInto(list, rows);
+      if (pill) pill.textContent = rows.length + '/' + (limits.maxSavedDashboards >= 999 ? '∞' : limits.maxSavedDashboards);
+    } catch (err) {
+      console.warn('Saved dashboards panel render failed:', err);
+      list.innerHTML = '<div class="saved-dash-empty"><strong>Could not load saved dashboards.</strong><br>' + sdEscape(err && err.message ? err.message : 'Click Refresh to try again.') + '</div>';
+    }
+  };
+  try { renderSavedDashboardsPanel = window.renderSavedDashboardsPanel; } catch (_) {}
+
+  window.openSavedDashboardsPanel = async function openSavedDashboardsPanelNoHang() {
+    if (!currentUser) {
+      if (typeof showUpgradePrompt === 'function') showUpgradePrompt('Log in to use saved dashboards.');
+      return;
+    }
+    const panel = typeof ensureSavedDashboardsPanel === 'function' ? ensureSavedDashboardsPanel() : document.getElementById('savedDashboardsPanel');
+    if (panel) panel.style.display = 'block';
+    await window.renderSavedDashboardsPanel(true);
+  };
+  try { openSavedDashboardsPanel = window.openSavedDashboardsPanel; } catch (_) {}
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    const panel = document.getElementById('savedDashboardsPanel');
+    if (!panel || panel.style.display === 'none') return;
+    const list = panel.querySelector('#savedDashboardsList');
+    if (list && /Loading saved dashboards/i.test(list.textContent || '')) {
+      // Replace an indefinite spinner with cache or a visible retry state quickly.
+      window.setTimeout(() => window.renderSavedDashboardsPanel(false).catch(console.warn), 150);
+    }
+  });
+})();
+</script>
+
 </body>
 </html>
