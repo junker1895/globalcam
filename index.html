@@ -1291,9 +1291,11 @@ body.dashboard-active #searchResults {
 
 #dashboardFeedWall.mode-focus {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 240px;
-  grid-template-rows: repeat(15, minmax(64px, 1fr));
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 24vw, 440px);
+  grid-template-rows: repeat(4, minmax(145px, 1fr));
+  grid-auto-rows: minmax(145px, 1fr);
   gap: 10px;
+  align-items: stretch;
 }
 
 #dashboardFeedWall.mode-single {
@@ -1330,25 +1332,27 @@ body.dashboard-active #searchResults {
   flex-direction: column;
 }
 
-/* Aspect-aware promotion: keep the dashboard as a stable grid, but allow
-   genuinely wide camera feeds to occupy two columns in denser modes. Large
-   2x2 remains four stable cells. This gives wide feeds room without causing
-   overlapping cards or pseudo-masonry slabs. */
-#dashboardFeedWall.grid-3x3 .dash-card.aspect-wide,
-#dashboardFeedWall.grid-3x3 .dash-card.aspect-pano,
-#dashboardFeedWall.grid-4x4 .dash-card.aspect-wide,
-#dashboardFeedWall.grid-4x4 .dash-card.aspect-pano {
-  grid-column: span 2;
+/* Grid mode is a strict cell grid. Camera aspect detection may affect only
+   the media rendering inside a tile. It must not automatically resize tiles,
+   because automatic spans break the 2x2 / 3x3 / 4x4 dashboard contract.
+   Wide/panorama cameras can still be widened intentionally using the per-tile
+   Width control. */
+#dashboardFeedWall.grid-2x2 .dash-card,
+#dashboardFeedWall.grid-3x3 .dash-card,
+#dashboardFeedWall.grid-4x4 .dash-card {
+  grid-column: span 1;
+  grid-row: span 1;
 }
-#dashboardFeedWall.grid-4x4 .dash-card.aspect-portrait {
-  grid-row: span 2;
-}
-#dashboardFeedWall.grid-2x2 .dash-card.aspect-wide,
-#dashboardFeedWall.grid-2x2 .dash-card.aspect-pano,
-#dashboardFeedWall.grid-2x2 .dash-card.aspect-portrait {
-  grid-column: auto;
-  grid-row: auto;
-}
+#dashboardFeedWall.grid-2x2 .dash-card.grid-span-2,
+#dashboardFeedWall.grid-3x3 .dash-card.grid-span-2,
+#dashboardFeedWall.grid-4x4 .dash-card.grid-span-2 { grid-column: span 2; }
+#dashboardFeedWall.grid-3x3 .dash-card.grid-span-3,
+#dashboardFeedWall.grid-4x4 .dash-card.grid-span-3 { grid-column: span 3; }
+#dashboardFeedWall.grid-4x4 .dash-card.grid-span-4 { grid-column: span 4; }
+.dash-span-btn { display: none; }
+#dashboardFeedWall.grid-2x2 .dash-span-btn,
+#dashboardFeedWall.grid-3x3 .dash-span-btn,
+#dashboardFeedWall.grid-4x4 .dash-span-btn { display: inline-flex; }
 
 .dash-card.selected {
   border-color: var(--c-accent);
@@ -1363,12 +1367,13 @@ body.dashboard-active #searchResults {
 
 .mode-focus .dash-card.focus-main {
   grid-column: 1;
-  grid-row: 1 / -1;
+  grid-row: 1 / span 4;
+  min-height: 0;
 }
 
 .mode-focus .dash-card.focus-thumb {
   grid-column: 2;
-  min-height: 70px;
+  min-height: 145px;
 }
 
 .mode-focus .dash-card.focus-thumb .dash-media {
@@ -1376,6 +1381,36 @@ body.dashboard-active #searchResults {
 }
 
 .mode-single .dash-card:not(.single-active) { display: none; }
+.mode-single .dash-card.single-active { min-height: 0; }
+.single-nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 6;
+  width: 46px;
+  height: 68px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.24);
+  background: rgba(15,23,42,0.58);
+  color: #fff;
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+  transition: opacity 140ms ease, background 140ms ease, transform 140ms ease;
+}
+.single-nav-btn.prev { left: 18px; }
+.single-nav-btn.next { right: 18px; }
+.mode-single .dash-card.single-active:hover .single-nav-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+.single-nav-btn:hover {
+  background: rgba(37,99,235,0.86);
+  transform: translateY(-50%) scale(1.04);
+}
 
 .dash-media {
   position: relative;
@@ -1533,25 +1568,33 @@ body.dashboard-active #searchResults {
   display: none;
 }
 
-/* Responsive map handling: when the feed wall would be squeezed, the map
-   becomes an overlay drawer instead of taking layout width. */
-body.dashboard-map-drawer #dashboardShell { position: relative; }
-body.dashboard-map-drawer #dashboardMapResize { display: none !important; }
+/* Dashboard map presentation: the right-side map is part of the layout.
+   It must push/resize the camera wall instead of floating over it. */
+body.dashboard-map-drawer #dashboardShell { position: static; }
+body.dashboard-map-drawer #dashboardMapResize { display: block; }
 body.dashboard-map-drawer #dashboardMapPane:not(.collapsed) {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  bottom: 10px;
-  width: min(460px, calc(100vw - 28px));
-  min-width: 0;
-  max-width: none;
-  z-index: 90;
-  border: 1px solid var(--c-border);
-  border-radius: 10px;
-  box-shadow: 0 18px 60px rgba(15,23,42,0.28);
+  position: relative;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  width: clamp(380px, 30vw, 520px);
+  min-width: 380px;
+  max-width: 520px;
+  z-index: auto;
+  border-radius: 0;
+  box-shadow: none;
   overflow: hidden;
 }
-body.dashboard-map-drawer #dashboardFeedPane { min-width: 0; }
+body.dashboard-map-drawer #dashboardFeedPane { min-width: 520px; }
+
+.dash-map-tile .dash-media { background: var(--c-surface); min-height: 0; }
+.dash-map-tile .dash-meta { position: relative; z-index: 4; cursor: move; }
+.dash-map-tile-map { width: 100%; height: 100%; min-height: 0; cursor: grab; }
+.dash-map-tile-map:active { cursor: grabbing; }
+.dash-map-tile .leaflet-control-attribution { display: none; }
+/* Mosaic resize handles must sit above media/maps/images so they remain usable. */
+.mode-mosaic .dash-card .dash-resize { z-index: 8; display: block; pointer-events: auto; }
+.mode-mosaic .dash-card .dash-actions { z-index: 9; }
 
 #dashboardMapHeader {
   height: 40px;
@@ -1630,6 +1673,11 @@ body.dashboard-map-drawer #dashboardFeedPane { min-width: 0; }
 }
 .dash-small-btn:hover,
 .dash-seg button:hover { background: var(--c-surface2); color: var(--c-text); }
+
+
+.dash-control-hidden {
+  display: none !important;
+}
 
 #dashboardStatus {
   font-size: 11px;
@@ -2443,7 +2491,7 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
           <button id="dashModeFocus" data-mode="focus">Focus</button>
           <button id="dashModeSingle" data-mode="single">Single</button>
         </div>
-        <div class="dash-seg dash-density-seg" aria-label="Dashboard tile size">
+        <div class="dash-seg dash-density-seg dash-control-grid" aria-label="Dashboard tile size">
           <button id="dashGrid2" data-grid="2x2" class="active" title="Large tiles" aria-label="Large tiles">
             <span class="density-icon density-large" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
           </button>
@@ -2455,10 +2503,11 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
           </button>
         </div>
         <button class="dash-small-btn" id="dashRefreshAll">↻ Refresh all</button>
-        <button class="dash-small-btn" id="dashMediaFitToggle" title="Toggle dashboard feed fit/fill">Fit: all</button>
         <button class="dash-small-btn" id="dashAddCamera">+ Add camera</button>
-        <button class="dash-small-btn" id="dashFitMap">Fit map</button>
-        <button class="dash-small-btn" id="dashToggleMap">Hide map</button>
+        <button class="dash-small-btn dash-control-map" id="dashFitMap" title="Frame all dashboard cameras on the 2D map">Map extent</button>
+        <button class="dash-small-btn dash-control-map" id="dashToggleMap">Hide map</button>
+        <button class="dash-small-btn dash-control-mosaic" id="dashAddMapTile" title="Add the 2D map as a draggable Mosaic tile">+ Map tile</button>
+        <button class="dash-small-btn dash-control-mosaic" id="dashFitMosaicCameras" title="Arrange Mosaic camera tiles so they fit cleanly without overlapping">Fit cameras</button>
         <button class="dash-small-btn" id="dashClearAll">Clear</button>
         <button class="dash-small-btn" id="dashSaveView">Save view</button>
         <button class="dash-small-btn" id="dashLoadView" title="Right-click to delete a saved view">Load view</button>
@@ -3888,10 +3937,15 @@ let dashboardState = {
   mosaic: {},
   page: 0,
   pageSize: DASHBOARD_PAGE_SIZE,
-  mediaFit: 'contain'
+  mediaFit: 'contain',
+  mapTileVisible: false,
+  gridSpans: {}
 };
 let dashboardMap = null;
 let dashboardMapLayer = null;
+let dashboardMapTile = null;
+let dashboardMapTileLayer = null;
+let dashboardMapTileResizeTimer = null;
 let dashboardRefreshTimers = new Map();
 let dashboardHls = new Map();
 let dashboardLastRefresh = new Map();
@@ -6860,7 +6914,9 @@ function loadDashboardState() {
       mosaic: saved.mosaic || {},
       page: Number.isFinite(saved.page) ? Math.max(0, saved.page) : 0,
       pageSize: DASHBOARD_PAGE_SIZE,
-      mediaFit: saved.mediaFit === 'cover' ? 'cover' : 'contain'
+      mediaFit: saved.mediaFit === 'cover' ? 'cover' : 'contain',
+      mapTileVisible: !!saved.mapTileVisible,
+      gridSpans: saved.gridSpans && typeof saved.gridSpans === 'object' ? saved.gridSpans : {}
     };
     dashboardState.cameras = enforceDashboardCameraLimit(dashboardState.cameras);
     if (dashboardState.focusCameraId && !dashboardState.cameras.includes(String(dashboardState.focusCameraId))) dashboardState.focusCameraId = dashboardState.cameras[0] || null;
@@ -6878,7 +6934,9 @@ function saveDashboardState() {
     selectedCameraId: dashboardState.selectedCameraId,
     mosaic: dashboardState.mosaic,
     page: dashboardState.page || 0,
-    mediaFit: dashboardState.mediaFit === 'cover' ? 'cover' : 'contain'
+    mediaFit: dashboardState.mediaFit === 'cover' ? 'cover' : 'contain',
+    mapTileVisible: !!dashboardState.mapTileVisible,
+    gridSpans: dashboardState.gridSpans || {}
   }));
 }
 
@@ -6895,6 +6953,56 @@ function dashboardGridDimension() {
   return 2;
 }
 
+
+function dashboardGridSpanForId(id) {
+  const dim = dashboardGridDimension();
+  const spans = dashboardState.gridSpans || {};
+  const raw = Number(spans[String(id)] || 1);
+  if (!Number.isFinite(raw)) return 1;
+  return Math.max(1, Math.min(dim, Math.round(raw)));
+}
+
+function dashboardGridPages() {
+  const ids = dashboardState.cameras.map(String);
+  if (dashboardState.layout !== 'grid') {
+    const size = DASHBOARD_PAGE_SIZE;
+    const pages = [];
+    for (let i = 0; i < ids.length; i += size) pages.push(ids.slice(i, i + size));
+    return pages.length ? pages : [[]];
+  }
+
+  const dim = dashboardGridDimension();
+  const capacity = dim * dim;
+  const pages = [];
+  let page = [];
+  let used = 0;
+  let rowUsed = 0;
+
+  ids.forEach(id => {
+    const span = dashboardGridSpanForId(id);
+    let extra = span;
+    if (rowUsed > 0 && rowUsed + span > dim) {
+      extra += dim - rowUsed;
+    }
+    if (page.length && used + extra > capacity) {
+      pages.push(page);
+      page = [];
+      used = 0;
+      rowUsed = 0;
+      extra = span;
+    }
+    if (rowUsed > 0 && rowUsed + span > dim) {
+      used += dim - rowUsed;
+      rowUsed = 0;
+    }
+    page.push(id);
+    used += span;
+    rowUsed = (rowUsed + span) % dim;
+  });
+  if (page.length || !pages.length) pages.push(page);
+  return pages;
+}
+
 function dashboardPageSize() {
   if (dashboardState.layout === 'grid') {
     const dim = dashboardGridDimension();
@@ -6904,7 +7012,7 @@ function dashboardPageSize() {
 }
 
 function dashboardPageCount() {
-  return Math.max(1, Math.ceil(dashboardState.cameras.length / dashboardPageSize()));
+  return Math.max(1, dashboardGridPages().length);
 }
 
 function clampDashboardPage() {
@@ -6913,14 +7021,15 @@ function clampDashboardPage() {
 
 function dashboardPageCameras() {
   clampDashboardPage();
-  const pageSize = dashboardPageSize();
-  const start = (dashboardState.page || 0) * pageSize;
-  return dashboardCameras().slice(start, start + pageSize);
+  const ids = dashboardGridPages()[dashboardState.page || 0] || [];
+  return ids.map(id => dashboardCameraById(id)).filter(Boolean);
 }
 
 function dashboardPageIndexForId(id) {
-  const idx = dashboardState.cameras.indexOf(String(id));
-  return idx >= 0 ? Math.floor(idx / dashboardPageSize()) : 0;
+  const idKey = String(id);
+  const pages = dashboardGridPages();
+  const pageIdx = pages.findIndex(page => page.includes(idKey));
+  return pageIdx >= 0 ? pageIdx : 0;
 }
 
 function setDashboardPage(page) {
@@ -6984,7 +7093,7 @@ function reorderDashboardCamera(dragId, targetId, insertAfter = false) {
 
 function goToDashboardCameraPage(id) {
   const idx = dashboardState.cameras.indexOf(String(id));
-  if (idx >= 0) dashboardState.page = Math.floor(idx / dashboardPageSize());
+  if (idx >= 0) dashboardState.page = dashboardPageIndexForId(id);
 }
 
 function updateDashboardBadge() {
@@ -7069,6 +7178,7 @@ function addCameraToDashboard(cam, options = {}) {
 
 function removeCameraFromDashboard(id) {
   dashboardState.cameras = dashboardState.cameras.filter(x => x !== id);
+  if (dashboardState.gridSpans) delete dashboardState.gridSpans[String(id)];
   dashboardErrorCounts.delete(String(id));
   dashboardLastRefresh.delete(String(id));
   if (dashboardRefreshTimers.has(String(id))) clearTimeout(dashboardRefreshTimers.get(String(id)));
@@ -7093,6 +7203,7 @@ function clearDashboard() {
   dashboardState.focusCameraId = null;
   dashboardState.selectedCameraId = null;
   dashboardState.mosaic = {};
+  dashboardState.gridSpans = {};
   dashboardState.page = 0;
   saveDashboardState();
   updateDashboardBadge();
@@ -7106,9 +7217,21 @@ function setDashboardLayout(mode) {
 }
 
 function setDashboardGrid(size) {
-  const keepId = dashboardState.selectedCameraId || dashboardPageCameras()[0]?.id || dashboardState.cameras[0] || null;
+  // Changing 2x2 / 3x3 / 4x4 changes the page size. Preserving the selected
+  // camera page can strand the user on a mostly-empty last page when switching
+  // back to 2x2. Treat density changes as a fresh dashboard view and return to
+  // page 1 so the grid fills with the first available cameras.
   dashboardState.gridSize = size;
-  if (keepId != null) dashboardState.page = dashboardPageIndexForId(keepId);
+  // If the user moves from 4x4/3x3 down to a smaller grid, keep manual wide
+  // choices but clamp them to the available number of columns.
+  const dim = dashboardGridDimension();
+  dashboardState.gridSpans = dashboardState.gridSpans || {};
+  Object.keys(dashboardState.gridSpans).forEach(id => {
+    const span = Math.max(1, Math.min(dim, Number(dashboardState.gridSpans[id]) || 1));
+    if (span <= 1) delete dashboardState.gridSpans[id];
+    else dashboardState.gridSpans[id] = span;
+  });
+  dashboardState.page = 0;
   clampDashboardPage();
   saveDashboardState();
   renderDashboard();
@@ -7136,6 +7259,23 @@ function promoteDashboardCamera(id) {
   renderDashboard();
 }
 
+
+function cycleDashboardGridSpan(id) {
+  if (dashboardState.layout !== 'grid') return;
+  const idKey = String(id);
+  const dim = dashboardGridDimension();
+  dashboardState.gridSpans = dashboardState.gridSpans || {};
+  const current = dashboardGridSpanForId(idKey);
+  const next = current >= dim ? 1 : current + 1;
+  if (next === 1) delete dashboardState.gridSpans[idKey];
+  else dashboardState.gridSpans[idKey] = next;
+  dashboardState.selectedCameraId = idKey;
+  dashboardState.page = dashboardPageIndexForId(idKey);
+  saveDashboardState();
+  markDashboardDirty();
+  renderDashboard();
+}
+
 function dashboardDirectionBadge(cam) {
   const details = cameraBearingDetails(cam);
   if (isBearingUsableForFrustum(details)) {
@@ -7153,10 +7293,10 @@ function updateDashboardMediaFitButton() {
   const btn = document.getElementById('dashMediaFitToggle');
   if (!btn) return;
   const fit = dashboardState.mediaFit === 'cover' ? 'cover' : 'contain';
-  btn.textContent = fit === 'cover' ? 'Fill: crop' : 'Fit: all';
+  btn.textContent = fit === 'cover' ? 'Image: fill' : 'Image: fit';
   btn.title = fit === 'cover'
-    ? 'Fill tiles by cropping feeds'
-    : 'Show the full feed with letterboxing where needed';
+    ? 'Fill each tile by cropping the camera feed where needed'
+    : 'Show the full camera feed inside each tile, with letterboxing where needed';
   btn.classList.toggle('active', fit === 'contain');
 }
 
@@ -7202,12 +7342,11 @@ function renderDashboard() {
   if (dashboardState.layout === 'grid') wall.classList.add(`grid-${dashboardState.gridSize}`);
   else wall.classList.add(`mode-${dashboardState.layout}`);
   wall.classList.add(dashboardState.mediaFit === 'cover' ? 'media-fit-fill' : 'media-fit-fit');
-  updateDashboardMediaFitButton();
   ensureDashboardMapResponsive();
 
   const allCams = dashboardCameras();
   clampDashboardPage();
-  const cams = dashboardPageCameras();
+  let cams = dashboardPageCameras();
   dashboardRefreshTimers.forEach(t => clearTimeout(t));
   dashboardRefreshTimers.clear();
   dashboardHls.forEach(h => h.destroy());
@@ -7232,14 +7371,43 @@ function renderDashboard() {
     dashboardState.selectedCameraId = String(dashboardState.focusCameraId);
   }
 
+  if ((dashboardState.layout === 'single' || dashboardState.layout === 'focus') && dashboardState.focusCameraId) {
+    const focusPage = dashboardPageIndexForId(dashboardState.focusCameraId);
+    if ((dashboardState.page || 0) !== focusPage) {
+      dashboardState.page = focusPage;
+      cams = dashboardPageCameras();
+    }
+  }
+
   const selectedOnPage = cams.some(cam => String(cam.id) === String(dashboardState.selectedCameraId));
   if (!selectedOnPage && cams[0]) dashboardState.selectedCameraId = String(cams[0].id);
 
-  wall.innerHTML = cams.map((cam, idx) => dashboardCardHtml(cam, idx)).join('');
+  const cardHtml = cams.map((cam, idx) => dashboardCardHtml(cam, idx));
+  if (dashboardState.layout === 'mosaic' && dashboardState.mapTileVisible) cardHtml.push(dashboardMapTileHtml());
+  wall.innerHTML = cardHtml.join('');
   cams.forEach((cam, idx) => mountDashboardFeed(cam, idx));
+  if (dashboardState.layout === 'mosaic' && dashboardState.mapTileVisible) {
+    setTimeout(() => { initDashboardMapTile(); renderDashboardMapTile(); }, 40);
+  }
   setupMosaicCardHandlers();
   updateDashboardStatus();
   renderDashboardMap();
+  updateDashboardMapPresentation();
+}
+
+function navigateDashboardSingle(delta) {
+  const ids = dashboardState.cameras.map(String);
+  if (!ids.length) return;
+  const current = String(dashboardState.focusCameraId || dashboardState.selectedCameraId || ids[0]);
+  let idx = ids.indexOf(current);
+  if (idx < 0) idx = 0;
+  idx = (idx + delta + ids.length) % ids.length;
+  const nextId = ids[idx];
+  dashboardState.focusCameraId = nextId;
+  dashboardState.selectedCameraId = nextId;
+  dashboardState.page = dashboardPageIndexForId(nextId);
+  saveDashboardState();
+  renderDashboard();
 }
 
 function dashboardCardHtml(cam, idx) {
@@ -7261,20 +7429,30 @@ function dashboardCardHtml(cam, idx) {
     mosaicStyle = `style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;height:${pos.h}%;"`;
   }
 
+  const manualSpan = dashboardState.layout === 'grid' ? dashboardGridSpanForId(cam.id) : 1;
   const cls = [
     'dash-card',
     selected ? 'selected' : '',
+    dashboardState.layout === 'grid' && manualSpan > 1 ? `grid-span-${manualSpan}` : '',
     isFocusMain ? 'focus-main' : '',
     isFocusThumb ? 'focus-thumb' : '',
     isSingle ? 'single-active' : ''
   ].filter(Boolean).join(' ');
 
-  const draggableAttr = dashboardState.layout === 'mosaic' ? '' : 'draggable="true"';
+  const spanButton = dashboardState.layout === 'grid'
+    ? `<button class="dash-mini-btn dash-span-btn" data-action="span" title="Cycle tile width in this grid">Width ${manualSpan}×</button>`
+    : '';
+  const draggableAttr = dashboardState.layout === 'mosaic' || dashboardState.layout === 'single' ? '' : 'draggable="true"';
+  const singleNav = isSingle ? `
+    <button class="single-nav-btn prev" data-action="single-prev" title="Previous camera" aria-label="Previous camera">‹</button>
+    <button class="single-nav-btn next" data-action="single-next" title="Next camera" aria-label="Next camera">›</button>` : '';
 
   return `<article class="${cls}" data-id="${escapeHtml(cam.id)}" ${draggableAttr} ${mosaicStyle}>
+    ${singleNav}
     <div class="dash-actions">
       <button class="dash-mini-btn" data-action="focus" title="Promote">Focus</button>
       <button class="dash-mini-btn" data-action="single" title="Single">Single</button>
+      ${spanButton}
       <button class="dash-mini-btn" data-action="locate" title="Locate on globe">Locate</button>
       <button class="dash-mini-btn" data-action="open" title="Open feed">↗</button>
       <button class="dash-mini-btn" data-action="refresh" title="Refresh">↻</button>
@@ -7297,6 +7475,80 @@ function defaultMosaicPos(idx) {
   const row = Math.floor(idx / 4);
   return { x: 1 + col * 24.5, y: 1 + row * 24, w: 23, h: 22 };
 }
+function dashboardMapTileHtml() {
+  const fallback = defaultMosaicPos(dashboardPageCameras().length);
+  const pos = dashboardState.mosaic.__map__ || fallback;
+  if (!dashboardState.mosaic.__map__) dashboardState.mosaic.__map__ = pos;
+  return `<article class="dash-card dash-map-tile" data-id="__map__" style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;height:${pos.h}%;">
+    <div class="dash-actions">
+      <button class="dash-mini-btn" data-action="fit-map-tile" title="Fit dashboard cameras">Fit</button>
+      <button class="dash-mini-btn" data-action="remove-map-tile" title="Remove map tile">×</button>
+    </div>
+    <div class="dash-media"><div id="dashboardMapTileMap" class="dash-map-tile-map"></div></div>
+    <div class="dash-meta">
+      <div class="dash-title">2D situation map</div>
+      <div class="dash-dir">MAP</div>
+      <div class="dash-sub">Mosaic tile · drag or resize</div>
+    </div>
+    <div class="dash-resize" data-action="resize"></div>
+  </article>`;
+}
+
+function toggleDashboardMapTile(force) {
+  dashboardState.mapTileVisible = typeof force === 'boolean' ? force : !dashboardState.mapTileVisible;
+  if (dashboardState.mapTileVisible) dashboardState.layout = 'mosaic';
+  saveDashboardState();
+  markDashboardDirty();
+  renderDashboard();
+}
+
+function initDashboardMapTile() {
+  const el = document.getElementById('dashboardMapTileMap');
+  if (!el) return;
+
+  // renderDashboard() replaces the Mosaic tile DOM. Leaflet keeps a reference
+  // to the old container, so reusing that map instance leaves the new tile as
+  // a blank/white rectangle. Recreate the Leaflet map whenever the container
+  // element has changed.
+  if (dashboardMapTile && dashboardMapTile.getContainer && dashboardMapTile.getContainer() !== el) {
+    try { dashboardMapTile.remove(); } catch (_) {}
+    dashboardMapTile = null;
+    dashboardMapTileLayer = null;
+  }
+
+  if (!dashboardMapTile) {
+    dashboardMapTile = L.map(el, { zoomControl: false, attributionControl: false }).setView([20, 0], 2);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(dashboardMapTile);
+    dashboardMapTileLayer = L.layerGroup().addTo(dashboardMapTile);
+  }
+
+  setTimeout(() => {
+    if (dashboardMapTile) {
+      dashboardMapTile.invalidateSize(true);
+      renderDashboardMapTile();
+    }
+  }, 60);
+}
+
+function renderDashboardMapTile() {
+  if (!dashboardMapTile || !dashboardMapTileLayer) return;
+  dashboardMapTileLayer.clearLayers();
+  const pts = [];
+  dashboardCameras().forEach(cam => {
+    if (!cam.lat || !cam.lng) return;
+    const heading = inferHeading(cam);
+    const color = heading !== null ? (DIR_COLORS[heading] || '#2563eb') : '#64748b';
+    const marker = dashboardCameraMarker(cam, { selected: String(cam.id) === String(dashboardState.selectedCameraId), color }).addTo(dashboardMapTileLayer);
+    marker.bindTooltip(cameraTitle(cam), { direction: 'top' });
+    marker.on('click', () => setDashboardSelected(cam.id));
+    pts.push([cam.lat, cam.lng]);
+  });
+  setTimeout(() => {
+    dashboardMapTile.invalidateSize(true);
+    if (pts.length) dashboardMapTile.fitBounds(L.latLngBounds(pts).pad(0.22), { animate: false, maxZoom: 14 });
+  }, 50);
+}
+
 
 async function mountDashboardFeed(cam, idx, options = {}) {
   const idKey = String(cam?.id ?? '');
@@ -7360,6 +7612,7 @@ function renderDashboardImageFeed(cam, imageUrl, idx, manual=false) {
   const img = document.createElement('img');
   img.alt = cameraTitle(cam);
   img.loading = 'lazy';
+  img.draggable = false;
   img.onload = () => {
     applyDashboardMediaAspect(idKey, img);
     markDashboardRefresh(idKey, true);
@@ -7423,6 +7676,7 @@ function updateDashboardStatus() {
   const visible = dashboardPageCameras().length;
   const last = [...dashboardLastRefresh.values()].sort((a, b) => b - a)[0];
   renderDashboardPagination();
+  updateDashboardToolbarVisibility();
   el.textContent = `${total} cameras · page ${page}/${pageCount} · ${visible} visible · ${last ? 'last refresh ' + new Date(last).toLocaleTimeString() : 'ready'}`;
 }
 
@@ -7444,21 +7698,86 @@ function locateDashboardCamera(cam) {
   selectCamera(cam);
 }
 
+function fitMosaicCameraTiles() {
+  if (dashboardState.layout !== 'mosaic') return;
+  const cams = dashboardPageCameras();
+  const layoutItems = cams.map(cam => ({ id: String(cam.id), type: 'camera' }));
+  if (dashboardState.mapTileVisible) layoutItems.push({ id: '__map__', type: 'map' });
+  if (!layoutItems.length) return;
+
+  const wall = document.getElementById('dashboardFeedWall');
+  const rect = wall ? wall.getBoundingClientRect() : { width: 16, height: 9 };
+  const usableRatio = Math.max(0.65, Math.min(2.4, (rect.width || 16) / (rect.height || 9)));
+  const n = layoutItems.length;
+  let cols = Math.ceil(Math.sqrt(n * usableRatio));
+  cols = Math.max(1, Math.min(n, cols));
+
+  // Arrange every Mosaic tile, including the map tile, through the same
+  // non-overlapping solver so automatic layout behaves consistently.
+  const candidates = [];
+  for (const c of new Set([cols - 1, cols, cols + 1].filter(v => v >= 1 && v <= n))) {
+    const r = Math.ceil(n / c);
+    const gap = 1.2;
+    const w = (100 - gap * (c + 1)) / c;
+    const h = (100 - gap * (r + 1)) / r;
+    const aspectPenalty = Math.abs((w / Math.max(h, 1)) - 1.55) * 3;
+    candidates.push({ cols: c, rows: r, gap, w, h, score: Math.min(w, h) - aspectPenalty });
+  }
+  const best = candidates.sort((a, b) => b.score - a.score)[0] || { cols, rows: Math.ceil(n / cols), gap: 1.2 };
+  cols = best.cols;
+  const rows = best.rows;
+  const gap = best.gap;
+  const cellW = (100 - gap * (cols + 1)) / cols;
+  const cellH = (100 - gap * (rows + 1)) / rows;
+
+  layoutItems.forEach((item, idx) => {
+    const col = idx % cols;
+    const row = Math.floor(idx / cols);
+    const pos = {
+      x: gap + col * (cellW + gap),
+      y: gap + row * (cellH + gap),
+      w: cellW,
+      h: cellH
+    };
+    dashboardState.mosaic[item.id] = pos;
+    const card = document.querySelector(`.dash-card[data-id="${CSS.escape(item.id)}"]`);
+    if (card) {
+      card.style.left = pos.x + '%';
+      card.style.top = pos.y + '%';
+      card.style.width = pos.w + '%';
+      card.style.height = pos.h + '%';
+    }
+  });
+
+  saveDashboardState();
+  markDashboardDirty();
+  if (dashboardState.mapTileVisible && dashboardMapTile) {
+    setTimeout(() => { dashboardMapTile.invalidateSize(); renderDashboardMapTile(); }, 80);
+  }
+}
+
 function setupMosaicCardHandlers() {
   document.querySelectorAll('.dash-card').forEach(card => {
     const id = card.dataset.id;
-    const cam = dashboardCameraById(id);
+    const isMapTile = id === '__map__';
+    const cam = isMapTile ? null : dashboardCameraById(id);
     card.addEventListener('click', e => {
       const actionEl = e.target.closest('[data-action]');
-      if (actionEl) return;
+      if (actionEl || isMapTile) return;
       setDashboardSelected(id);
     });
     card.querySelectorAll('[data-action]').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
         const action = btn.dataset.action;
+        if (action === 'remove-map-tile') { dashboardState.mapTileVisible = false; saveDashboardState(); markDashboardDirty(); renderDashboard(); return; }
+        if (action === 'fit-map-tile') { renderDashboardMapTile(); return; }
+        if (isMapTile) return;
         if (action === 'focus') promoteDashboardCamera(id);
+        if (action === 'span') { cycleDashboardGridSpan(id); return; }
         if (action === 'single') { dashboardState.focusCameraId = id; dashboardState.selectedCameraId = id; dashboardState.layout = 'single'; saveDashboardState(); renderDashboard(); }
+        if (action === 'single-prev') navigateDashboardSingle(-1);
+        if (action === 'single-next') navigateDashboardSingle(1);
         if (action === 'locate') locateDashboardCamera(cam);
         if (action === 'open') openDashboardFeed(cam);
         if (action === 'refresh') mountDashboardFeed(cam, dashboardState.cameras.indexOf(id));
@@ -7507,10 +7826,17 @@ function setupMosaicCardHandlers() {
     if (dashboardState.layout === 'mosaic') {
       card.addEventListener('mousedown', e => {
         if (e.button !== 0) return;
+        const resizing = !!e.target.closest('.dash-resize');
+        const actionEl = e.target.closest('[data-action]');
+        const mapSurface = isMapTile && e.target.closest('.dash-map-tile-map, .leaflet-container, .leaflet-pane, .leaflet-control-container');
+        // Map tiles behave like camera tiles for frame drag/resize, but the
+        // live Leaflet map itself must keep its own pan/zoom interactions.
+        // Resize handles also carry data-action="resize". Do not treat that
+        // as a normal action button, otherwise manual Mosaic resizing never starts.
+        if ((actionEl && !resizing) || (mapSurface && !resizing)) return;
         const wall = document.getElementById('dashboardFeedWall');
         const wr = wall.getBoundingClientRect();
         const cr = card.getBoundingClientRect();
-        const resizing = !!e.target.closest('.dash-resize');
         dashboardMosaicDrag = {
           id, resizing, wall,
           startX: e.clientX, startY: e.clientY,
@@ -7555,15 +7881,26 @@ document.addEventListener('mousemove', e => {
   const dy = ((e.clientY - d.startY) / wr.height) * 100;
   let pos;
   if (d.resizing) {
-    pos = { x: d.x, y: d.y, w: Math.max(14, Math.min(70, d.w + dx)), h: Math.max(14, Math.min(70, d.h + dy)) };
+    // Use the full Mosaic canvas, not a conservative 96% clamp. This allows
+    // tiles to be resized close to the right/bottom edge while still keeping
+    // them inside the dashboard wall.
+    const maxW = Math.max(14, 100 - d.x);
+    const maxH = Math.max(14, 100 - d.y);
+    pos = { x: d.x, y: d.y, w: Math.max(14, Math.min(maxW, d.w + dx)), h: Math.max(14, Math.min(maxH, d.h + dy)) };
   } else {
-    pos = { x: Math.max(0, Math.min(96 - d.w, d.x + dx)), y: Math.max(0, Math.min(96 - d.h, d.y + dy)), w: d.w, h: d.h };
+    // Allow dragging across the full available dashboard wall. The previous
+    // 96% limit made it feel like invisible margins blocked placement.
+    pos = { x: Math.max(0, Math.min(100 - d.w, d.x + dx)), y: Math.max(0, Math.min(100 - d.h, d.y + dy)), w: d.w, h: d.h };
   }
   dashboardState.mosaic[d.id] = pos;
   const card = document.querySelector(`.dash-card[data-id="${CSS.escape(String(d.id))}"]`);
   if (card) {
     card.style.left = pos.x + '%'; card.style.top = pos.y + '%';
     card.style.width = pos.w + '%'; card.style.height = pos.h + '%';
+  }
+  if (String(d.id) === '__map__' && dashboardMapTile) {
+    clearTimeout(dashboardMapTileResizeTimer);
+    dashboardMapTileResizeTimer = setTimeout(() => dashboardMapTile.invalidateSize(), 40);
   }
 });
 
@@ -7572,6 +7909,7 @@ document.addEventListener('mouseup', () => {
     dashboardMosaicDrag = null;
     document.body.style.userSelect = '';
     saveDashboardState();
+    if (dashboardState.layout === 'mosaic' && dashboardState.mapTileVisible) setTimeout(() => { if (dashboardMapTile) { dashboardMapTile.invalidateSize(); renderDashboardMapTile(); } }, 60);
   }
 });
 
@@ -7680,7 +8018,7 @@ function dashboardCandidateCamerasForMap() {
 }
 
 function renderDashboardMap() {
-  if (!dashboardMap || !dashboardMapLayer) return;
+  if (!dashboardMap || !dashboardMapLayer) { renderDashboardMapTile(); return; }
   dashboardMapLayer.clearLayers();
   // Uploaded layer graphics live outside the camera layer, so rebuild them
   // after the camera layer has been cleared/redrawn.
@@ -7736,6 +8074,8 @@ function renderDashboardMap() {
     if (savedMatches.length) highlightAreaMatches();
   }
 
+  renderDashboardMapTile();
+
   if (bounds.length && activeView === 'dashboard' && dashboardState._fitPending) {
     const b = L.latLngBounds(bounds);
     dashboardMap.fitBounds(b.pad(0.24), { animate: false, maxZoom: 15 });
@@ -7744,6 +8084,11 @@ function renderDashboardMap() {
 }
 
 function fitDashboardMap() {
+  if (!dashboardState.mapVisible) {
+    dashboardState.mapVisible = true;
+    updateDashboardMapPresentation();
+    initDashboardMap();
+  }
   if (!dashboardMap) return;
   const pts = [];
   dashboardCameras().forEach(cam => {
@@ -7751,13 +8096,48 @@ function fitDashboardMap() {
     const cone = dashboardFrustumLatLngs(cam);
     if (cone) cone.forEach(p => pts.push(p));
   });
-  if (pts.length) dashboardMap.fitBounds(L.latLngBounds(pts).pad(0.24), { maxZoom: 15 });
+  setTimeout(() => {
+    dashboardMap.invalidateSize();
+    if (pts.length) dashboardMap.fitBounds(L.latLngBounds(pts).pad(0.24), { maxZoom: 15 });
+  }, 40);
 }
 
 function dashboardShouldUseMapDrawer() {
-  const shell = document.getElementById('dashboardShell');
-  const width = shell ? shell.getBoundingClientRect().width : window.innerWidth;
-  return (dashboardState.layout === 'grid' && dashboardState.gridSize === '4x4') || width < 1240;
+  return false;
+}
+
+
+function updateDashboardToolbarVisibility() {
+  const layout = dashboardState.layout || 'grid';
+  const setHidden = (selector, hidden) => {
+    document.querySelectorAll(selector).forEach(el => el.classList.toggle('dash-control-hidden', !!hidden));
+  };
+
+  // Density controls are only meaningful in the true grid dashboard.
+  setHidden('.dash-control-grid', layout !== 'grid');
+
+  // Mosaic-only tools: map tile and automatic camera tile arrangement.
+  setHidden('.dash-control-mosaic', layout !== 'mosaic');
+
+  // Map extent should remain available in every dashboard view. It frames all
+  // dashboard cameras on the right-side map and, if required, opens the map first.
+  const fitMap = document.getElementById('dashFitMap');
+  if (fitMap) {
+    fitMap.textContent = 'Map extent';
+    fitMap.title = 'Show the right-side map and frame all dashboard cameras';
+    fitMap.classList.remove('dash-control-hidden');
+  }
+
+  // The right-side map toggle is valid in every view now that Map extent is
+  // available globally. It still pushes/resizes the feed area rather than floating.
+  const toggleMap = document.getElementById('dashToggleMap');
+  if (toggleMap) toggleMap.classList.remove('dash-control-hidden');
+
+  const addMapTile = document.getElementById('dashAddMapTile');
+  if (addMapTile) addMapTile.classList.toggle('dash-control-hidden', layout !== 'mosaic');
+
+  const fitMosaic = document.getElementById('dashFitMosaicCameras');
+  if (fitMosaic) fitMosaic.classList.toggle('dash-control-hidden', layout !== 'mosaic');
 }
 
 function updateDashboardMapPresentation() {
@@ -7765,6 +8145,7 @@ function updateDashboardMapPresentation() {
   const resize = document.getElementById('dashboardMapResize');
   const toggle = document.getElementById('dashToggleMap');
   const collapse = document.getElementById('dashMapCollapseHeader');
+  const addMapTile = document.getElementById('dashAddMapTile');
   if (!pane || !resize) return;
 
   const drawer = dashboardShouldUseMapDrawer();
@@ -7772,8 +8153,13 @@ function updateDashboardMapPresentation() {
   pane.classList.toggle('collapsed', !dashboardState.mapVisible);
   resize.classList.toggle('collapsed', !dashboardState.mapVisible || drawer);
 
-  if (toggle) toggle.textContent = dashboardState.mapVisible ? (drawer ? 'Close map' : 'Hide map') : 'Show map';
-  if (collapse) collapse.textContent = drawer ? 'Close' : 'Collapse';
+  if (toggle) toggle.textContent = dashboardState.mapVisible ? 'Hide map' : 'Show map';
+  if (collapse) collapse.textContent = 'Collapse';
+  if (addMapTile) {
+    addMapTile.textContent = dashboardState.mapTileVisible ? 'Map tile added' : '+ Map tile';
+    addMapTile.disabled = dashboardState.layout !== 'mosaic' || dashboardState.mapTileVisible;
+  }
+  updateDashboardToolbarVisibility();
 
   if (dashboardMap && dashboardState.mapVisible) {
     setTimeout(() => dashboardMap.invalidateSize(), 30);
@@ -7781,12 +8167,6 @@ function updateDashboardMapPresentation() {
 }
 
 function ensureDashboardMapResponsive() {
-  // 4×4 is too dense for side-by-side. Keep the feeds usable and let the
-  // user open the map as an overlay drawer when needed.
-  if (dashboardState.layout === 'grid' && dashboardState.gridSize === '4x4' && dashboardState.mapVisible) {
-    dashboardState.mapVisible = false;
-    saveDashboardState();
-  }
   updateDashboardMapPresentation();
 }
 
@@ -8623,7 +9003,8 @@ function normaliseSavedDashboardState(state) {
     mosaic: base.mosaic && typeof base.mosaic === 'object' ? base.mosaic : {},
     page: Number.isFinite(base.page) ? Math.max(0, Math.floor(base.page)) : 0,
     pageSize: DASHBOARD_PAGE_SIZE,
-    mediaFit: base.mediaFit === 'cover' ? 'cover' : 'contain'
+    mediaFit: base.mediaFit === 'cover' ? 'cover' : 'contain',
+    mapTileVisible: !!base.mapTileVisible
   };
 }
 
@@ -8638,7 +9019,8 @@ function dashboardStateForPreset() {
     mosaic: dashboardState.mosaic || {},
     page: dashboardState.page || 0,
     pageSize: DASHBOARD_PAGE_SIZE,
-    mediaFit: dashboardState.mediaFit === 'cover' ? 'cover' : 'contain'
+    mediaFit: dashboardState.mediaFit === 'cover' ? 'cover' : 'contain',
+    mapTileVisible: !!dashboardState.mapTileVisible
   };
 }
 
@@ -9352,6 +9734,10 @@ window.startBillingPortal = startBillingPortal;
   document.getElementById('dashFitMap').onclick = fitDashboardMap;
   document.getElementById('dashMapFitHeader').onclick = fitDashboardMap;
   document.getElementById('dashToggleMap').onclick = () => toggleDashboardMap();
+  const dashAddMapTile = document.getElementById('dashAddMapTile');
+  if (dashAddMapTile) dashAddMapTile.onclick = () => toggleDashboardMapTile(true);
+  const dashFitMosaicCameras = document.getElementById('dashFitMosaicCameras');
+  if (dashFitMosaicCameras) dashFitMosaicCameras.onclick = fitMosaicCameraTiles;
   document.getElementById('dashMapCollapseHeader').onclick = () => toggleDashboardMap(false);
   document.getElementById('dashClearAll').onclick = clearDashboard;
   document.getElementById('dashSaveView').onclick = saveCurrentDashboardView;
@@ -10325,7 +10711,7 @@ window.startBillingPortal = startBillingPortal;
 
     document.addEventListener('click', function autosaveMutationClickListener(e) {
       const target = e.target && e.target.closest ? e.target.closest(
-        '#dashRefreshAll,#dashFitAll,#dashFitMap,#dashToggleMap,#dashMediaFitToggle,.dash-mini-btn,.dash-result button,.dashboard-map-popup button,.dash-seg button,.dash-small-btn,.area-btn'
+        '#dashRefreshAll,#dashFitMap,#dashToggleMap,#dashFitMosaicCameras,.dash-mini-btn,.dash-result button,.dashboard-map-popup button,.dash-seg button,.dash-small-btn,.area-btn'
       ) : null;
       if (!target) return;
       window.setTimeout(() => markDashboardDirty('dashboard_click'), 220);
