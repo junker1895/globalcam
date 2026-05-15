@@ -3900,15 +3900,28 @@ function snapHeadingForDisplay(deg) {
   return n === null ? null : (Math.round(n / 45) * 45 + 360) % 360;
 }
 
-function trustedCameraBearing(cam) {
-  if (!cam) return null;
+function firstNonNullBearingFromList(values) {
+  for (const v of values) {
+    const n = bearingFromCompositeValue(v);
+    if (n !== null) return n;
+  }
+  return null;
+}
 
-  // Use a single authoritative FOV bearing pipeline. Numeric fields are first,
-  // including composite numeric strings from data providers. Only if there is
-  // no numeric orientation do we fall back to explicit camera/view direction
-  // labels. This prevents the resolver from placing the selected dot correctly
-  // while the frustum silently exits because bearing was parsed as null.
-  const numericCandidates = [
+function explicitCardinalHeadingFromValue(value) {
+  // Plain cardinal text is only an approximate camera direction. It is useful
+  // enough to visualise, but it must never look as authoritative as a numeric
+  // bearing from the source data.
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  if (isBoundDirectionText(raw)) return null;
+  return directionValueToHeading(raw, { allowBound: false });
+}
+
+function cameraBearingDetails(cam) {
+  if (!cam) return { bearing: null, heading: null, confidence: 'none', source: 'none' };
+
+  const measuredNumericCandidates = [
     cam.bearing,
     cam.azimuth,
     cam.heading,
@@ -3920,9 +3933,15 @@ function trustedCameraBearing(cam) {
     cam.bearingDeg,
     cam.angleDegrees,
   ];
-  for (const v of numericCandidates) {
-    const n = bearingFromCompositeValue(v);
-    if (n !== null) return n;
+
+  const measured = firstNonNullBearingFromList(measuredNumericCandidates);
+  if (measured !== null) {
+    return {
+      bearing: measured,
+      heading: snapHeadingForDisplay(measured),
+      confidence: 'measured',
+      source: 'numeric'
+    };
   }
 
   const textCandidates = [
@@ -3934,23 +3953,80 @@ function trustedCameraBearing(cam) {
     cam.name,
     cam.location,
   ];
+
+  for (const v of textCandidates) {
+    const parsed = bearingFromCompositeValue(v);
+    if (parsed !== null) {
+      return {
+        bearing: parsed,
+        heading: snapHeadingForDisplay(parsed),
+        confidence: 'parsed',
+        source: 'numeric-text'
+      };
+    }
+  }
+
   for (const v of textCandidates) {
     const explicit = headingFromText(v);
-    if (explicit !== null) return explicit;
-    const cardinal = directionValueToHeading(v, { allowBound: true });
-    if (cardinal !== null) return cardinal;
+    if (explicit !== null) {
+      return {
+        bearing: explicit,
+        heading: snapHeadingForDisplay(explicit),
+        confidence: 'cardinal',
+        source: 'explicit-cardinal-text'
+      };
+    }
+
+    const cardinal = explicitCardinalHeadingFromValue(v);
+    if (cardinal !== null) {
+      return {
+        bearing: cardinal,
+        heading: snapHeadingForDisplay(cardinal),
+        confidence: 'cardinal',
+        source: 'cardinal-text'
+      };
+    }
+
+    if (isBoundDirectionText(v)) {
+      return {
+        bearing: null,
+        heading: null,
+        confidence: 'road',
+        source: 'road-direction-label'
+      };
+    }
   }
 
   const feed = getCameraFeed(cam);
   const fromFeed = headingFromFeedUrl(feed.imageUrl || feed.videoUrl || cam.imageUrl || cam.videoUrl || '');
-  if (fromFeed !== null) return fromFeed;
+  if (fromFeed !== null) {
+    return {
+      bearing: fromFeed,
+      heading: snapHeadingForDisplay(fromFeed),
+      confidence: 'cardinal',
+      source: 'feed-url-text'
+    };
+  }
 
-  return null;
+  return { bearing: null, heading: null, confidence: 'none', source: 'none' };
+}
+
+function isBearingUsableForFrustum(details) {
+  return !!details && details.bearing !== null && details.confidence !== 'road' && details.confidence !== 'none';
+}
+
+function isApproximateBearing(details) {
+  return !!details && details.confidence === 'cardinal';
+}
+
+function trustedCameraBearing(cam) {
+  const details = cameraBearingDetails(cam);
+  return isBearingUsableForFrustum(details) ? details.bearing : null;
 }
 
 function trustedCameraHeading(cam) {
-  const bearing = trustedCameraBearing(cam);
-  return bearing === null ? null : snapHeadingForDisplay(bearing);
+  const details = cameraBearingDetails(cam);
+  return isBearingUsableForFrustum(details) ? details.heading : null;
 }
 
 function directionValueToHeading(value, { allowBound = false } = {}) {
@@ -4018,8 +4094,13 @@ function cleanDirectionLabel(value) {
 
 function cameraDirectionLabel(cam) {
   if (!cam) return '';
-  const trusted = trustedCameraHeading(cam);
-  if (trusted !== null) return `${DIR_NAMES[trusted]} · ${Math.round(trustedCameraBearing(cam))}°`;
+  const details = cameraBearingDetails(cam);
+  if (details.bearing !== null && details.heading !== null) {
+    if (details.confidence === 'cardinal') {
+      return `Approx. ${DIR_NAMES[details.heading]} · text-derived`;
+    }
+    return `${DIR_NAMES[details.heading]} · ${Math.round(details.bearing)}°`;
+  }
 
   const candidates = [cam.direction, cam.viewLabel, cam.angleName].filter(Boolean);
   for (const c of candidates) {
@@ -4033,10 +4114,8 @@ function headingFromText(text) {
   const t = String(text || '').toUpperCase().replace(/[()_]/g, ' ');
   if (!t.trim()) return null;
 
-  // Display-only helper. It intentionally does not treat NB/SB/EB/WB as
-  // trustworthy camera bearings. Those are road/carraigeway labels in many
-  // feeds and are now rendered as text badges only unless a numeric bearing is
-  // present.
+  // Only explicit camera-facing language is allowed here. Road/carriageway
+  // words such as NB/SB/EB/WB are intentionally excluded from frustum bearings.
   const explicitPatterns = [
     [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(NORTH\s*EAST|NORTHEAST|NE)\b/, 45],
     [/\b(?:FACING|LOOKING|LOOKS|VIEW(?:ING)?|TOWARDS?|POINT(?:ING)?|CAMERA)\s+(SOUTH\s*EAST|SOUTHEAST|SE)\b/, 135],
@@ -4050,7 +4129,7 @@ function headingFromText(text) {
   for (const [rx, deg] of explicitPatterns) if (rx.test(t)) return deg;
 
   const suffix = t.match(/(?:^|[-–—/|,\[]\s*)(NORTH\s*EAST|NORTHEAST|NE|SOUTH\s*EAST|SOUTHEAST|SE|SOUTH\s*WEST|SOUTHWEST|SW|NORTH\s*WEST|NORTHWEST|NW|NORTH|SOUTH|EAST|WEST|N|S|E|W)\s*(?:$|\]|[-–—/|,])/);
-  if (suffix) return directionValueToHeading(suffix[1], { allowBound: false });
+  if (suffix && !isBoundDirectionText(suffix[1])) return directionValueToHeading(suffix[1], { allowBound: false });
 
   return null;
 }
@@ -4064,10 +4143,10 @@ function headingFromFeedUrl(url) {
 }
 
 function inferHeading(cam) {
-  // Backwards-compatible name used throughout the app. It now returns only a
-  // trusted numeric orientation derived from bearing/azimuth/heading columns.
-  // It deliberately ignores NB/SB/EB/WB and other "bound" direction labels.
-  return trustedCameraHeading(cam);
+  // Backwards-compatible name used throughout the app. It now returns measured,
+  // parsed, or approximate-cardinal camera headings, but never road-bound labels.
+  const details = cameraBearingDetails(cam);
+  return isBearingUsableForFrustum(details) ? details.heading : null;
 }
 
 function displayHeadingFromText(cam) {
@@ -4179,13 +4258,15 @@ function sampleGroundHeight(lng, lat) {
   return 0;
 }
 
-function buildFrustumPolylines(lng, lat, groundHeight, heading, originOverride = null) {
+function buildFrustumPolylines(lng, lat, groundHeight, heading, originOverride = null, style = {}) {
   const POLE   = google3DEnabled ? 3.5 : 5.5;
-  const FAR    = frustumRange;
+  const approximate = !!style.approximate;
+  const FAR    = Number.isFinite(Number(style.range)) ? Number(style.range) : (approximate ? Math.max(frustumRange * 0.82, 55) : frustumRange);
   const NEAR   = 2;
   const TILT   = -frustumTilt;
-  const HFOV_H = frustumFovH / 2;
-  const HFOV_V = (frustumFovH / 2) * (9 / 16);
+  const fovH   = Number.isFinite(Number(style.fovH)) ? Number(style.fovH) : (approximate ? Math.max(120, frustumFovH) : frustumFovH);
+  const HFOV_H = fovH / 2;
+  const HFOV_V = (fovH / 2) * (9 / 16);
 
   const originHeight = google3DEnabled
     ? selectedCameraHeight(groundHeight, CAMERA_3D_FRUSTUM_LIFT_M)
@@ -4249,15 +4330,22 @@ function buildFrustumPolylines(lng, lat, groundHeight, heading, originOverride =
     [nc[0], nc[1]], [nc[1], nc[2]], [nc[2], nc[3]], [nc[3], nc[0]],
   ];
 
-  const col      = Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.92);
-  const fadedCol = Cesium.Color.fromCssColorString('#2563eb').withAlpha(google3DEnabled ? 0.52 : 0.12);
+  const col      = Cesium.Color.fromCssColorString(approximate ? '#60a5fa' : '#2563eb').withAlpha(approximate ? 0.46 : 0.92);
+  const fadedCol = Cesium.Color.fromCssColorString(approximate ? '#60a5fa' : '#2563eb').withAlpha(approximate ? 0.18 : (google3DEnabled ? 0.52 : 0.12));
+  const materialType = approximate ? 'PolylineDash' : 'Color';
+  const materialOpts = approximate
+    ? { color: col, dashLength: 14.0, dashPattern: 255 }
+    : { color: col };
+  const depthMaterialOpts = approximate
+    ? { color: fadedCol, dashLength: 14.0, dashPattern: 255 }
+    : { color: fadedCol };
   const coll     = new Cesium.PolylineCollection();
   segs.forEach(([s, e]) => {
     coll.add({
       positions: [s, e],
-      width: google3DEnabled ? 2.4 : 1.5,
-      material: Cesium.Material.fromType('Color', { color: col }),
-      depthFailMaterial: Cesium.Material.fromType('Color', { color: fadedCol }),
+      width: approximate ? (google3DEnabled ? 1.8 : 1.2) : (google3DEnabled ? 2.4 : 1.5),
+      material: Cesium.Material.fromType(materialType, materialOpts),
+      depthFailMaterial: Cesium.Material.fromType(materialType, depthMaterialOpts),
     });
   });
   return coll;
@@ -4354,9 +4442,11 @@ async function showFrustum(cam, options = {}) {
   removeFrustum();
   if (!frustumsEnabled) return;
 
-  const bearing = trustedCameraBearing(cam);
-  const heading = bearing === null ? null : snapHeadingForDisplay(bearing);
+  const bearingDetails = cameraBearingDetails(cam);
+  const bearing = isBearingUsableForFrustum(bearingDetails) ? bearingDetails.bearing : null;
+  const heading = bearing === null ? null : bearingDetails.heading;
   if (heading === null) return;
+  const approximate = isApproximateBearing(bearingDetails);
 
   let groundHeight;
   if (google3DEnabled) {
@@ -4377,7 +4467,11 @@ async function showFrustum(cam, options = {}) {
     originOverride = options.originCartesian;
   }
 
-  const coll = buildFrustumPolylines(cam.lng, cam.lat, groundHeight, heading, originOverride);
+  const coll = buildFrustumPolylines(cam.lng, cam.lat, groundHeight, heading, originOverride, {
+    approximate,
+    fovH: approximate ? Math.max(120, frustumFovH) : frustumFovH,
+    range: approximate ? Math.max(frustumRange * 0.82, 55) : frustumRange,
+  });
   viewer.scene.primitives.add(coll);
   currentFrustumPrimitive = coll;
 
@@ -4385,11 +4479,14 @@ async function showFrustum(cam, options = {}) {
   const fi = document.getElementById('frustumInfo');
   const ft = document.getElementById('frustumInfoText');
   fi.style.display = 'block';
-  ft.textContent   = `${DIR_NAMES[heading]} (${Math.round(bearing)}°)  ·  ${Math.round(frustumFovH)}° H × ${Math.round(frustumFovH * 9 / 16)}° V  ·  ${Math.round(frustumRange)} m range`;
+  const shownFovH = approximate ? Math.max(120, frustumFovH) : frustumFovH;
+  const shownRange = approximate ? Math.max(frustumRange * 0.82, 55) : frustumRange;
+  const confidenceLabel = approximate ? 'approx. text-derived direction' : (bearingDetails.confidence === 'parsed' ? 'parsed numeric bearing' : 'numeric bearing');
+  ft.textContent   = `${approximate ? 'Approx. ' : ''}${DIR_NAMES[heading]} (${Math.round(bearing)}°)  ·  ${Math.round(shownFovH)}° H × ${Math.round(shownFovH * 9 / 16)}° V  ·  ${Math.round(shownRange)} m range  ·  ${confidenceLabel}`;
 
   document.getElementById('statusFrustum').style.display = 'flex';
   document.getElementById('statusFrustumText').textContent =
-    `FOV: ${DIR_NAMES[heading]} ${Math.round(bearing)}°`;
+    approximate ? `FOV: approx ${DIR_NAMES[heading]}` : `FOV: ${DIR_NAMES[heading]} ${Math.round(bearing)}°`;
 }
 
 function removeFrustum() {
@@ -5653,10 +5750,16 @@ function populateSidePanel(cam) {
   const badgesEl = document.getElementById('camBadges');
   badgesEl.innerHTML = '';
 
-  const heading = inferHeading(cam);
-  const bearing = trustedCameraBearing(cam);
-  if (heading !== null) {
-    badgesEl.innerHTML += `<span class="badge badge-dir" title="Trusted numeric bearing from the database">Bearing ${DIR_NAMES[heading]} · ${Math.round(bearing)}°</span>`;
+  const bearingDetails = cameraBearingDetails(cam);
+  const heading = isBearingUsableForFrustum(bearingDetails) ? bearingDetails.heading : null;
+  const bearing = isBearingUsableForFrustum(bearingDetails) ? bearingDetails.bearing : null;
+  if (heading !== null && bearingDetails.confidence === 'cardinal') {
+    badgesEl.innerHTML += `<span class="badge badge-dir" title="Approximate text-derived direction — rendered as a wide faded frustum">Approx ${DIR_NAMES[heading]}</span>`;
+  } else if (heading !== null) {
+    const title = bearingDetails.confidence === 'parsed'
+      ? 'Numeric bearing parsed from provider text'
+      : 'Trusted numeric bearing from the database';
+    badgesEl.innerHTML += `<span class="badge badge-dir" title="${title}">Bearing ${DIR_NAMES[heading]} · ${Math.round(bearing)}°</span>`;
   } else {
     const label = cameraDirectionLabel(cam);
     if (label) badgesEl.innerHTML += `<span class="badge badge-dir" title="Road/view direction label only — not used for arrows or frustums">${escapeHtml(label)}</span>`;
@@ -6585,11 +6688,46 @@ function cameraTitle(cam) {
 }
 
 function getCameraFeed(cam) {
-  const firstView = cam?.views && cam.views.length ? cam.views[0] : null;
+  // Dashboard cards can be built from lightweight bbox/search summaries.
+  // Prefer promoted camera-level URLs, but scan every view before giving up.
+  const views = Array.isArray(cam?.views) ? cam.views.filter(Boolean) : [];
+  const imageView = views.find(v => v && v.imageUrl);
+  const videoView = views.find(v => v && v.videoUrl);
   return {
-    imageUrl: cam?.imageUrl || firstView?.imageUrl || null,
-    videoUrl: cam?.videoUrl || firstView?.videoUrl || null,
+    imageUrl: cam?.imageUrl || imageView?.imageUrl || null,
+    videoUrl: cam?.videoUrl || videoView?.videoUrl || null,
   };
+}
+
+function dashboardCameraById(id) {
+  const idKey = String(id);
+  return cameraMap.get(idKey) || cameraMap.get(id) || cameras.find(c => String(c.id) === idKey) || null;
+}
+
+async function resolveDashboardCameraFeed(cam, { forceHydrate = false } = {}) {
+  if (!cam || !cam.id) return { cam, imageUrl: null, videoUrl: null, hydrated: false };
+
+  const idKey = String(cam.id);
+  let current = dashboardCameraById(idKey) || cam;
+  let feed = getCameraFeed(current);
+  if ((feed.imageUrl || feed.videoUrl) && !forceHydrate) {
+    return { cam: current, ...feed, hydrated: false };
+  }
+
+  // Mirror the map-view behaviour: only declare no feed after requesting the
+  // authoritative detail row and merging it back into cameraMap.
+  try {
+    if (typeof hydrateCameraDetail === 'function') {
+      const full = await hydrateCameraDetail(current);
+      if (full) current = full;
+    }
+  } catch (err) {
+    console.warn('Dashboard camera hydration failed:', err);
+  }
+
+  current = dashboardCameraById(idKey) || current;
+  feed = getCameraFeed(current);
+  return { cam: current, ...feed, hydrated: true };
 }
 
 function loadDashboardState() {
@@ -6628,7 +6766,7 @@ function saveDashboardState() {
 
 function dashboardCameras() {
   return dashboardState.cameras
-    .map(id => cameraMap.get(id) || cameras.find(c => c.id === id))
+    .map(id => dashboardCameraById(id))
     .filter(Boolean);
 }
 
@@ -6811,9 +6949,14 @@ function promoteDashboardCamera(id) {
 }
 
 function dashboardDirectionBadge(cam) {
-  const heading = inferHeading(cam);
-  const bearing = trustedCameraBearing(cam);
-  if (heading !== null) return `<span class="dash-dir" title="Trusted numeric bearing">${DIR_NAMES[heading]} ${Math.round(bearing)}°</span>`;
+  const details = cameraBearingDetails(cam);
+  if (isBearingUsableForFrustum(details)) {
+    if (details.confidence === 'cardinal') {
+      return `<span class="dash-dir" title="Approximate text-derived direction">≈ ${DIR_NAMES[details.heading]}</span>`;
+    }
+    const title = details.confidence === 'parsed' ? 'Parsed numeric bearing' : 'Trusted numeric bearing';
+    return `<span class="dash-dir" title="${title}">${DIR_NAMES[details.heading]} ${Math.round(details.bearing)}°</span>`;
+  }
   const label = cameraDirectionLabel(cam);
   return label ? `<span class="dash-dir" title="Direction label only">${escapeHtml(label)}</span>` : `<span class="dash-dir">NO BEARING</span>`;
 }
@@ -6965,11 +7108,20 @@ function defaultMosaicPos(idx) {
   return { x: 1 + col * 24.5, y: 1 + row * 24, w: 23, h: 22 };
 }
 
-function mountDashboardFeed(cam, idx) {
-  const media = document.getElementById(`dash-media-${dashDomId(cam.id)}`);
-  if (!media) return;
+async function mountDashboardFeed(cam, idx, options = {}) {
+  const idKey = String(cam?.id ?? '');
+  const media = document.getElementById(`dash-media-${dashDomId(idKey)}`);
+  if (!media || !idKey) return;
 
-  const { imageUrl, videoUrl } = getCameraFeed(cam);
+  const requestToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  media.dataset.feedRequest = requestToken;
+
+  let resolved = await resolveDashboardCameraFeed(cam, { forceHydrate: !!options.forceHydrate });
+  if (!resolved || media.dataset.feedRequest !== requestToken) return;
+
+  const currentCam = resolved.cam || cam;
+  const { imageUrl, videoUrl } = resolved;
+
   if (videoUrl) {
     const video = document.createElement('video');
     video.autoplay = true;
@@ -6980,22 +7132,23 @@ function mountDashboardFeed(cam, idx) {
     media.appendChild(video);
 
     if (videoUrl.includes('.m3u8') && typeof Hls !== 'undefined' && Hls.isSupported()) {
+      if (dashboardHls.has(idKey)) { dashboardHls.get(idKey).destroy(); dashboardHls.delete(idKey); }
       const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
       hls.loadSource(videoUrl);
       hls.attachMedia(video);
-      dashboardHls.set(String(cam.id), hls);
-      hls.on(Hls.Events.ERROR, () => markDashboardRefresh(cam.id, false));
+      dashboardHls.set(idKey, hls);
+      hls.on(Hls.Events.ERROR, () => markDashboardRefresh(idKey, false));
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setTimeout(() => applyDashboardMediaAspect(cam.id, video), 250);
-        markDashboardRefresh(cam.id, true);
+        setTimeout(() => applyDashboardMediaAspect(idKey, video), 250);
+        markDashboardRefresh(idKey, true);
         video.play().catch(() => {});
       });
     } else {
       video.src = videoUrl;
-      video.onloadeddata = () => { applyDashboardMediaAspect(cam.id, video); markDashboardRefresh(cam.id, true); };
+      video.onloadeddata = () => { applyDashboardMediaAspect(idKey, video); markDashboardRefresh(idKey, true); };
       video.onerror = () => {
-        if (imageUrl) renderDashboardImageFeed(cam, imageUrl, idx);
-        else markDashboardRefresh(cam.id, false);
+        if (imageUrl) renderDashboardImageFeed(currentCam, imageUrl, idx);
+        else markDashboardRefresh(idKey, false);
       };
       video.play().catch(() => {});
     }
@@ -7003,26 +7156,27 @@ function mountDashboardFeed(cam, idx) {
   }
 
   if (imageUrl) {
-    renderDashboardImageFeed(cam, imageUrl, idx);
+    renderDashboardImageFeed(currentCam, imageUrl, idx);
   } else {
     media.innerHTML = '<div class="dash-no-feed">No feed URL available</div>';
-    markDashboardRefresh(cam.id, false, true);
+    markDashboardRefresh(idKey, false, true);
   }
 }
 
 function renderDashboardImageFeed(cam, imageUrl, idx, manual=false) {
-  const media = document.getElementById(`dash-media-${dashDomId(cam.id)}`);
-  if (!media) return;
+  const idKey = String(cam?.id ?? '');
+  const media = document.getElementById(`dash-media-${dashDomId(idKey)}`);
+  if (!media || !idKey) return;
   const img = document.createElement('img');
   img.alt = cameraTitle(cam);
   img.loading = 'lazy';
   img.onload = () => {
-    applyDashboardMediaAspect(cam.id, img);
-    markDashboardRefresh(cam.id, true);
+    applyDashboardMediaAspect(idKey, img);
+    markDashboardRefresh(idKey, true);
     scheduleDashboardImageRefresh(cam, idx);
   };
   img.onerror = () => {
-    markDashboardRefresh(cam.id, false);
+    markDashboardRefresh(idKey, false);
     scheduleDashboardImageRefresh(cam, idx, true);
   };
   const sep = imageUrl.includes('?') ? '&' : '?';
@@ -7033,17 +7187,21 @@ function renderDashboardImageFeed(cam, imageUrl, idx, manual=false) {
 
 function scheduleDashboardImageRefresh(cam, idx, errored=false) {
   if (dashboardRefreshPaused || document.hidden) return;
-  const failures = dashboardErrorCounts.get(String(cam.id)) || 0;
+  const idKey = String(cam?.id ?? '');
+  if (!idKey) return;
+  const failures = dashboardErrorCounts.get(idKey) || 0;
   if (failures >= 3) return;
 
   const baseInterval = Number(cam.refreshIntervalSec || cam.refreshSeconds || 30) * 1000;
   const stagger = Math.round((idx / Math.max(1, dashboardPageCameras().length)) * baseInterval);
   const delay = errored ? Math.min(120000, baseInterval * 2) : baseInterval + stagger;
 
-  if (dashboardRefreshTimers.has(String(cam.id))) clearTimeout(dashboardRefreshTimers.get(String(cam.id)));
-  dashboardRefreshTimers.set(String(cam.id), setTimeout(() => {
-    const feed = getCameraFeed(cam);
-    if (feed.imageUrl) renderDashboardImageFeed(cam, feed.imageUrl, idx);
+  if (dashboardRefreshTimers.has(idKey)) clearTimeout(dashboardRefreshTimers.get(idKey));
+  dashboardRefreshTimers.set(idKey, setTimeout(async () => {
+    const current = dashboardCameraById(idKey) || cam;
+    const resolved = await resolveDashboardCameraFeed(current);
+    if (resolved.imageUrl) renderDashboardImageFeed(resolved.cam || current, resolved.imageUrl, idx);
+    else if (resolved.videoUrl) mountDashboardFeed(resolved.cam || current, idx);
   }, delay));
 }
 
@@ -7084,15 +7242,11 @@ function updateDashboardStatus() {
 function refreshDashboardAll() {
   dashboardRefreshTimers.forEach(t => clearTimeout(t));
   dashboardRefreshTimers.clear();
-  dashboardPageCameras().forEach((cam, idx) => {
-    const feed = getCameraFeed(cam);
-    if (feed.imageUrl) renderDashboardImageFeed(cam, feed.imageUrl, idx, true);
-    else if (feed.videoUrl) mountDashboardFeed(cam, idx);
-  });
+  dashboardPageCameras().forEach((cam, idx) => mountDashboardFeed(cam, idx, { forceHydrate: true }));
 }
 
-function openDashboardFeed(cam) {
-  const { imageUrl, videoUrl } = getCameraFeed(cam);
+async function openDashboardFeed(cam) {
+  const { imageUrl, videoUrl } = await resolveDashboardCameraFeed(cam, { forceHydrate: true });
   const url = videoUrl || imageUrl;
   if (!url) return;
   window.open(url, '_blank', 'noopener');
@@ -7106,7 +7260,7 @@ function locateDashboardCamera(cam) {
 function setupMosaicCardHandlers() {
   document.querySelectorAll('.dash-card').forEach(card => {
     const id = card.dataset.id;
-    const cam = cameraMap.get(id) || cameras.find(c => c.id === id);
+    const cam = dashboardCameraById(id);
     card.addEventListener('click', e => {
       const actionEl = e.target.closest('[data-action]');
       if (actionEl) return;
