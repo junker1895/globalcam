@@ -1286,14 +1286,36 @@ body.dashboard-active #searchResults {
 #dashboardFeedWall.mode-mosaic {
   position: relative;
   display: block;
-  overflow: hidden;
+  overflow: auto;
+  --mosaic-row-height: 76px;
+  --mosaic-gap: 8px;
+  background-image:
+    linear-gradient(90deg, rgba(148,163,184,0.075) 1px, transparent 1px),
+    linear-gradient(rgba(148,163,184,0.075) 1px, transparent 1px);
+  background-size: calc(100% / 12) calc(var(--mosaic-row-height) + var(--mosaic-gap));
 }
+#dashboardFeedWall.mode-mosaic.mosaic-locked {
+  background-image:
+    linear-gradient(90deg, rgba(37,99,235,0.075) 1px, transparent 1px),
+    linear-gradient(rgba(37,99,235,0.075) 1px, transparent 1px);
+}
+.mosaic-guide {
+  position: absolute;
+  z-index: 12;
+  pointer-events: none;
+  display: none;
+  background: rgba(37,99,235,0.72);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.22);
+}
+.mosaic-guide.active { display: block; }
+.mosaic-guide.v { top: 0; bottom: 0; width: 1px; }
+.mosaic-guide.h { left: 0; right: 0; height: 1px; }
 
 #dashboardFeedWall.mode-focus {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(320px, 24vw, 440px);
-  grid-template-rows: repeat(4, minmax(145px, 1fr));
-  grid-auto-rows: minmax(145px, 1fr);
+  grid-template-columns: minmax(0, 1fr) clamp(380px, 28vw, 520px);
+  grid-template-rows: repeat(3, minmax(185px, 1fr));
+  grid-auto-rows: minmax(185px, 1fr);
   gap: 10px;
   align-items: stretch;
 }
@@ -1322,12 +1344,12 @@ body.dashboard-active #searchResults {
 .dash-card {
   position: relative;
   background: #05070b;
-  border: 1px solid rgba(148,163,184,0.35);
-  border-radius: 8px;
+  border: 1px solid rgba(148,163,184,0.18);
+  border-radius: 7px;
   overflow: hidden;
   min-height: 0;
   min-width: 0;
-  box-shadow: var(--c-shadow);
+  box-shadow: 0 1px 2px rgba(15,23,42,0.16);
   display: flex;
   flex-direction: column;
 }
@@ -1362,18 +1384,29 @@ body.dashboard-active #searchResults {
 .mode-mosaic .dash-card {
   position: absolute;
   min-width: 220px;
-  min-height: 150px;
+  min-height: 160px;
+}
+.mode-mosaic .dash-card.offline,
+.mode-mosaic .dash-card.stale {
+  opacity: 0.78;
+}
+.mode-mosaic .dash-card.offline .dash-media img,
+.mode-mosaic .dash-card.stale .dash-media img,
+.mode-mosaic .dash-card.offline .dash-media video,
+.mode-mosaic .dash-card.stale .dash-media video {
+  filter: grayscale(0.75) brightness(0.62);
 }
 
 .mode-focus .dash-card.focus-main {
   grid-column: 1;
-  grid-row: 1 / span 4;
+  grid-row: 1 / -1;
   min-height: 0;
 }
 
 .mode-focus .dash-card.focus-thumb {
   grid-column: 2;
-  min-height: 145px;
+  min-height: 185px;
+  cursor: pointer;
 }
 
 .mode-focus .dash-card.focus-thumb .dash-media {
@@ -1462,21 +1495,99 @@ body.dashboard-active #searchResults {
   padding: 16px;
 }
 
+.dash-feed-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: linear-gradient(180deg, rgba(2,6,23,0.72), rgba(2,6,23,0.46));
+  color: rgba(248,250,252,0.94);
+  text-align: center;
+  pointer-events: none;
+}
+.dash-media.feed-loading .dash-feed-overlay,
+.dash-media.feed-refreshing .dash-feed-overlay,
+.dash-media.feed-no-url .dash-feed-overlay,
+.dash-media.feed-failed .dash-feed-overlay,
+.dash-media.feed-stale .dash-feed-overlay { display: flex; }
+.dash-media.feed-refreshing .dash-feed-overlay,
+.dash-media.feed-stale .dash-feed-overlay { align-items: flex-end; justify-content: flex-start; background: linear-gradient(180deg, transparent, rgba(2,6,23,0.68)); }
+.dash-feed-card {
+  max-width: 260px;
+  padding: 12px 14px;
+  border: 1px solid rgba(226,232,240,0.16);
+  border-radius: 9px;
+  background: rgba(15,23,42,0.72);
+  box-shadow: 0 10px 34px rgba(0,0,0,0.28);
+  backdrop-filter: blur(10px);
+}
+.dash-media.feed-refreshing .dash-feed-card,
+.dash-media.feed-stale .dash-feed-card { max-width: 320px; padding: 8px 10px; text-align: left; }
+.dash-feed-title { font-size: 12px; font-weight: 800; letter-spacing: -0.01em; }
+.dash-feed-detail { margin-top: 4px; font-family: var(--mono); font-size: 10px; line-height: 1.45; color: rgba(226,232,240,0.72); }
+.dash-feed-spinner {
+  width: 18px;
+  height: 18px;
+  margin: 0 auto 9px;
+  border-radius: 999px;
+  border: 2px solid rgba(226,232,240,0.18);
+  border-top-color: rgba(248,250,252,0.86);
+  animation: tilesSpin 850ms linear infinite;
+}
+.dash-feed-retry {
+  margin-top: 10px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.22);
+  background: rgba(255,255,255,0.10);
+  color: #fff;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.dash-feed-retry:hover { background: rgba(37,99,235,0.82); border-color: rgba(37,99,235,0.95); }
+.dash-media.feed-failed .dash-feed-overlay,
+.dash-media.feed-stale .dash-feed-overlay { pointer-events: auto; }
+.dash-feed-state-dot {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 5;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--c-text3);
+  box-shadow: 0 0 0 2px rgba(15,23,42,0.72);
+}
+.dash-media.feed-live .dash-feed-state-dot { background: var(--c-success); }
+.dash-media.feed-loading .dash-feed-state-dot,
+.dash-media.feed-refreshing .dash-feed-state-dot { background: var(--c-accent); }
+.dash-media.feed-stale .dash-feed-state-dot { background: var(--c-warn); }
+.dash-media.feed-no-url .dash-feed-state-dot,
+.dash-media.feed-failed .dash-feed-state-dot { background: var(--c-danger); }
+
 .dash-meta {
   flex-shrink: 0;
-  background: var(--c-surface);
-  border-top: 1px solid var(--c-border);
-  padding: 7px 9px;
+  background: rgba(15,23,42,0.82);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding: 5px 8px;
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 4px 8px;
+  gap: 2px 7px;
   align-items: center;
+  backdrop-filter: blur(8px);
 }
 
 .dash-title {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--c-text);
+  color: rgba(248,250,252,0.92);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1484,9 +1595,9 @@ body.dashboard-active #searchResults {
 
 .dash-sub {
   grid-column: 1 / -1;
-  font-size: 10px;
+  font-size: 9px;
   font-family: var(--mono);
-  color: var(--c-text3);
+  color: rgba(203,213,225,0.66);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1494,10 +1605,10 @@ body.dashboard-active #searchResults {
 
 .dash-dir {
   font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--c-accent);
-  background: var(--c-accent-bg);
+  font-size: 9px;
+  font-weight: 700;
+  color: #93c5fd;
+  background: rgba(37,99,235,0.18);
   border-radius: 4px;
   padding: 2px 6px;
 }
@@ -1506,12 +1617,84 @@ body.dashboard-active #searchResults {
   position: absolute;
   top: 8px;
   right: 8px;
-  display: none;
+  display: flex;
   gap: 5px;
-  z-index: 3;
+  z-index: 10;
 }
 
-.dash-card:hover .dash-actions { display: flex; }
+.dash-menu-trigger {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.20);
+  background: rgba(15,23,42,0.74);
+  color: #fff;
+  font-size: 18px;
+  line-height: 1;
+  font-family: var(--font);
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 130ms ease, transform 130ms ease, background 130ms ease;
+}
+
+.dash-card:hover .dash-menu-trigger,
+.dash-card.menu-open .dash-menu-trigger,
+.dash-card.selected .dash-menu-trigger {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.dash-menu-trigger:hover,
+.dash-menu-trigger[aria-expanded="true"] { background: rgba(37,99,235,0.92); }
+
+.dash-tile-menu {
+  position: absolute;
+  top: 42px;
+  right: 0;
+  width: 188px;
+  padding: 5px;
+  border-radius: 9px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text);
+  box-shadow: var(--c-shadow-md);
+  display: none;
+  z-index: 20;
+}
+
+.dash-card.menu-open .dash-tile-menu { display: block; }
+
+.dash-menu-item {
+  width: 100%;
+  min-height: 30px;
+  padding: 0 9px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--c-text2);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dash-menu-item:hover { background: var(--c-surface2); color: var(--c-text); }
+.dash-menu-item.danger { color: var(--c-danger); }
+.dash-menu-item[disabled] { opacity: 0.45; cursor: default; }
+.dash-menu-item[disabled]:hover { background: transparent; color: var(--c-text2); }
+.dash-menu-sep { height: 1px; margin: 5px 3px; background: var(--c-border); }
+.dash-menu-label { padding: 5px 9px 3px; font-family: var(--mono); font-size: 10px; color: var(--c-text3); text-transform: uppercase; letter-spacing: 0.05em; }
+.dash-menu-check { color: var(--c-accent); font-family: var(--mono); font-size: 11px; }
 
 .dash-mini-btn {
   height: 26px;
@@ -1540,6 +1723,23 @@ body.dashboard-active #searchResults {
   background: linear-gradient(135deg, transparent 45%, rgba(255,255,255,0.55) 46%, rgba(255,255,255,0.55) 56%, transparent 57%);
 }
 .mode-mosaic .dash-resize { display: block; }
+.mode-mosaic.mosaic-locked .dash-resize { display: none !important; }
+.mode-mosaic.mosaic-locked .dash-card { cursor: default; }
+.mode-mosaic.mosaic-locked .dash-meta { cursor: default; }
+
+
+.dash-card.offline .dash-feed-state-dot,
+.dash-card.stale .dash-feed-state-dot { opacity: 0.9; }
+.dash-media.feed-no-url .dash-feed-overlay,
+.dash-media.feed-failed .dash-feed-overlay {
+  background: linear-gradient(180deg, rgba(2,6,23,0.50), rgba(2,6,23,0.38));
+}
+.dash-media.feed-no-url .dash-feed-card,
+.dash-media.feed-failed .dash-feed-card {
+  transform: scale(0.92);
+  opacity: 0.72;
+}
+.dash-map-tile .dash-meta { background: rgba(15,23,42,0.82); }
 
 #dashboardMapResize {
   width: 6px;
@@ -1571,7 +1771,21 @@ body.dashboard-active #searchResults {
 /* Dashboard map presentation: the right-side map is part of the layout.
    It must push/resize the camera wall instead of floating over it. */
 body.dashboard-map-drawer #dashboardShell { position: static; }
-body.dashboard-map-drawer #dashboardMapResize { display: block; }
+body.dashboard-map-drawer 
+.dash-card.offline .dash-feed-state-dot,
+.dash-card.stale .dash-feed-state-dot { opacity: 0.9; }
+.dash-media.feed-no-url .dash-feed-overlay,
+.dash-media.feed-failed .dash-feed-overlay {
+  background: linear-gradient(180deg, rgba(2,6,23,0.50), rgba(2,6,23,0.38));
+}
+.dash-media.feed-no-url .dash-feed-card,
+.dash-media.feed-failed .dash-feed-card {
+  transform: scale(0.92);
+  opacity: 0.72;
+}
+.dash-map-tile .dash-meta { background: rgba(15,23,42,0.82); }
+
+#dashboardMapResize { display: block; }
 body.dashboard-map-drawer #dashboardMapPane:not(.collapsed) {
   position: relative;
   top: auto;
@@ -1673,10 +1887,16 @@ body.dashboard-map-drawer #dashboardFeedPane { min-width: 520px; }
 }
 .dash-small-btn:hover,
 .dash-seg button:hover { background: var(--c-surface2); color: var(--c-text); }
+.dash-small-btn.active { background: var(--c-accent-bg); color: var(--c-accent); border-color: rgba(37,99,235,0.25); }
 
 
 .dash-control-hidden {
   display: none !important;
+}
+
+.dash-mode-disabled {
+  opacity: 0.48;
+  pointer-events: none;
 }
 
 #dashboardStatus {
@@ -1714,6 +1934,65 @@ body.dashboard-map-drawer #dashboardFeedPane { min-width: 520px; }
 #dashboardAutosaveStatus.error::before { background: var(--c-danger); }
 #dashboardAutosaveStatus.disabled { color: var(--c-text3); }
 #dashboardAutosaveStatus.disabled::before { background: var(--c-text3); }
+
+.dashboard-refresh-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+  color: var(--c-text2);
+  font-size: 11px;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+.dashboard-refresh-control select {
+  height: 22px;
+  border: 1px solid var(--c-border);
+  border-radius: 5px;
+  background: var(--c-surface2);
+  color: var(--c-text);
+  font-family: var(--mono);
+  font-size: 11px;
+  outline: none;
+}
+.dashboard-refresh-note {
+  color: var(--c-text3);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.dash-feed-age {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--c-text3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dash-feed-age::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--c-text3);
+  flex: 0 0 auto;
+}
+.dash-feed-age.live { color: var(--c-success); }
+.dash-feed-age.live::before { background: var(--c-success); }
+.dash-feed-age.refreshing { color: var(--c-accent); }
+.dash-feed-age.refreshing::before { background: var(--c-accent); }
+.dash-feed-age.stale { color: var(--c-warn); }
+.dash-feed-age.stale::before { background: var(--c-warn); }
+.dash-feed-age.failed { color: var(--c-danger); }
+.dash-feed-age.failed::before { background: var(--c-danger); }
+
 
 
 #dashboardAddPanel {
@@ -2206,6 +2485,128 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
   flex: 0 0 auto;
 }
 
+
+
+/* ─── CORRECTION: scoped structured Mosaic + theme-aware dashboard chrome ───
+   The structured layout must affect Mosaic only. Grid, Focus, Single and the
+   bottom dashboard toolbar remain part of the normal dashboard shell. */
+:root {
+  --dash-canvas: var(--c-bg);
+  --dash-grid-line: rgba(148,163,184,0.18);
+  --dash-grid-line-strong: rgba(148,163,184,0.28);
+  --dash-tile-bg: var(--c-surface);
+  --dash-tile-border: rgba(15,23,42,0.16);
+  --dash-feed-bg: #020617;
+  --dash-meta-bg: rgba(255,255,255,0.92);
+  --dash-meta-border: rgba(15,23,42,0.10);
+  --dash-title: var(--c-text);
+  --dash-sub: var(--c-text2);
+  --dash-muted: var(--c-text3);
+  --dash-offline-bg: rgba(241,245,249,0.96);
+}
+[data-theme="dark"] {
+  --dash-canvas: var(--c-bg);
+  --dash-grid-line: rgba(148,163,184,0.09);
+  --dash-grid-line-strong: rgba(148,163,184,0.14);
+  --dash-tile-bg: #0b1220;
+  --dash-tile-border: rgba(226,232,240,0.13);
+  --dash-feed-bg: #020617;
+  --dash-meta-bg: rgba(15,23,42,0.88);
+  --dash-meta-border: rgba(226,232,240,0.08);
+  --dash-title: rgba(248,250,252,0.94);
+  --dash-sub: rgba(203,213,225,0.68);
+  --dash-muted: rgba(148,163,184,0.66);
+  --dash-offline-bg: rgba(15,23,42,0.92);
+}
+
+/* Keep the dashboard shell and toolbar intact in every mode. */
+#dashboardView { flex-direction: column !important; }
+#dashboardShell { min-height: 0; overflow: hidden; }
+#dashboardFeedPane { min-height: 0; overflow: hidden; background: var(--dash-canvas); }
+#dashboardFeedWall { min-height: 0; }
+#dashboardBar {
+  display: flex !important;
+  position: relative;
+  z-index: 90;
+  background: var(--c-surface) !important;
+  border-top: 1px solid var(--c-border) !important;
+  color: var(--c-text2);
+}
+#dashboardBar .dash-seg,
+#dashboardBar .dash-small-btn,
+#dashboardBar .dashboard-refresh-control,
+#dashboardBar #dashboardStatus,
+#dashboardBar #dashboardAutosaveStatus,
+#dashboardBar #dashPageButtons { display: flex; }
+#dashboardBar .dash-control-hidden { display: none !important; }
+
+/* Non-Mosaic modes keep the standard app chrome/colour rules. */
+#dashboardFeedWall:not(.mode-mosaic) .dash-card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  box-shadow: var(--c-shadow);
+}
+#dashboardFeedWall:not(.mode-mosaic) .dash-meta {
+  background: var(--c-surface);
+  border-top: 1px solid var(--c-border);
+  color: var(--c-text);
+  backdrop-filter: none;
+}
+#dashboardFeedWall:not(.mode-mosaic) .dash-title { color: var(--c-text); }
+#dashboardFeedWall:not(.mode-mosaic) .dash-sub { color: var(--c-text3); }
+#dashboardFeedWall:not(.mode-mosaic) .dash-dir {
+  color: var(--c-accent);
+  background: var(--c-accent-bg);
+}
+
+/* Structured Mosaic is scoped here. */
+#dashboardFeedWall.mode-mosaic {
+  background-color: var(--dash-canvas) !important;
+  background-image:
+    linear-gradient(90deg, var(--dash-grid-line) 1px, transparent 1px),
+    linear-gradient(var(--dash-grid-line) 1px, transparent 1px) !important;
+  background-size: calc(100% / 12) calc(var(--mosaic-row-height) + var(--mosaic-gap)) !important;
+}
+#dashboardFeedWall.mode-mosaic.mosaic-locked {
+  background-image:
+    linear-gradient(90deg, rgba(37,99,235,0.12) 1px, transparent 1px),
+    linear-gradient(rgba(37,99,235,0.12) 1px, transparent 1px) !important;
+}
+#dashboardFeedWall.mode-mosaic .dash-card {
+  background: var(--dash-tile-bg) !important;
+  border-color: var(--dash-tile-border) !important;
+  box-shadow: var(--c-shadow) !important;
+}
+#dashboardFeedWall.mode-mosaic .dash-media {
+  background: var(--dash-feed-bg) !important;
+}
+#dashboardFeedWall.mode-mosaic .dash-meta,
+#dashboardFeedWall.mode-mosaic .dash-map-tile .dash-meta {
+  background: var(--dash-meta-bg) !important;
+  border-top: 1px solid var(--dash-meta-border) !important;
+  color: var(--dash-title) !important;
+  backdrop-filter: blur(8px);
+}
+#dashboardFeedWall.mode-mosaic .dash-title { color: var(--dash-title) !important; }
+#dashboardFeedWall.mode-mosaic .dash-sub { color: var(--dash-sub) !important; }
+#dashboardFeedWall.mode-mosaic .dash-feed-age { color: var(--dash-muted); }
+#dashboardFeedWall.mode-mosaic .dash-dir {
+  color: var(--c-accent) !important;
+  background: var(--c-accent-bg) !important;
+}
+#dashboardFeedWall.mode-mosaic .dash-card.offline,
+#dashboardFeedWall.mode-mosaic .dash-card.stale {
+  background: var(--dash-offline-bg) !important;
+  opacity: 0.84;
+}
+#dashboardFeedWall.mode-mosaic .dash-map-tile .dash-media {
+  background: var(--c-surface) !important;
+}
+#dashboardFeedWall.mode-mosaic .mosaic-guide {
+  background: var(--c-accent) !important;
+  box-shadow: 0 0 0 1px var(--c-surface), 0 0 0 3px rgba(37,99,235,0.16) !important;
+}
+
 </style>
 
 
@@ -2502,12 +2903,23 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
             <span class="density-icon density-small" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
           </button>
         </div>
-        <button class="dash-small-btn" id="dashRefreshAll">↻ Refresh all</button>
+        <button class="dash-small-btn" id="dashRefreshAll" title="Refresh visible dashboard feeds in a staggered wave">↻ Refresh all</button>
+        <label class="dashboard-refresh-control" title="Automatic refresh cadence for visible dashboard feeds">
+          Auto
+          <select id="dashRefreshInterval" aria-label="Dashboard auto refresh interval">
+            <option value="15">15s</option>
+            <option value="30" selected>30s</option>
+            <option value="60">60s</option>
+            <option value="120">2m</option>
+          </select>
+          <span class="dashboard-refresh-note">staggered</span>
+        </label>
         <button class="dash-small-btn" id="dashAddCamera">+ Add camera</button>
         <button class="dash-small-btn dash-control-map" id="dashFitMap" title="Frame all dashboard cameras on the 2D map">Map extent</button>
         <button class="dash-small-btn dash-control-map" id="dashToggleMap">Hide map</button>
         <button class="dash-small-btn dash-control-mosaic" id="dashAddMapTile" title="Add the 2D map as a draggable Mosaic tile">+ Map tile</button>
         <button class="dash-small-btn dash-control-mosaic" id="dashFitMosaicCameras" title="Arrange Mosaic camera tiles so they fit cleanly without overlapping">Fit cameras</button>
+        <button class="dash-small-btn dash-control-mosaic" id="dashLockMosaic" title="Lock Mosaic layout so tiles cannot be dragged or resized">Lock layout</button>
         <button class="dash-small-btn" id="dashClearAll">Clear</button>
         <button class="dash-small-btn" id="dashSaveView">Save view</button>
         <button class="dash-small-btn" id="dashLoadView" title="Right-click to delete a saved view">Load view</button>
@@ -3520,7 +3932,7 @@ function trackEvent(name, props = {}) {
     posthog.capture(name, {
       plan: currentPlan || 'guest',
       logged_in: !!currentUser,
-      dashboard_camera_count: Array.isArray(dashboardState?.cameras) ? dashboardState.cameras.length : 0,
+      dashboard_camera_count: Array.isArray(dashboardState?.cameras) ? dashboardState.order.length : 0,
       camera_count_loaded: Array.isArray(cameras) ? cameras.length : 0,
       ...props
     });
@@ -3608,7 +4020,7 @@ async function applyAuthSession(session) {
   if (!currentUser) {
     currentPlan = 'guest';
     currentProfile = null;
-    dashboardState.cameras = enforceDashboardCameraLimit(dashboardState.cameras);
+    dashboardState.order = enforceDashboardCameraLimit(dashboardState.order);
     updateAuthUI();
     updatePlanUI();
     updateDashboardBadge();
@@ -3618,7 +4030,7 @@ async function applyAuthSession(session) {
   }
 
   await loadUserProfile();
-  dashboardState.cameras = enforceDashboardCameraLimit(dashboardState.cameras);
+  dashboardState.order = enforceDashboardCameraLimit(dashboardState.order);
   updateAuthUI();
   updatePlanUI();
   updateDashboardBadge();
@@ -3890,7 +4302,7 @@ function requirePro3D() {
 function dashboardCameraCapacityRemaining() {
   const max = getPlanLimits().maxDashboardCameras;
   if (max >= 999) return Number.POSITIVE_INFINITY;
-  return Math.max(0, max - dashboardState.cameras.length);
+  return Math.max(0, max - dashboardState.order.length);
 }
 
 function enforceDashboardCameraLimit(ids) {
@@ -3918,7 +4330,7 @@ function setLocalPlanForTesting(plan) {
   }
   currentPlan = plan;
   currentUser = plan === 'guest' ? null : { id: 'local-dev-user', email: 'local@example.test' };
-  dashboardState.cameras = enforceDashboardCameraLimit(dashboardState.cameras);
+  dashboardState.order = enforceDashboardCameraLimit(dashboardState.order);
   saveDashboardState();
   updatePlanUI();
   updateDashboardBadge();
@@ -3941,6 +4353,7 @@ function createDefaultDashboardState() {
     mosaicLayout: {},
     mapVisible: true,
     mapAsTile: false,
+    lockLayout: false,
     pageSize: DASHBOARD_PAGE_SIZE,
     mediaFit: 'contain'
   };
@@ -3955,6 +4368,7 @@ function installDashboardStateCompatibilityAliases(state) {
     page: { get: () => state.currentPage, set: value => { state.currentPage = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0; } },
     mosaic: { get: () => state.mosaicLayout, set: value => { state.mosaicLayout = value && typeof value === 'object' ? value : {}; } },
     mapTileVisible: { get: () => !!state.mapAsTile, set: value => { state.mapAsTile = !!value; } },
+    mosaicLocked: { get: () => !!state.lockLayout, set: value => { state.lockLayout = !!value; } },
     focusCameraId: { get: () => state.selectedCameraId, set: value => { state.selectedCameraId = value != null ? String(value) : null; } }
   };
   Object.keys(aliases).forEach(key => {
@@ -3984,6 +4398,7 @@ function normaliseDashboardState(raw = {}) {
   state.mosaicLayout = base.mosaicLayout && typeof base.mosaicLayout === 'object' ? { ...base.mosaicLayout } : (base.mosaic && typeof base.mosaic === 'object' ? { ...base.mosaic } : {});
   state.mapVisible = base.mapVisible !== false;
   state.mapAsTile = !!(base.mapAsTile || base.mapTileVisible);
+  state.lockLayout = !!(base.lockLayout || base.mosaicLocked);
   state.pageSize = DASHBOARD_PAGE_SIZE;
   state.mediaFit = base.mediaFit === 'cover' ? 'cover' : 'contain';
   return installDashboardStateCompatibilityAliases(state);
@@ -4000,6 +4415,7 @@ function serialiseDashboardStateForStorage() {
     mosaicLayout: dashboardState.mosaicLayout || {},
     mapVisible: dashboardState.mapVisible !== false,
     mapAsTile: !!dashboardState.mapAsTile,
+    lockLayout: !!dashboardState.lockLayout,
     pageSize: DASHBOARD_PAGE_SIZE,
     mediaFit: dashboardState.mediaFit === 'cover' ? 'cover' : 'contain'
   };
@@ -4034,12 +4450,23 @@ let dashboardRefreshTimers = new Map();
 let dashboardHls = new Map();
 let dashboardLastRefresh = new Map();
 let dashboardErrorCounts = new Map();
+let dashboardFeedStates = new Map();
 let dashboardRefreshPaused = false;
+let dashboardRefreshIntervalSec = 30;
+let dashboardStaleAfterSec = 120;
+let dashboardStaleWatchTimer = null;
 let dashboardResizeActive = false;
 let dashboardMosaicDrag = null;
 let dashboardOrderDragId = null;
 let dashboardMapMoveTimer = null;
 let dashboardSearchContext = null;
+const MOSAIC_GRID_COLS = 12;
+const MOSAIC_ROW_HEIGHT = 76;
+const MOSAIC_GAP = 8;
+const MOSAIC_MIN_COL_SPAN = 2;
+const MOSAIC_MIN_ROW_SPAN = 2;
+const MOSAIC_DEFAULT_COL_SPAN = 3;
+const MOSAIC_DEFAULT_ROW_SPAN = 3;
 
 // Area selection state shared by Cesium globe and dashboard Leaflet map
 let areaSelection = {
@@ -6559,7 +6986,7 @@ async function runLocationSearch(query) {
     const dirBadge = label
       ? `<span class="sr-dir">${escapeHtml(label)}</span>`
       : '';
-    const exists = dashboardState.cameras.includes(String(cam.id));
+    const exists = dashboardState.order.includes(String(cam.id));
     const full = false;
     item.innerHTML = `
       <div class="sr-row-main">
@@ -7004,14 +7431,49 @@ function saveDashboardState() {
   localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(serialiseDashboardStateForStorage()));
 }
 
+function dashboardMode() {
+  return ['grid','mosaic','focus','single'].includes(dashboardState.mode) ? dashboardState.mode : 'grid';
+}
+
+function dashboardSideMapAllowed() {
+  return dashboardMode() === 'grid';
+}
+
+function dashboardMapTileAllowed() {
+  return dashboardMode() === 'mosaic';
+}
+
+function applyDashboardModeRules(previousMode = null) {
+  const mode = dashboardMode();
+  dashboardState.mode = mode;
+
+  // Density and manual width spans are grid-only. The data can remain saved,
+  // but non-grid modes must not let it affect layout or controls.
+  if (mode !== 'grid') {
+    dashboardState.currentPage = dashboardPageIndexForId(dashboardState.selectedCameraId || dashboardState.order[0]);
+  }
+
+  // Mosaic is the only mode that supports the map as a draggable tile.
+  if (mode !== 'mosaic') dashboardState.mapAsTile = false;
+
+  // The side map is a grid layout panel. Other modes use the full wall so their
+  // interaction model stays clean and intentional.
+  if (mode !== 'grid') document.body.classList.remove('dashboard-map-drawer');
+
+  if (dashboardState.selectedCameraId && !dashboardState.order.includes(String(dashboardState.selectedCameraId))) {
+    dashboardState.selectedCameraId = dashboardState.order[0] || null;
+  }
+  if (!dashboardState.selectedCameraId && dashboardState.order.length) dashboardState.selectedCameraId = dashboardState.order[0];
+}
+
 function dashboardCameras() {
-  return dashboardState.cameras
+  return dashboardState.order
     .map(id => dashboardCameraById(id))
     .filter(Boolean);
 }
 
 function dashboardGridDimension() {
-  const size = dashboardState.gridSize || '2x2';
+  const size = dashboardState.density || '2x2';
   if (size === '4x4') return 4;
   if (size === '3x3') return 3;
   return 2;
@@ -7027,13 +7489,8 @@ function dashboardGridSpanForId(id) {
 }
 
 function dashboardGridPages() {
-  const ids = dashboardState.cameras.map(String);
-  if (dashboardState.layout !== 'grid') {
-    const size = DASHBOARD_PAGE_SIZE;
-    const pages = [];
-    for (let i = 0; i < ids.length; i += size) pages.push(ids.slice(i, i + size));
-    return pages.length ? pages : [[]];
-  }
+  const ids = dashboardState.order.map(String);
+  if (dashboardMode() !== 'grid') return ids.length ? [ids] : [[]];
 
   const dim = dashboardGridDimension();
   const capacity = dim * dim;
@@ -7068,7 +7525,7 @@ function dashboardGridPages() {
 }
 
 function dashboardPageSize() {
-  if (dashboardState.layout === 'grid') {
+  if (dashboardMode() === 'grid') {
     const dim = dashboardGridDimension();
     return dim * dim;
   }
@@ -7080,12 +7537,12 @@ function dashboardPageCount() {
 }
 
 function clampDashboardPage() {
-  dashboardState.page = Math.max(0, Math.min(dashboardState.page || 0, dashboardPageCount() - 1));
+  dashboardState.currentPage = Math.max(0, Math.min(dashboardState.currentPage || 0, dashboardPageCount() - 1));
 }
 
 function dashboardPageCameras() {
   clampDashboardPage();
-  const ids = dashboardGridPages()[dashboardState.page || 0] || [];
+  const ids = dashboardGridPages()[dashboardState.currentPage || 0] || [];
   return ids.map(id => dashboardCameraById(id)).filter(Boolean);
 }
 
@@ -7097,7 +7554,7 @@ function dashboardPageIndexForId(id) {
 }
 
 function setDashboardPage(page) {
-  dashboardState.page = Math.max(0, Math.min(page, dashboardPageCount() - 1));
+  dashboardState.currentPage = Math.max(0, Math.min(page, dashboardPageCount() - 1));
   saveDashboardState();
   renderDashboard();
 }
@@ -7113,8 +7570,12 @@ function dashboardPaginationItems(current, total) {
 function renderDashboardPagination() {
   const wrap = document.getElementById('dashPageButtons');
   if (!wrap) return;
+  if (dashboardMode() !== 'grid') {
+    wrap.innerHTML = '';
+    return;
+  }
   const total = dashboardPageCount();
-  const current = Math.min(dashboardState.page || 0, total - 1);
+  const current = Math.min(dashboardState.currentPage || 0, total - 1);
   if (total <= 1) {
     wrap.innerHTML = '';
     return;
@@ -7135,37 +7596,37 @@ function reorderDashboardCamera(dragId, targetId, insertAfter = false) {
   targetId = String(targetId || '');
   if (!dragId || !targetId || dragId === targetId) return false;
 
-  const ids = dashboardState.cameras.map(String);
+  const ids = dashboardState.order.map(String);
   let from = ids.indexOf(dragId);
   let to = ids.indexOf(targetId);
   if (from < 0 || to < 0) return false;
 
-  const [moved] = dashboardState.cameras.splice(from, 1);
+  const [moved] = dashboardState.order.splice(from, 1);
   ids.splice(from, 1);
 
   to = ids.indexOf(targetId);
-  if (to < 0) to = dashboardState.cameras.length;
+  if (to < 0) to = dashboardState.order.length;
   if (insertAfter) to += 1;
 
-  dashboardState.cameras.splice(to, 0, String(moved));
+  dashboardState.order.splice(to, 0, String(moved));
   dashboardState.selectedCameraId = String(moved);
-  dashboardState.page = dashboardPageIndexForId(moved);
+  dashboardState.currentPage = dashboardPageIndexForId(moved);
   saveDashboardState();
   markDashboardDirty();
   return true;
 }
 
 function goToDashboardCameraPage(id) {
-  const idx = dashboardState.cameras.indexOf(String(id));
-  if (idx >= 0) dashboardState.page = dashboardPageIndexForId(id);
+  const idx = dashboardState.order.indexOf(String(id));
+  if (idx >= 0) dashboardState.currentPage = dashboardPageIndexForId(id);
 }
 
 function updateDashboardBadge() {
   const badge = document.getElementById('dashboardNavBadge');
-  if (badge) badge.textContent = dashboardState.cameras.length;
+  if (badge) badge.textContent = dashboardState.order.length;
   const sideBtn = document.getElementById('addSelectedToDashboard');
   if (sideBtn && selectedCamera) {
-    const exists = dashboardState.cameras.includes(String(selectedCamera.id));
+    const exists = dashboardState.order.includes(String(selectedCamera.id));
     sideBtn.textContent = exists ? '✓ In dashboard' : '+ Add to dashboard';
     sideBtn.disabled = exists;
   }
@@ -7203,10 +7664,10 @@ function addCameraToDashboard(cam, options = {}) {
   if (!cam || !cam.id) return false;
   const id = String(cam.id);
 
-  if (dashboardState.cameras.includes(id)) {
+  if (dashboardState.order.includes(id)) {
     dashboardState.selectedCameraId = id;
-    if (!dashboardState.focusCameraId) dashboardState.focusCameraId = id;
-    dashboardState.page = dashboardPageIndexForId(id);
+    if (!dashboardState.selectedCameraId) dashboardState.selectedCameraId = id;
+    dashboardState.currentPage = dashboardPageIndexForId(id);
     dashboardState._fitPending = true;
     saveDashboardState();
     updateDashboardBadge();
@@ -7217,9 +7678,9 @@ function addCameraToDashboard(cam, options = {}) {
 
   if (!canAddDashboardCamera(true)) return false;
 
-  dashboardState.cameras.push(id);
-  dashboardState.page = dashboardPageIndexForId(id);
-  if (!dashboardState.focusCameraId) dashboardState.focusCameraId = id;
+  dashboardState.order.push(id);
+  dashboardState.currentPage = dashboardPageIndexForId(id);
+  if (!dashboardState.selectedCameraId) dashboardState.selectedCameraId = id;
   dashboardState.selectedCameraId = id;
   dashboardState._fitPending = true;
   saveDashboardState();
@@ -7241,15 +7702,14 @@ function addCameraToDashboard(cam, options = {}) {
 }
 
 function removeCameraFromDashboard(id) {
-  dashboardState.cameras = dashboardState.cameras.filter(x => x !== id);
+  dashboardState.order = dashboardState.order.filter(x => x !== id);
   if (dashboardState.gridSpans) delete dashboardState.gridSpans[String(id)];
   dashboardErrorCounts.delete(String(id));
   dashboardLastRefresh.delete(String(id));
   if (dashboardRefreshTimers.has(String(id))) clearTimeout(dashboardRefreshTimers.get(String(id)));
   dashboardRefreshTimers.delete(String(id));
   if (dashboardHls.has(String(id))) { dashboardHls.get(String(id)).destroy(); dashboardHls.delete(String(id)); }
-  if (dashboardState.focusCameraId === id) dashboardState.focusCameraId = dashboardState.cameras[0] || null;
-  if (dashboardState.selectedCameraId === id) dashboardState.selectedCameraId = String(dashboardState.focusCameraId);
+  if (dashboardState.selectedCameraId === id) dashboardState.selectedCameraId = dashboardState.order[0] || null;
   clampDashboardPage();
   saveDashboardState();
   updateDashboardBadge();
@@ -7263,19 +7723,26 @@ function clearDashboard() {
   dashboardHls.clear();
   dashboardLastRefresh.clear();
   dashboardErrorCounts.clear();
-  dashboardState.cameras = [];
-  dashboardState.focusCameraId = null;
+  dashboardFeedStates.clear();
+  dashboardState.order = [];
   dashboardState.selectedCameraId = null;
-  dashboardState.mosaic = {};
+  dashboardState.mosaicLayout = {};
   dashboardState.gridSpans = {};
-  dashboardState.page = 0;
+  dashboardState.currentPage = 0;
   saveDashboardState();
   updateDashboardBadge();
   renderDashboard();
 }
 
 function setDashboardLayout(mode) {
-  dashboardState.layout = mode;
+  const next = ['grid','mosaic','focus','single'].includes(mode) ? mode : 'grid';
+  const previous = dashboardMode();
+  dashboardState.mode = next;
+  if (next === 'focus' || next === 'single') {
+    dashboardState.selectedCameraId = String(dashboardState.selectedCameraId || dashboardState.order[0] || '');
+  }
+  applyDashboardModeRules(previous);
+  clampDashboardPage();
   saveDashboardState();
   renderDashboard();
 }
@@ -7285,7 +7752,7 @@ function setDashboardGrid(size) {
   // camera page can strand the user on a mostly-empty last page when switching
   // back to 2x2. Treat density changes as a fresh dashboard view and return to
   // page 1 so the grid fills with the first available cameras.
-  dashboardState.gridSize = size;
+  dashboardState.density = size;
   // If the user moves from 4x4/3x3 down to a smaller grid, keep manual wide
   // choices but clamp them to the available number of columns.
   const dim = dashboardGridDimension();
@@ -7295,7 +7762,7 @@ function setDashboardGrid(size) {
     if (span <= 1) delete dashboardState.gridSpans[id];
     else dashboardState.gridSpans[id] = span;
   });
-  dashboardState.page = 0;
+  dashboardState.currentPage = 0;
   clampDashboardPage();
   saveDashboardState();
   renderDashboard();
@@ -7303,11 +7770,11 @@ function setDashboardGrid(size) {
 
 function setDashboardSelected(id) {
   dashboardState.selectedCameraId = String(id);
-  if (!dashboardState.focusCameraId) dashboardState.focusCameraId = String(id);
-  const oldPage = dashboardState.page || 0;
+  if (!dashboardState.selectedCameraId) dashboardState.selectedCameraId = String(id);
+  const oldPage = dashboardState.currentPage || 0;
   goToDashboardCameraPage(id);
   saveDashboardState();
-  if ((dashboardState.page || 0) !== oldPage) renderDashboard();
+  if ((dashboardState.currentPage || 0) !== oldPage) renderDashboard();
   else {
     renderDashboardMap();
     document.querySelectorAll('.dash-card').forEach(el => el.classList.toggle('selected', el.dataset.id === String(id)));
@@ -7315,17 +7782,17 @@ function setDashboardSelected(id) {
 }
 
 function promoteDashboardCamera(id) {
-  dashboardState.focusCameraId = String(id);
+  dashboardState.selectedCameraId = String(id);
   dashboardState.selectedCameraId = String(id);
   goToDashboardCameraPage(id);
-  if (dashboardState.layout === 'grid') dashboardState.layout = 'focus';
+  if (dashboardState.mode === 'grid') dashboardState.mode = 'focus';
   saveDashboardState();
   renderDashboard();
 }
 
 
 function cycleDashboardGridSpan(id) {
-  if (dashboardState.layout !== 'grid') return;
+  if (dashboardState.mode !== 'grid') return;
   const idKey = String(id);
   const dim = dashboardGridDimension();
   dashboardState.gridSpans = dashboardState.gridSpans || {};
@@ -7334,7 +7801,7 @@ function cycleDashboardGridSpan(id) {
   if (next === 1) delete dashboardState.gridSpans[idKey];
   else dashboardState.gridSpans[idKey] = next;
   dashboardState.selectedCameraId = idKey;
-  dashboardState.page = dashboardPageIndexForId(idKey);
+  dashboardState.currentPage = dashboardPageIndexForId(idKey);
   saveDashboardState();
   markDashboardDirty();
   renderDashboard();
@@ -7399,12 +7866,17 @@ function renderDashboard() {
   const wall = document.getElementById('dashboardFeedWall');
   if (!wall) return;
 
-  document.querySelectorAll('#dashboardBar [data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === dashboardState.layout));
-  document.querySelectorAll('#dashboardBar [data-grid]').forEach(b => b.classList.toggle('active', b.dataset.grid === dashboardState.gridSize));
+  applyDashboardModeRules();
+  const mode = dashboardMode();
+
+  document.querySelectorAll('#dashboardBar [data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+  document.querySelectorAll('#dashboardBar [data-grid]').forEach(b => b.classList.toggle('active', b.dataset.grid === dashboardState.density));
 
   wall.className = '';
-  if (dashboardState.layout === 'grid') wall.classList.add(`grid-${dashboardState.gridSize}`);
-  else wall.classList.add(`mode-${dashboardState.layout}`);
+  if (mode === 'grid') wall.classList.add(`grid-${dashboardState.density}`);
+  else wall.classList.add(`mode-${mode}`);
+  if (mode === 'mosaic' && dashboardState.lockLayout) wall.classList.add('mosaic-locked');
+  if (mode !== 'mosaic') wall.style.minHeight = '';
   wall.classList.add(dashboardState.mediaFit === 'cover' ? 'media-fit-fill' : 'media-fit-fit');
   ensureDashboardMapResponsive();
 
@@ -7428,17 +7900,14 @@ function renderDashboard() {
     return;
   }
 
-  if (!dashboardState.focusCameraId || !dashboardState.cameras.includes(String(dashboardState.focusCameraId))) {
-    dashboardState.focusCameraId = String(allCams[0].id);
-  }
-  if (!dashboardState.selectedCameraId || !dashboardState.cameras.includes(String(dashboardState.selectedCameraId))) {
-    dashboardState.selectedCameraId = String(dashboardState.focusCameraId);
+  if (!dashboardState.selectedCameraId || !dashboardState.order.includes(String(dashboardState.selectedCameraId))) {
+    dashboardState.selectedCameraId = String(allCams[0].id);
   }
 
-  if ((dashboardState.layout === 'single' || dashboardState.layout === 'focus') && dashboardState.focusCameraId) {
-    const focusPage = dashboardPageIndexForId(dashboardState.focusCameraId);
-    if ((dashboardState.page || 0) !== focusPage) {
-      dashboardState.page = focusPage;
+  if ((mode === 'single' || mode === 'focus') && dashboardState.selectedCameraId) {
+    const focusPage = dashboardPageIndexForId(dashboardState.selectedCameraId);
+    if ((dashboardState.currentPage || 0) !== focusPage) {
+      dashboardState.currentPage = focusPage;
       cams = dashboardPageCameras();
     }
   }
@@ -7446,11 +7915,21 @@ function renderDashboard() {
   const selectedOnPage = cams.some(cam => String(cam.id) === String(dashboardState.selectedCameraId));
   if (!selectedOnPage && cams[0]) dashboardState.selectedCameraId = String(cams[0].id);
 
+  if (mode === 'single') {
+    const focused = dashboardCameraById(dashboardState.selectedCameraId) || cams[0] || allCams[0];
+    cams = focused ? [focused] : [];
+  } else if (mode === 'focus') {
+    const focused = dashboardCameraById(dashboardState.selectedCameraId) || cams[0] || allCams[0];
+    const previews = allCams.filter(cam => String(cam.id) !== String(focused?.id)).slice(0, 6);
+    cams = focused ? [focused, ...previews] : previews;
+  }
+
   const cardHtml = cams.map((cam, idx) => dashboardCardHtml(cam, idx));
-  if (dashboardState.layout === 'mosaic' && dashboardState.mapTileVisible) cardHtml.push(dashboardMapTileHtml());
+  if (mode === 'mosaic' && dashboardState.mapAsTile) cardHtml.push(dashboardMapTileHtml());
   wall.innerHTML = cardHtml.join('');
+  if (mode === 'mosaic') updateMosaicCanvasHeight();
   cams.forEach((cam, idx) => mountDashboardFeed(cam, idx));
-  if (dashboardState.layout === 'mosaic' && dashboardState.mapTileVisible) {
+  if (mode === 'mosaic' && dashboardState.mapAsTile) {
     setTimeout(() => { initDashboardMapTile(); renderDashboardMapTile(); }, 40);
   }
   setupMosaicCardHandlers();
@@ -7460,18 +7939,106 @@ function renderDashboard() {
 }
 
 function navigateDashboardSingle(delta) {
-  const ids = dashboardState.cameras.map(String);
+  const ids = dashboardState.order.map(String);
   if (!ids.length) return;
-  const current = String(dashboardState.focusCameraId || dashboardState.selectedCameraId || ids[0]);
+  const current = String(dashboardState.selectedCameraId || ids[0]);
   let idx = ids.indexOf(current);
   if (idx < 0) idx = 0;
   idx = (idx + delta + ids.length) % ids.length;
   const nextId = ids[idx];
-  dashboardState.focusCameraId = nextId;
   dashboardState.selectedCameraId = nextId;
-  dashboardState.page = dashboardPageIndexForId(nextId);
+  dashboardState.currentPage = dashboardPageIndexForId(nextId);
   saveDashboardState();
   renderDashboard();
+}
+
+function dashboardTileMenuHtml(cam, manualSpan) {
+  const id = String(cam.id);
+  const mode = dashboardMode();
+  const order = dashboardState.order.map(String);
+  const pos = order.indexOf(id);
+  const canMoveEarlier = pos > 0;
+  const canMoveLater = pos >= 0 && pos < order.length - 1;
+  const widthControls = mode === 'grid'
+    ? `<div class="dash-menu-sep"></div>
+       <div class="dash-menu-label">Set width</div>
+       ${[1,2,3,4].map(n => {
+         const dim = dashboardGridDimension();
+         const disabled = n > dim ? ' disabled' : '';
+         const check = Number(manualSpan) === n ? '<span class="dash-menu-check">✓</span>' : '';
+         return `<button class="dash-menu-item" data-action="set-span" data-span="${n}"${disabled}>${n}×${check}</button>`;
+       }).join('')}`
+    : '';
+  const focusLabel = mode === 'focus' ? 'Set as focus' : 'Focus';
+  const singleLabel = mode === 'single' ? 'Show in single' : 'Open single';
+  return `<div class="dash-actions">
+    <button class="dash-menu-trigger" data-action="tile-menu" type="button" aria-haspopup="menu" aria-expanded="false" title="Tile actions">⋯</button>
+    <div class="dash-tile-menu" role="menu">
+      <button class="dash-menu-item" data-action="focus" role="menuitem">${focusLabel}</button>
+      <button class="dash-menu-item" data-action="single" role="menuitem">${singleLabel}</button>
+      <button class="dash-menu-item" data-action="locate" role="menuitem">Locate on map</button>
+      <button class="dash-menu-item" data-action="refresh" role="menuitem">Refresh now</button>
+      <div class="dash-menu-sep"></div>
+      <button class="dash-menu-item" data-action="move-earlier" role="menuitem"${canMoveEarlier ? '' : ' disabled'}>Move earlier</button>
+      <button class="dash-menu-item" data-action="move-later" role="menuitem"${canMoveLater ? '' : ' disabled'}>Move later</button>
+      ${widthControls}
+      <div class="dash-menu-sep"></div>
+      <button class="dash-menu-item danger" data-action="remove" role="menuitem">Remove from dashboard</button>
+    </div>
+  </div>`;
+}
+
+function dashboardMapTileMenuHtml() {
+  return `<div class="dash-actions">
+    <button class="dash-menu-trigger" data-action="tile-menu" type="button" aria-haspopup="menu" aria-expanded="false" title="Tile actions">⋯</button>
+    <div class="dash-tile-menu" role="menu">
+      <button class="dash-menu-item" data-action="fit-map-tile" role="menuitem">Fit cameras</button>
+      <div class="dash-menu-sep"></div>
+      <button class="dash-menu-item danger" data-action="remove-map-tile" role="menuitem">Remove map tile</button>
+    </div>
+  </div>`;
+}
+
+function closeDashboardTileMenus(exceptCard = null) {
+  document.querySelectorAll('.dash-card.menu-open').forEach(card => {
+    if (exceptCard && card === exceptCard) return;
+    card.classList.remove('menu-open');
+    const trigger = card.querySelector('.dash-menu-trigger');
+    if (trigger) trigger.setAttribute('aria-expanded', 'false');
+  });
+}
+
+function setDashboardGridSpan(id, span) {
+  if (dashboardState.mode !== 'grid') return;
+  const idKey = String(id);
+  const dim = dashboardGridDimension();
+  const next = Math.max(1, Math.min(dim, Number(span) || 1));
+  dashboardState.gridSpans = dashboardState.gridSpans || {};
+  if (next <= 1) delete dashboardState.gridSpans[idKey];
+  else dashboardState.gridSpans[idKey] = next;
+  dashboardState.selectedCameraId = idKey;
+  dashboardState.currentPage = dashboardPageIndexForId(idKey);
+  saveDashboardState();
+  markDashboardDirty();
+  renderDashboard();
+}
+
+function moveDashboardCameraRelative(id, delta) {
+  const idKey = String(id);
+  const order = dashboardState.order.map(String);
+  const idx = order.indexOf(idKey);
+  if (idx < 0) return false;
+  const nextIdx = Math.max(0, Math.min(order.length - 1, idx + delta));
+  if (nextIdx === idx) return false;
+  order.splice(idx, 1);
+  order.splice(nextIdx, 0, idKey);
+  dashboardState.order = order;
+  dashboardState.selectedCameraId = idKey;
+  dashboardState.currentPage = dashboardPageIndexForId(idKey);
+  saveDashboardState();
+  markDashboardDirty();
+  renderDashboard();
+  return true;
 }
 
 function dashboardCardHtml(cam, idx) {
@@ -7482,72 +8049,161 @@ function dashboardCardHtml(cam, idx) {
   const dir = heading !== null ? `${DIR_NAMES[heading]} · ${Math.round(bearing)}°` : (directionLabel ? `${directionLabel} · label only` : 'No bearing');
   const updated = dashboardLastRefresh.get(String(cam.id));
   const refreshText = updated ? `Updated ${new Date(updated).toLocaleTimeString()}` : 'Waiting for refresh';
-  const isFocusMain = dashboardState.layout === 'focus' && String(cam.id) === String(dashboardState.focusCameraId);
-  const isFocusThumb = dashboardState.layout === 'focus' && String(cam.id) !== String(dashboardState.focusCameraId);
-  const isSingle = dashboardState.layout === 'single' && String(cam.id) === String(dashboardState.focusCameraId);
+  const mode = dashboardMode();
+  const isFocusMain = mode === 'focus' && String(cam.id) === String(dashboardState.selectedCameraId);
+  const isFocusThumb = mode === 'focus' && String(cam.id) !== String(dashboardState.selectedCameraId);
+  const isSingle = mode === 'single' && String(cam.id) === String(dashboardState.selectedCameraId);
   const selected = dashboardState.selectedCameraId === String(cam.id);
 
   let mosaicStyle = '';
-  if (dashboardState.layout === 'mosaic') {
-    const pos = dashboardState.mosaic[cam.id] || defaultMosaicPos(idx);
-    mosaicStyle = `style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;height:${pos.h}%;"`;
+  if (mode === 'mosaic') {
+    const pos = normaliseMosaicPos(dashboardState.mosaicLayout[cam.id] || defaultMosaicPos(idx));
+    dashboardState.mosaicLayout[cam.id] = pos;
+    mosaicStyle = mosaicInlineStyle(pos);
   }
 
-  const manualSpan = dashboardState.layout === 'grid' ? dashboardGridSpanForId(cam.id) : 1;
+  const manualSpan = mode === 'grid' ? dashboardGridSpanForId(cam.id) : 1;
   const cls = [
     'dash-card',
     selected ? 'selected' : '',
-    dashboardState.layout === 'grid' && manualSpan > 1 ? `grid-span-${manualSpan}` : '',
+    mode === 'grid' && manualSpan > 1 ? `grid-span-${manualSpan}` : '',
     isFocusMain ? 'focus-main' : '',
     isFocusThumb ? 'focus-thumb' : '',
     isSingle ? 'single-active' : ''
   ].filter(Boolean).join(' ');
 
-  const spanButton = dashboardState.layout === 'grid'
-    ? `<button class="dash-mini-btn dash-span-btn" data-action="span" title="Cycle tile width in this grid">Width ${manualSpan}×</button>`
-    : '';
-  const draggableAttr = dashboardState.layout === 'mosaic' || dashboardState.layout === 'single' ? '' : 'draggable="true"';
+  const tileMenu = dashboardTileMenuHtml(cam, manualSpan);
+  const draggableAttr = mode === 'grid' ? 'draggable="true"' : '';
   const singleNav = isSingle ? `
     <button class="single-nav-btn prev" data-action="single-prev" title="Previous camera" aria-label="Previous camera">‹</button>
     <button class="single-nav-btn next" data-action="single-next" title="Next camera" aria-label="Next camera">›</button>` : '';
 
   return `<article class="${cls}" data-id="${escapeHtml(cam.id)}" ${draggableAttr} ${mosaicStyle}>
     ${singleNav}
-    <div class="dash-actions">
-      <button class="dash-mini-btn" data-action="focus" title="Promote">Focus</button>
-      <button class="dash-mini-btn" data-action="single" title="Single">Single</button>
-      ${spanButton}
-      <button class="dash-mini-btn" data-action="locate" title="Locate on globe">Locate</button>
-      <button class="dash-mini-btn" data-action="open" title="Open feed">↗</button>
-      <button class="dash-mini-btn" data-action="refresh" title="Refresh">↻</button>
-      <button class="dash-mini-btn" data-action="remove" title="Remove">×</button>
-    </div>
-    <div class="dash-media" id="dash-media-${dashDomId(cam.id)}">
-      <div class="dash-no-feed">Loading feed…</div>
+    ${tileMenu}
+    <div class="dash-media feed-loading" id="dash-media-${dashDomId(cam.id)}">
+      <div class="dash-feed-state-dot"></div>
+      <div class="dash-feed-overlay"><div class="dash-feed-card"><div class="dash-feed-spinner"></div><div class="dash-feed-title">Loading feed…</div><div class="dash-feed-detail">Contacting camera source.</div></div></div>
     </div>
     <div class="dash-meta">
       <div class="dash-title" title="${title}">${title}</div>
       ${dashboardDirectionBadge(cam)}
-      <div class="dash-sub">${escapeHtml(dir)} · <span id="dash-updated-${dashDomId(cam.id)}">${escapeHtml(refreshText)}</span></div>
+      <div class="dash-sub">${escapeHtml(dir)}</div><div class="dash-feed-age" id="dash-updated-${dashDomId(cam.id)}">${escapeHtml(refreshText)}</div>
     </div>
     <div class="dash-resize" data-action="resize"></div>
   </article>`;
 }
 
-function defaultMosaicPos(idx) {
-  const col = idx % 4;
-  const row = Math.floor(idx / 4);
-  return { x: 1 + col * 24.5, y: 1 + row * 24, w: 23, h: 22 };
+function clampNumber(value, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, n));
 }
+
+function mosaicWallMetrics(wall = document.getElementById('dashboardFeedWall')) {
+  const rect = wall ? wall.getBoundingClientRect() : { width: 1200, height: 760 };
+  const width = Math.max(1, rect.width || 1200);
+  const colW = width / MOSAIC_GRID_COLS;
+  const rowH = MOSAIC_ROW_HEIGHT + MOSAIC_GAP;
+  return { width, colW, rowH, gap: MOSAIC_GAP, minRows: 8 };
+}
+
+function migratePercentMosaicPos(pos) {
+  if (!pos || typeof pos !== 'object') return null;
+  if (Number.isFinite(Number(pos.col)) || Number.isFinite(Number(pos.row))) return pos;
+  if (!Number.isFinite(Number(pos.x)) || !Number.isFinite(Number(pos.y))) return null;
+  const col = Math.round((Number(pos.x) / 100) * MOSAIC_GRID_COLS);
+  const colSpan = Math.round((Number(pos.w || 24) / 100) * MOSAIC_GRID_COLS);
+  // Old layouts used percentage height. Map that to roughly a 9-row canvas so
+  // old saved dashboards still open without collapsing into one row.
+  const row = Math.round((Number(pos.y) / 100) * 9);
+  const rowSpan = Math.round((Number(pos.h || 22) / 100) * 9);
+  return { col, row, colSpan, rowSpan };
+}
+
+function normaliseMosaicPos(pos) {
+  const migrated = migratePercentMosaicPos(pos) || {};
+  let colSpan = Math.round(Number(migrated.colSpan ?? MOSAIC_DEFAULT_COL_SPAN));
+  let rowSpan = Math.round(Number(migrated.rowSpan ?? MOSAIC_DEFAULT_ROW_SPAN));
+  colSpan = clampNumber(colSpan, MOSAIC_MIN_COL_SPAN, MOSAIC_GRID_COLS);
+  rowSpan = clampNumber(rowSpan, MOSAIC_MIN_ROW_SPAN, 12);
+  let col = Math.round(Number(migrated.col ?? 0));
+  let row = Math.round(Number(migrated.row ?? 0));
+  col = clampNumber(col, 0, Math.max(0, MOSAIC_GRID_COLS - colSpan));
+  row = Math.max(0, row);
+  return { col, row, colSpan, rowSpan };
+}
+
+function mosaicPosToStyle(pos, wall = document.getElementById('dashboardFeedWall')) {
+  const p = normaliseMosaicPos(pos);
+  const m = mosaicWallMetrics(wall);
+  const left = p.col * m.colW + MOSAIC_GAP / 2;
+  const top = p.row * m.rowH + MOSAIC_GAP / 2;
+  const width = p.colSpan * m.colW - MOSAIC_GAP;
+  const height = p.rowSpan * m.rowH - MOSAIC_GAP;
+  return { left, top, width, height, pos: p };
+}
+
+function applyMosaicCardStyle(card, pos, wall = document.getElementById('dashboardFeedWall')) {
+  if (!card) return;
+  const s = mosaicPosToStyle(pos, wall);
+  card.style.left = `${Math.round(s.left)}px`;
+  card.style.top = `${Math.round(s.top)}px`;
+  card.style.width = `${Math.max(180, Math.round(s.width))}px`;
+  card.style.height = `${Math.max(140, Math.round(s.height))}px`;
+}
+
+function mosaicInlineStyle(pos) {
+  const s = mosaicPosToStyle(pos);
+  return `style="left:${Math.round(s.left)}px;top:${Math.round(s.top)}px;width:${Math.max(180, Math.round(s.width))}px;height:${Math.max(140, Math.round(s.height))}px;"`;
+}
+
+function defaultMosaicPos(idx) {
+  const colSpan = idx === 0 ? 4 : 3;
+  const rowSpan = idx === 0 ? 4 : 3;
+  const col = (idx * 3) % MOSAIC_GRID_COLS;
+  const row = Math.floor((idx * 3) / MOSAIC_GRID_COLS) * 3;
+  return normaliseMosaicPos({ col, row, colSpan, rowSpan });
+}
+
+function updateMosaicCanvasHeight() {
+  const wall = document.getElementById('dashboardFeedWall');
+  if (!wall || dashboardMode() !== 'mosaic') return;
+  const items = Object.values(dashboardState.mosaicLayout || {}).map(normaliseMosaicPos);
+  const maxRow = Math.max(8, ...items.map(p => p.row + p.rowSpan + 1));
+  wall.style.minHeight = `${maxRow * (MOSAIC_ROW_HEIGHT + MOSAIC_GAP) + MOSAIC_GAP}px`;
+}
+
+function ensureMosaicGuides(wall) {
+  if (!wall) return null;
+  let v = wall.querySelector('.mosaic-guide.v');
+  let h = wall.querySelector('.mosaic-guide.h');
+  if (!v) { v = document.createElement('div'); v.className = 'mosaic-guide v'; wall.appendChild(v); }
+  if (!h) { h = document.createElement('div'); h.className = 'mosaic-guide h'; wall.appendChild(h); }
+  return { v, h };
+}
+
+function updateMosaicGuides(wall, pos) {
+  const guides = ensureMosaicGuides(wall);
+  if (!guides || !pos) return;
+  const p = normaliseMosaicPos(pos);
+  const m = mosaicWallMetrics(wall);
+  guides.v.style.left = `${Math.round(p.col * m.colW + MOSAIC_GAP / 2)}px`;
+  guides.h.style.top = `${Math.round(p.row * m.rowH + MOSAIC_GAP / 2)}px`;
+  guides.v.classList.add('active');
+  guides.h.classList.add('active');
+}
+
+function clearMosaicGuides() {
+  document.querySelectorAll('.mosaic-guide').forEach(el => el.classList.remove('active'));
+}
+
 function dashboardMapTileHtml() {
   const fallback = defaultMosaicPos(dashboardPageCameras().length);
-  const pos = dashboardState.mosaic.__map__ || fallback;
-  if (!dashboardState.mosaic.__map__) dashboardState.mosaic.__map__ = pos;
-  return `<article class="dash-card dash-map-tile" data-id="__map__" style="left:${pos.x}%;top:${pos.y}%;width:${pos.w}%;height:${pos.h}%;">
-    <div class="dash-actions">
-      <button class="dash-mini-btn" data-action="fit-map-tile" title="Fit dashboard cameras">Fit</button>
-      <button class="dash-mini-btn" data-action="remove-map-tile" title="Remove map tile">×</button>
-    </div>
+  const pos = normaliseMosaicPos(dashboardState.mosaicLayout.__map__ || fallback);
+  dashboardState.mosaicLayout.__map__ = pos;
+  return `<article class="dash-card dash-map-tile" data-id="__map__" ${mosaicInlineStyle(pos)}>
+    ${dashboardMapTileMenuHtml()}
     <div class="dash-media"><div id="dashboardMapTileMap" class="dash-map-tile-map"></div></div>
     <div class="dash-meta">
       <div class="dash-title">2D situation map</div>
@@ -7559,8 +8215,8 @@ function dashboardMapTileHtml() {
 }
 
 function toggleDashboardMapTile(force) {
-  dashboardState.mapTileVisible = typeof force === 'boolean' ? force : !dashboardState.mapTileVisible;
-  if (dashboardState.mapTileVisible) dashboardState.layout = 'mosaic';
+  if (!dashboardMapTileAllowed()) return;
+  dashboardState.mapAsTile = typeof force === 'boolean' ? force : !dashboardState.mapAsTile;
   saveDashboardState();
   markDashboardDirty();
   renderDashboard();
@@ -7614,6 +8270,196 @@ function renderDashboardMapTile() {
 }
 
 
+
+function dashboardRefreshIntervalMs() {
+  return Math.max(15000, Math.min(300000, Number(dashboardRefreshIntervalSec || 30) * 1000));
+}
+
+function dashboardStaleAfterMs() {
+  return Math.max(90000, Math.max(Number(dashboardStaleAfterSec || 120) * 1000, dashboardRefreshIntervalMs() * 3));
+}
+
+function dashboardRefreshStaggerMs(count) {
+  // Spread a visible-page refresh wave across a meaningful slice of the cadence.
+  // This avoids 9–16 camera requests hammering sources at the same instant.
+  if (count <= 1) return 0;
+  const interval = dashboardRefreshIntervalMs();
+  const maxSpread = Math.min(interval * 0.72, 18000);
+  return Math.max(750, Math.floor(maxSpread / Math.max(1, count - 1)));
+}
+
+function dashboardFeedAgeText(ts) {
+  if (!ts) return 'No successful refresh yet';
+  const ageSec = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (ageSec < 8) return 'Updated just now';
+  if (ageSec < 60) return `Updated ${ageSec}s ago`;
+  const mins = Math.round(ageSec / 60);
+  if (mins < 60) return `Updated ${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  return `Updated ${hrs}h ago`;
+}
+
+function updateDashboardRefreshInterval(sec) {
+  dashboardRefreshIntervalSec = Math.max(15, Math.min(300, Number(sec) || 30));
+  dashboardStaleAfterSec = Math.max(120, dashboardRefreshIntervalSec * 4);
+  try { localStorage.setItem('vigil.dashboard.refreshIntervalSec', String(dashboardRefreshIntervalSec)); } catch (_) {}
+  const select = document.getElementById('dashRefreshInterval');
+  if (select) select.value = String(dashboardRefreshIntervalSec);
+  if (activeView === 'dashboard') scheduleDashboardRefreshWave({ immediate: false, forceHydrate: false, reason: 'cadence-change' });
+  updateDashboardStatus();
+}
+
+function loadDashboardRefreshSettings() {
+  let stored = null;
+  try { stored = localStorage.getItem('vigil.dashboard.refreshIntervalSec'); } catch (_) {}
+  dashboardRefreshIntervalSec = Math.max(15, Math.min(300, Number(stored || dashboardRefreshIntervalSec || 30)));
+  dashboardStaleAfterSec = Math.max(120, dashboardRefreshIntervalSec * 4);
+  const select = document.getElementById('dashRefreshInterval');
+  if (select) select.value = String(dashboardRefreshIntervalSec);
+}
+
+function checkDashboardStaleFeeds() {
+  if (activeView !== 'dashboard') return;
+  const staleAfter = dashboardStaleAfterMs();
+  const now = Date.now();
+  dashboardPageCameras().forEach(cam => {
+    const idKey = String(cam.id);
+    const state = dashboardFeedState(idKey);
+    const last = state.lastSuccessAt || dashboardLastRefresh.get(idKey);
+    if (!last) return;
+    if ((state.status === 'live' || state.status === 'refreshing') && now - last > staleAfter) {
+      setDashboardFeedState(idKey, {
+        status: 'stale',
+        lastSuccessAt: last,
+        message: 'No successful refresh inside the expected window.'
+      });
+    } else {
+      renderDashboardFeedState(idKey);
+    }
+  });
+  updateDashboardStatus();
+}
+
+function startDashboardStaleWatcher() {
+  if (dashboardStaleWatchTimer) clearInterval(dashboardStaleWatchTimer);
+  dashboardStaleWatchTimer = setInterval(checkDashboardStaleFeeds, 15000);
+}
+
+function scheduleDashboardRefreshWave(options = {}) {
+  const { immediate = false, forceHydrate = false } = options;
+  if (dashboardRefreshPaused || document.hidden || activeView !== 'dashboard') return;
+  const cams = dashboardPageCameras();
+  dashboardRefreshTimers.forEach(t => clearTimeout(t));
+  dashboardRefreshTimers.clear();
+  const step = dashboardRefreshStaggerMs(cams.length);
+  const startDelay = immediate ? 0 : dashboardRefreshIntervalMs();
+  cams.forEach((cam, idx) => {
+    const idKey = String(cam.id);
+    const jitter = immediate ? 0 : Math.floor(Math.random() * 450);
+    const delay = startDelay + (idx * step) + jitter;
+    const timer = setTimeout(() => {
+      const current = dashboardCameraById(idKey) || cam;
+      mountDashboardFeed(current, idx, { forceHydrate });
+    }, delay);
+    dashboardRefreshTimers.set(idKey, timer);
+  });
+  updateDashboardStatus();
+}
+
+function formatDashboardFeedTime(ts) {
+  return ts ? new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '—';
+}
+
+function dashboardFeedState(id) {
+  const idKey = String(id);
+  if (!dashboardFeedStates.has(idKey)) {
+    dashboardFeedStates.set(idKey, {
+      status: 'loading',
+      lastSuccessAt: dashboardLastRefresh.get(idKey) || null,
+      lastAttemptAt: null,
+      lastUrl: null,
+      failures: dashboardErrorCounts.get(idKey) || 0,
+      message: ''
+    });
+  }
+  return dashboardFeedStates.get(idKey);
+}
+
+function setDashboardFeedState(id, patch = {}) {
+  const idKey = String(id);
+  const prev = dashboardFeedState(idKey);
+  const next = { ...prev, ...patch };
+  dashboardFeedStates.set(idKey, next);
+  renderDashboardFeedState(idKey);
+  return next;
+}
+
+function ensureDashboardFeedChrome(media, idKey) {
+  if (!media) return;
+  if (!media.querySelector('.dash-feed-state-dot')) {
+    const dot = document.createElement('div');
+    dot.className = 'dash-feed-state-dot';
+    media.appendChild(dot);
+  }
+  let overlay = media.querySelector('.dash-feed-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.className = 'dash-feed-overlay';
+    overlay.innerHTML = '<div class="dash-feed-card"><div class="dash-feed-title">Loading feed…</div></div>';
+    media.appendChild(overlay);
+  }
+  overlay.dataset.id = idKey;
+}
+
+function dashboardFeedStateText(state) {
+  const last = state.lastSuccessAt ? `Last successful image: ${formatDashboardFeedTime(state.lastSuccessAt)}` : 'No successful image yet';
+  if (state.status === 'loading') return { title: 'Loading feed…', detail: 'Contacting camera source.', spinner: true, retry: false };
+  if (state.status === 'refreshing') return { title: 'Refreshing…', detail: last, spinner: true, retry: false };
+  if (state.status === 'no_url') return { title: 'Feed unavailable', detail: 'No image or video URL is available for this camera.', spinner: false, retry: false };
+  if (state.status === 'stale') return { title: 'Feed stale', detail: `${last}. Keeping last good image visible until the source updates again.`, spinner: false, retry: true };
+  if (state.status === 'failed') return { title: 'Feed unavailable', detail: state.lastSuccessAt ? `${last}. Retry failed.` : 'The camera source did not return an image.', spinner: false, retry: true };
+  return { title: 'Live/updated', detail: state.lastSuccessAt ? dashboardFeedAgeText(state.lastSuccessAt) : last, spinner: false, retry: false };
+}
+
+function renderDashboardFeedState(id) {
+  const idKey = String(id);
+  const media = document.getElementById(`dash-media-${dashDomId(idKey)}`);
+  if (!media) return;
+  ensureDashboardFeedChrome(media, idKey);
+  const state = dashboardFeedState(idKey);
+  const classes = ['feed-loading', 'feed-refreshing', 'feed-no-url', 'feed-failed', 'feed-stale', 'feed-live'];
+  media.classList.remove(...classes);
+  media.classList.add(`feed-${state.status === 'no_url' ? 'no-url' : state.status}`);
+  const card = media.closest('.dash-card');
+  if (card) {
+    card.classList.remove('offline', 'stale', 'live', 'refreshing');
+    if (state.status === 'live') card.classList.add('live');
+    else if (state.status === 'refreshing' || state.status === 'loading') card.classList.add('refreshing');
+    else if (state.status === 'stale') card.classList.add('stale');
+    else if (state.status === 'failed' || state.status === 'no_url') card.classList.add('offline');
+  }
+  const overlay = media.querySelector('.dash-feed-overlay');
+  const copy = dashboardFeedStateText(state);
+  if (overlay) {
+    overlay.innerHTML = `<div class="dash-feed-card">
+      ${copy.spinner ? '<div class="dash-feed-spinner"></div>' : ''}
+      <div class="dash-feed-title">${escapeHtml(copy.title)}</div>
+      <div class="dash-feed-detail">${escapeHtml(copy.detail)}</div>
+      ${copy.retry ? '<button class="dash-feed-retry" data-action="retry-feed" type="button">Retry</button>' : ''}
+    </div>`;
+  }
+  const updated = document.getElementById(`dash-updated-${dashDomId(idKey)}`);
+  if (updated) {
+    updated.classList.remove('live', 'refreshing', 'stale', 'failed');
+    if (state.status === 'live') { updated.textContent = dashboardFeedAgeText(state.lastSuccessAt); updated.classList.add('live'); }
+    else if (state.status === 'refreshing') { updated.textContent = `Refreshing · ${state.lastSuccessAt ? dashboardFeedAgeText(state.lastSuccessAt) : 'no previous image'}`; updated.classList.add('refreshing'); }
+    else if (state.status === 'stale') { updated.textContent = `Stale · ${state.lastSuccessAt ? dashboardFeedAgeText(state.lastSuccessAt) : 'no successful refresh'}`; updated.classList.add('stale'); }
+    else if (state.status === 'loading') { updated.textContent = 'Loading feed…'; updated.classList.add('refreshing'); }
+    else { updated.textContent = state.status === 'no_url' ? 'No feed URL' : 'Feed unavailable'; updated.classList.add('failed'); }
+  }
+}
+
+
 async function mountDashboardFeed(cam, idx, options = {}) {
   const idKey = String(cam?.id ?? '');
   const media = document.getElementById(`dash-media-${dashDomId(idKey)}`);
@@ -7621,6 +8467,13 @@ async function mountDashboardFeed(cam, idx, options = {}) {
 
   const requestToken = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   media.dataset.feedRequest = requestToken;
+  ensureDashboardFeedChrome(media, idKey);
+  const existing = dashboardFeedState(idKey);
+  setDashboardFeedState(idKey, {
+    status: existing.lastSuccessAt ? 'refreshing' : 'loading',
+    lastAttemptAt: Date.now(),
+    message: ''
+  });
 
   let resolved = await resolveDashboardCameraFeed(cam, { forceHydrate: !!options.forceHydrate });
   if (!resolved || media.dataset.feedRequest !== requestToken) return;
@@ -7636,6 +8489,7 @@ async function mountDashboardFeed(cam, idx, options = {}) {
     video.controls = false;
     media.innerHTML = '';
     media.appendChild(video);
+    ensureDashboardFeedChrome(media, idKey);
 
     if (videoUrl.includes('.m3u8') && typeof Hls !== 'undefined' && Hls.isSupported()) {
       if (dashboardHls.has(idKey)) { dashboardHls.get(idKey).destroy(); dashboardHls.delete(idKey); }
@@ -7673,60 +8527,106 @@ function renderDashboardImageFeed(cam, imageUrl, idx, manual=false) {
   const idKey = String(cam?.id ?? '');
   const media = document.getElementById(`dash-media-${dashDomId(idKey)}`);
   if (!media || !idKey) return;
+  ensureDashboardFeedChrome(media, idKey);
+
+  const previous = dashboardFeedState(idKey);
+  const hasVisibleSuccess = !!previous.lastSuccessAt && !!media.querySelector('img, video');
+  setDashboardFeedState(idKey, {
+    status: hasVisibleSuccess ? 'refreshing' : 'loading',
+    lastAttemptAt: Date.now(),
+    lastUrl: imageUrl,
+    message: manual ? 'Manual retry' : ''
+  });
+
   const img = document.createElement('img');
   img.alt = cameraTitle(cam);
   img.loading = 'lazy';
   img.draggable = false;
+  img.style.opacity = hasVisibleSuccess ? '0' : '';
+  img.style.position = hasVisibleSuccess ? 'absolute' : '';
+  img.style.inset = hasVisibleSuccess ? '0' : '';
   img.onload = () => {
+    if (media.dataset.feedImageRequest !== img.dataset.feedImageRequest) return;
+    media.querySelectorAll('img, video').forEach(el => { if (el !== img) el.remove(); });
+    img.style.opacity = '';
+    img.style.position = '';
+    img.style.inset = '';
+    if (!img.parentNode) media.insertBefore(img, media.firstChild);
     applyDashboardMediaAspect(idKey, img);
     markDashboardRefresh(idKey, true);
     scheduleDashboardImageRefresh(cam, idx);
   };
   img.onerror = () => {
+    if (media.dataset.feedImageRequest !== img.dataset.feedImageRequest) return;
+    if (img.parentNode) img.remove();
     markDashboardRefresh(idKey, false);
     scheduleDashboardImageRefresh(cam, idx, true);
   };
+  const req = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  img.dataset.feedImageRequest = req;
+  media.dataset.feedImageRequest = req;
   const sep = imageUrl.includes('?') ? '&' : '?';
   img.src = imageUrl + sep + '_dash=' + Date.now();
-  media.innerHTML = '';
-  media.appendChild(img);
+  if (!hasVisibleSuccess) {
+    media.querySelectorAll('img, video').forEach(el => el.remove());
+    media.insertBefore(img, media.firstChild);
+  } else {
+    media.appendChild(img);
+  }
+  ensureDashboardFeedChrome(media, idKey);
 }
 
 function scheduleDashboardImageRefresh(cam, idx, errored=false) {
-  if (dashboardRefreshPaused || document.hidden) return;
+  if (dashboardRefreshPaused || document.hidden || activeView !== 'dashboard') return;
   const idKey = String(cam?.id ?? '');
   if (!idKey) return;
   const failures = dashboardErrorCounts.get(idKey) || 0;
-  if (failures >= 3) return;
+  if (failures >= 5) return;
 
-  const baseInterval = Number(cam.refreshIntervalSec || cam.refreshSeconds || 30) * 1000;
-  const stagger = Math.round((idx / Math.max(1, dashboardPageCameras().length)) * baseInterval);
-  const delay = errored ? Math.min(120000, baseInterval * 2) : baseInterval + stagger;
+  const visible = dashboardPageCameras();
+  const visibleIdx = Math.max(0, visible.findIndex(c => String(c.id) === idKey));
+  const step = dashboardRefreshStaggerMs(Math.max(1, visible.length));
+  const baseInterval = dashboardRefreshIntervalMs();
+  const backoff = errored ? Math.min(180000, baseInterval * Math.min(4, failures + 1)) : baseInterval;
+  const jitter = Math.floor(Math.random() * 650);
+  const delay = backoff + (visibleIdx * step) + jitter;
 
   if (dashboardRefreshTimers.has(idKey)) clearTimeout(dashboardRefreshTimers.get(idKey));
   dashboardRefreshTimers.set(idKey, setTimeout(async () => {
     const current = dashboardCameraById(idKey) || cam;
     const resolved = await resolveDashboardCameraFeed(current);
-    if (resolved.imageUrl) renderDashboardImageFeed(resolved.cam || current, resolved.imageUrl, idx);
-    else if (resolved.videoUrl) mountDashboardFeed(resolved.cam || current, idx);
+    if (resolved.imageUrl) renderDashboardImageFeed(resolved.cam || current, resolved.imageUrl, visibleIdx);
+    else if (resolved.videoUrl) mountDashboardFeed(resolved.cam || current, visibleIdx);
+    else markDashboardRefresh(idKey, false, true);
   }, delay));
 }
 
 function markDashboardRefresh(id, ok, noRetry=false) {
   const idKey = String(id);
+  const now = Date.now();
+  const prev = dashboardFeedState(idKey);
   if (ok) {
-    dashboardLastRefresh.set(idKey, Date.now());
+    dashboardLastRefresh.set(idKey, now);
     dashboardErrorCounts.set(idKey, 0);
+    setDashboardFeedState(idKey, {
+      status: 'live',
+      lastSuccessAt: now,
+      lastAttemptAt: now,
+      failures: 0,
+      message: ''
+    });
   } else {
-    dashboardErrorCounts.set(idKey, (dashboardErrorCounts.get(idKey) || 0) + 1);
-  }
-
-  const el = document.getElementById(`dash-updated-${dashDomId(idKey)}`);
-  if (el) {
-    const failures = dashboardErrorCounts.get(idKey) || 0;
-    el.textContent = ok
-      ? `Updated ${new Date(dashboardLastRefresh.get(idKey)).toLocaleTimeString()}`
-      : failures >= 3 || noRetry ? 'Feed unavailable' : `Retry ${failures}/3`;
+    const failures = (dashboardErrorCounts.get(idKey) || 0) + 1;
+    dashboardErrorCounts.set(idKey, failures);
+    const hasLastGood = !!(prev.lastSuccessAt || dashboardLastRefresh.get(idKey));
+    const failedStatus = noRetry ? 'no_url' : (hasLastGood ? 'stale' : 'failed');
+    setDashboardFeedState(idKey, {
+      status: failedStatus,
+      lastSuccessAt: prev.lastSuccessAt || dashboardLastRefresh.get(idKey) || null,
+      lastAttemptAt: now,
+      failures,
+      message: noRetry ? 'No feed URL available.' : 'Refresh failed.'
+    });
   }
   updateDashboardStatus();
 }
@@ -7734,20 +8634,24 @@ function markDashboardRefresh(id, ok, noRetry=false) {
 function updateDashboardStatus() {
   const el = document.getElementById('dashboardStatus');
   if (!el) return;
-  const total = dashboardState.cameras.length;
+  const mode = dashboardMode();
+  const total = dashboardState.order.length;
   const pageCount = dashboardPageCount();
-  const page = Math.min((dashboardState.page || 0) + 1, pageCount);
+  const page = Math.min((dashboardState.currentPage || 0) + 1, pageCount);
   const visible = dashboardPageCameras().length;
   const last = [...dashboardLastRefresh.values()].sort((a, b) => b - a)[0];
   renderDashboardPagination();
   updateDashboardToolbarVisibility();
-  el.textContent = `${total} cameras · page ${page}/${pageCount} · ${visible} visible · ${last ? 'last refresh ' + new Date(last).toLocaleTimeString() : 'ready'}`;
+  const refreshed = last ? 'last refresh ' + new Date(last).toLocaleTimeString() : 'ready';
+  const cadence = `auto ${dashboardRefreshIntervalSec}s · staggered`;
+  if (mode === 'grid') el.textContent = `${total} cameras · page ${page}/${pageCount} · ${visible} visible · ${cadence} · ${refreshed}`;
+  else if (mode === 'mosaic') el.textContent = `${total} cameras · snapped mosaic${dashboardState.lockLayout ? ' · locked' : ''} · ${cadence} · ${refreshed}`;
+  else if (mode === 'focus') el.textContent = `${total} cameras · focus preview · ${cadence} · ${refreshed}`;
+  else el.textContent = `${total} cameras · single feed · ${cadence} · ${refreshed}`;
 }
 
 function refreshDashboardAll() {
-  dashboardRefreshTimers.forEach(t => clearTimeout(t));
-  dashboardRefreshTimers.clear();
-  dashboardPageCameras().forEach((cam, idx) => mountDashboardFeed(cam, idx, { forceHydrate: true }));
+  scheduleDashboardRefreshWave({ immediate: true, forceHydrate: true, reason: 'manual-all' });
 }
 
 async function openDashboardFeed(cam) {
@@ -7758,64 +8662,78 @@ async function openDashboardFeed(cam) {
 }
 
 function locateDashboardCamera(cam) {
+  if (!cam) return;
+  if (activeView === 'dashboard') {
+    dashboardState.selectedCameraId = String(cam.id);
+    if (dashboardSideMapAllowed()) dashboardState.mapVisible = true;
+    saveDashboardState();
+    renderDashboard();
+    setTimeout(() => {
+      if (dashboardMap && Number.isFinite(Number(cam.lat)) && Number.isFinite(Number(cam.lng))) {
+        dashboardMap.setView([Number(cam.lat), Number(cam.lng)], Math.max(dashboardMap.getZoom() || 2, 11), { animate: true });
+      }
+    }, 80);
+    return;
+  }
   switchView('globe');
   selectCamera(cam);
 }
 
-function fitMosaicCameraTiles() {
-  if (dashboardState.layout !== 'mosaic') return;
-  const cams = dashboardPageCameras();
-  const layoutItems = cams.map(cam => ({ id: String(cam.id), type: 'camera' }));
-  if (dashboardState.mapTileVisible) layoutItems.push({ id: '__map__', type: 'map' });
-  if (!layoutItems.length) return;
-
-  const wall = document.getElementById('dashboardFeedWall');
-  const rect = wall ? wall.getBoundingClientRect() : { width: 16, height: 9 };
-  const usableRatio = Math.max(0.65, Math.min(2.4, (rect.width || 16) / (rect.height || 9)));
-  const n = layoutItems.length;
-  let cols = Math.ceil(Math.sqrt(n * usableRatio));
-  cols = Math.max(1, Math.min(n, cols));
-
-  // Arrange every Mosaic tile, including the map tile, through the same
-  // non-overlapping solver so automatic layout behaves consistently.
-  const candidates = [];
-  for (const c of new Set([cols - 1, cols, cols + 1].filter(v => v >= 1 && v <= n))) {
-    const r = Math.ceil(n / c);
-    const gap = 1.2;
-    const w = (100 - gap * (c + 1)) / c;
-    const h = (100 - gap * (r + 1)) / r;
-    const aspectPenalty = Math.abs((w / Math.max(h, 1)) - 1.55) * 3;
-    candidates.push({ cols: c, rows: r, gap, w, h, score: Math.min(w, h) - aspectPenalty });
-  }
-  const best = candidates.sort((a, b) => b.score - a.score)[0] || { cols, rows: Math.ceil(n / cols), gap: 1.2 };
-  cols = best.cols;
-  const rows = best.rows;
-  const gap = best.gap;
-  const cellW = (100 - gap * (cols + 1)) / cols;
-  const cellH = (100 - gap * (rows + 1)) / rows;
-
-  layoutItems.forEach((item, idx) => {
-    const col = idx % cols;
-    const row = Math.floor(idx / cols);
-    const pos = {
-      x: gap + col * (cellW + gap),
-      y: gap + row * (cellH + gap),
-      w: cellW,
-      h: cellH
-    };
-    dashboardState.mosaic[item.id] = pos;
-    const card = document.querySelector(`.dash-card[data-id="${CSS.escape(item.id)}"]`);
-    if (card) {
-      card.style.left = pos.x + '%';
-      card.style.top = pos.y + '%';
-      card.style.width = pos.w + '%';
-      card.style.height = pos.h + '%';
-    }
-  });
-
+function toggleMosaicLayoutLock(force) {
+  if (dashboardMode() !== 'mosaic') return;
+  dashboardState.lockLayout = typeof force === 'boolean' ? force : !dashboardState.lockLayout;
   saveDashboardState();
   markDashboardDirty();
-  if (dashboardState.mapTileVisible && dashboardMapTile) {
+  renderDashboard();
+}
+
+function fitMosaicCameraTiles() {
+  if (dashboardState.mode !== 'mosaic') return;
+  const cams = dashboardPageCameras();
+  const layoutItems = cams.map((cam, idx) => ({ id: String(cam.id), type: 'camera', idx }));
+  if (dashboardState.mapAsTile) layoutItems.push({ id: '__map__', type: 'map', idx: layoutItems.length });
+  if (!layoutItems.length) return;
+
+  // Structured mosaic: 12 columns, fixed row increments, no collisions. This
+  // composes a monitoring wall rather than scattering desktop-style windows.
+  const occupied = [];
+  const place = (id, colSpan, rowSpan) => {
+    colSpan = clampNumber(colSpan, MOSAIC_MIN_COL_SPAN, MOSAIC_GRID_COLS);
+    rowSpan = clampNumber(rowSpan, MOSAIC_MIN_ROW_SPAN, 8);
+    for (let row = 0; row < 80; row++) {
+      for (let col = 0; col <= MOSAIC_GRID_COLS - colSpan; col++) {
+        const hit = occupied.some(p => !(col + colSpan <= p.col || col >= p.col + p.colSpan || row + rowSpan <= p.row || row >= p.row + p.rowSpan));
+        if (!hit) {
+          const pos = normaliseMosaicPos({ col, row, colSpan, rowSpan });
+          occupied.push(pos);
+          dashboardState.mosaicLayout[id] = pos;
+          return pos;
+        }
+      }
+    }
+    const pos = normaliseMosaicPos({ col: 0, row: occupied.reduce((m, p) => Math.max(m, p.row + p.rowSpan), 0), colSpan, rowSpan });
+    occupied.push(pos);
+    dashboardState.mosaicLayout[id] = pos;
+    return pos;
+  };
+
+  layoutItems.forEach((item, idx) => {
+    let colSpan = 3;
+    let rowSpan = 3;
+    if (idx === 0 && layoutItems.length >= 5) { colSpan = 4; rowSpan = 4; }
+    if (layoutItems.length <= 2) { colSpan = 6; rowSpan = 5; }
+    else if (layoutItems.length <= 4) { colSpan = 6; rowSpan = 4; }
+    else if (layoutItems.length >= 10) { colSpan = 3; rowSpan = 3; }
+    if (item.type === 'map') { colSpan = 4; rowSpan = 4; }
+    const pos = place(item.id, colSpan, rowSpan);
+    const card = document.querySelector(`.dash-card[data-id="${CSS.escape(item.id)}"]`);
+    if (card) applyMosaicCardStyle(card, pos);
+  });
+
+  updateMosaicCanvasHeight();
+  saveDashboardState();
+  markDashboardDirty();
+  if (dashboardState.mapAsTile && dashboardMapTile) {
     setTimeout(() => { dashboardMapTile.invalidateSize(); renderDashboardMapTile(); }, 80);
   }
 }
@@ -7827,29 +8745,54 @@ function setupMosaicCardHandlers() {
     const cam = isMapTile ? null : dashboardCameraById(id);
     card.addEventListener('click', e => {
       const actionEl = e.target.closest('[data-action]');
+      if (actionEl && actionEl.dataset.action === 'retry-feed' && !isMapTile) {
+        e.stopPropagation();
+        mountDashboardFeed(cam, dashboardState.order.indexOf(id), { forceHydrate: true });
+        return;
+      }
       if (actionEl || isMapTile) return;
+      if (dashboardMode() === 'focus' && id !== String(dashboardState.selectedCameraId)) {
+        dashboardState.selectedCameraId = id;
+        dashboardState.currentPage = dashboardPageIndexForId(id);
+        saveDashboardState();
+        renderDashboard();
+        return;
+      }
       setDashboardSelected(id);
     });
     card.querySelectorAll('[data-action]').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
         const action = btn.dataset.action;
-        if (action === 'remove-map-tile') { dashboardState.mapTileVisible = false; saveDashboardState(); markDashboardDirty(); renderDashboard(); return; }
-        if (action === 'fit-map-tile') { renderDashboardMapTile(); return; }
+        if (action === 'tile-menu') {
+          const isOpen = card.classList.contains('menu-open');
+          closeDashboardTileMenus(card);
+          card.classList.toggle('menu-open', !isOpen);
+          btn.setAttribute('aria-expanded', String(!isOpen));
+          return;
+        }
+        closeDashboardTileMenus();
+        if (btn.disabled) return;
+        if (action === 'remove-map-tile') { dashboardState.mapAsTile = false; saveDashboardState(); markDashboardDirty(); renderDashboard(); return; }
+        if (action === 'fit-map-tile') { fitMosaicCameraTiles(); return; }
         if (isMapTile) return;
         if (action === 'focus') promoteDashboardCamera(id);
+        if (action === 'set-span') { setDashboardGridSpan(id, btn.dataset.span); return; }
         if (action === 'span') { cycleDashboardGridSpan(id); return; }
-        if (action === 'single') { dashboardState.focusCameraId = id; dashboardState.selectedCameraId = id; dashboardState.layout = 'single'; saveDashboardState(); renderDashboard(); }
+        if (action === 'move-earlier') { moveDashboardCameraRelative(id, -1); return; }
+        if (action === 'move-later') { moveDashboardCameraRelative(id, 1); return; }
+        if (action === 'single') { dashboardState.selectedCameraId = id; setDashboardLayout('single'); }
         if (action === 'single-prev') navigateDashboardSingle(-1);
         if (action === 'single-next') navigateDashboardSingle(1);
         if (action === 'locate') locateDashboardCamera(cam);
         if (action === 'open') openDashboardFeed(cam);
-        if (action === 'refresh') mountDashboardFeed(cam, dashboardState.cameras.indexOf(id));
+        if (action === 'retry-feed') { mountDashboardFeed(cam, dashboardState.order.indexOf(id), { forceHydrate: true }); return; }
+        if (action === 'refresh') mountDashboardFeed(cam, dashboardState.order.indexOf(id), { forceHydrate: true });
         if (action === 'remove') removeCameraFromDashboard(id);
       });
     });
 
-    if (dashboardState.layout !== 'mosaic') {
+    if (dashboardMode() === 'grid') {
       card.addEventListener('dragstart', e => {
         const actionEl = e.target.closest('[data-action], .dash-media video');
         if (actionEl) { e.preventDefault(); return; }
@@ -7878,7 +8821,7 @@ function setupMosaicCardHandlers() {
         e.preventDefault();
         const dragId = dashboardOrderDragId || e.dataTransfer.getData('application/x-vigil-camera-id') || e.dataTransfer.getData('text/plain');
         const rect = card.getBoundingClientRect();
-        const insertAfter = dashboardState.layout === 'grid'
+        const insertAfter = dashboardState.mode === 'grid'
           ? (e.clientY > rect.top + rect.height / 2 || e.clientX > rect.left + rect.width / 2)
           : (e.clientY > rect.top + rect.height / 2);
         card.classList.remove('drag-over');
@@ -7887,9 +8830,9 @@ function setupMosaicCardHandlers() {
       });
     }
 
-    if (dashboardState.layout === 'mosaic') {
+    if (dashboardMode() === 'mosaic') {
       card.addEventListener('mousedown', e => {
-        if (e.button !== 0) return;
+        if (e.button !== 0 || dashboardState.lockLayout) return;
         const resizing = !!e.target.closest('.dash-resize');
         const actionEl = e.target.closest('[data-action]');
         const mapSurface = isMapTile && e.target.closest('.dash-map-tile-map, .leaflet-container, .leaflet-pane, .leaflet-control-container');
@@ -7901,13 +8844,12 @@ function setupMosaicCardHandlers() {
         const wall = document.getElementById('dashboardFeedWall');
         const wr = wall.getBoundingClientRect();
         const cr = card.getBoundingClientRect();
+        const startPos = normaliseMosaicPos(dashboardState.mosaicLayout[id] || defaultMosaicPos(0));
         dashboardMosaicDrag = {
           id, resizing, wall,
           startX: e.clientX, startY: e.clientY,
-          x: ((cr.left - wr.left) / wr.width) * 100,
-          y: ((cr.top - wr.top) / wr.height) * 100,
-          w: (cr.width / wr.width) * 100,
-          h: (cr.height / wr.height) * 100
+          col: startPos.col, row: startPos.row,
+          colSpan: startPos.colSpan, rowSpan: startPos.rowSpan
         };
         document.body.style.userSelect = 'none';
         e.preventDefault();
@@ -7916,7 +8858,7 @@ function setupMosaicCardHandlers() {
   });
 
   const wall = document.getElementById('dashboardFeedWall');
-  if (wall && dashboardState.layout !== 'mosaic') {
+  if (wall && dashboardMode() === 'grid') {
     wall.addEventListener('dragover', e => {
       if (!dashboardOrderDragId) return;
       e.preventDefault();
@@ -7925,10 +8867,10 @@ function setupMosaicCardHandlers() {
       if (!dashboardOrderDragId || e.target.closest('.dash-card')) return;
       e.preventDefault();
       const moved = String(dashboardOrderDragId);
-      dashboardState.cameras = dashboardState.cameras.map(String).filter(x => x !== moved);
-      dashboardState.cameras.push(moved);
+      dashboardState.order = dashboardState.order.map(String).filter(x => x !== moved);
+      dashboardState.order.push(moved);
       dashboardState.selectedCameraId = moved;
-      dashboardState.page = dashboardPageIndexForId(moved);
+      dashboardState.currentPage = dashboardPageIndexForId(moved);
       dashboardOrderDragId = null;
       saveDashboardState();
       markDashboardDirty();
@@ -7940,28 +8882,21 @@ function setupMosaicCardHandlers() {
 document.addEventListener('mousemove', e => {
   if (!dashboardMosaicDrag) return;
   const d = dashboardMosaicDrag;
-  const wr = d.wall.getBoundingClientRect();
-  const dx = ((e.clientX - d.startX) / wr.width) * 100;
-  const dy = ((e.clientY - d.startY) / wr.height) * 100;
-  let pos;
+  const m = mosaicWallMetrics(d.wall);
+  const dCol = Math.round((e.clientX - d.startX) / m.colW);
+  const dRow = Math.round((e.clientY - d.startY) / m.rowH);
+  let rawPos;
   if (d.resizing) {
-    // Use the full Mosaic canvas, not a conservative 96% clamp. This allows
-    // tiles to be resized close to the right/bottom edge while still keeping
-    // them inside the dashboard wall.
-    const maxW = Math.max(14, 100 - d.x);
-    const maxH = Math.max(14, 100 - d.y);
-    pos = { x: d.x, y: d.y, w: Math.max(14, Math.min(maxW, d.w + dx)), h: Math.max(14, Math.min(maxH, d.h + dy)) };
+    rawPos = { col: d.col, row: d.row, colSpan: d.colSpan + dCol, rowSpan: d.rowSpan + dRow };
   } else {
-    // Allow dragging across the full available dashboard wall. The previous
-    // 96% limit made it feel like invisible margins blocked placement.
-    pos = { x: Math.max(0, Math.min(100 - d.w, d.x + dx)), y: Math.max(0, Math.min(100 - d.h, d.y + dy)), w: d.w, h: d.h };
+    rawPos = { col: d.col + dCol, row: d.row + dRow, colSpan: d.colSpan, rowSpan: d.rowSpan };
   }
-  dashboardState.mosaic[d.id] = pos;
+  const pos = normaliseMosaicPos(rawPos);
+  dashboardState.mosaicLayout[d.id] = pos;
   const card = document.querySelector(`.dash-card[data-id="${CSS.escape(String(d.id))}"]`);
-  if (card) {
-    card.style.left = pos.x + '%'; card.style.top = pos.y + '%';
-    card.style.width = pos.w + '%'; card.style.height = pos.h + '%';
-  }
+  if (card) applyMosaicCardStyle(card, pos, d.wall);
+  updateMosaicCanvasHeight();
+  updateMosaicGuides(d.wall, pos);
   if (String(d.id) === '__map__' && dashboardMapTile) {
     clearTimeout(dashboardMapTileResizeTimer);
     dashboardMapTileResizeTimer = setTimeout(() => dashboardMapTile.invalidateSize(), 40);
@@ -7971,9 +8906,33 @@ document.addEventListener('mousemove', e => {
 document.addEventListener('mouseup', () => {
   if (dashboardMosaicDrag) {
     dashboardMosaicDrag = null;
+    clearMosaicGuides();
     document.body.style.userSelect = '';
     saveDashboardState();
-    if (dashboardState.layout === 'mosaic' && dashboardState.mapTileVisible) setTimeout(() => { if (dashboardMapTile) { dashboardMapTile.invalidateSize(); renderDashboardMapTile(); } }, 60);
+    if (dashboardMode() === 'mosaic' && dashboardState.mapAsTile) setTimeout(() => { if (dashboardMapTile) { dashboardMapTile.invalidateSize(); renderDashboardMapTile(); } }, 60);
+  }
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.dash-actions')) closeDashboardTileMenus();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeDashboardTileMenus();
+});
+
+// keyboard left/right support for Single dashboard mode
+
+document.addEventListener('keydown', e => {
+  if (activeView !== 'dashboard' || dashboardMode() !== 'single') return;
+  const tag = (e.target && e.target.tagName ? e.target.tagName : '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable) return;
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    navigateDashboardSingle(-1);
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault();
+    navigateDashboardSingle(1);
   }
 });
 
@@ -8048,7 +9007,7 @@ function dashboardCandidateCamerasForMap() {
   const zoom = dashboardMap.getZoom();
   if (zoom < 10) return [];
 
-  const selectedIds = new Set(dashboardState.cameras.map(String));
+  const selectedIds = new Set(dashboardState.order.map(String));
   const selected = dashboardCameras();
   const limit = zoom >= 13 ? 1200 : zoom >= 11 ? 650 : 300;
 
@@ -8088,7 +9047,7 @@ function renderDashboardMap() {
   // after the camera layer has been cleared/redrawn.
   if (uploadedLayerState.features.length) setTimeout(renderUploadedLayerGraphics, 0);
   const cams = dashboardCameras();
-  const selectedIds = new Set(dashboardState.cameras.map(String));
+  const selectedIds = new Set(dashboardState.order.map(String));
   const bounds = [];
 
   // Faint available cameras: clickable context layer for adding nearby/visible cameras.
@@ -8148,6 +9107,7 @@ function renderDashboardMap() {
 }
 
 function fitDashboardMap() {
+  if (!dashboardSideMapAllowed()) return;
   if (!dashboardState.mapVisible) {
     dashboardState.mapVisible = true;
     updateDashboardMapPresentation();
@@ -8172,36 +9132,32 @@ function dashboardShouldUseMapDrawer() {
 
 
 function updateDashboardToolbarVisibility() {
-  const layout = dashboardState.layout || 'grid';
+  const mode = dashboardMode();
   const setHidden = (selector, hidden) => {
     document.querySelectorAll(selector).forEach(el => el.classList.toggle('dash-control-hidden', !!hidden));
   };
 
-  // Density controls are only meaningful in the true grid dashboard.
-  setHidden('.dash-control-grid', layout !== 'grid');
+  // Grid: fixed density, numbered pagination, manual width spans, side map.
+  setHidden('.dash-control-grid', mode !== 'grid');
 
-  // Mosaic-only tools: map tile and automatic camera tile arrangement.
-  setHidden('.dash-control-mosaic', layout !== 'mosaic');
+  // Mosaic: freeform drag/resize, Fit cameras, optional map tile. No density.
+  setHidden('.dash-control-mosaic', mode !== 'mosaic');
 
-  // Map extent should remain available in every dashboard view. It frames all
-  // dashboard cameras on the right-side map and, if required, opens the map first.
-  const fitMap = document.getElementById('dashFitMap');
-  if (fitMap) {
-    fitMap.textContent = 'Map extent';
-    fitMap.title = 'Show the right-side map and frame all dashboard cameras';
-    fitMap.classList.remove('dash-control-hidden');
-  }
-
-  // The right-side map toggle is valid in every view now that Map extent is
-  // available globally. It still pushes/resizes the feed area rather than floating.
-  const toggleMap = document.getElementById('dashToggleMap');
-  if (toggleMap) toggleMap.classList.remove('dash-control-hidden');
+  // Side-map controls are grid-only. Mosaic uses the optional draggable map tile;
+  // Focus and Single dedicate the whole dashboard to camera feeds.
+  setHidden('.dash-control-map', mode !== 'grid');
 
   const addMapTile = document.getElementById('dashAddMapTile');
-  if (addMapTile) addMapTile.classList.toggle('dash-control-hidden', layout !== 'mosaic');
-
-  const fitMosaic = document.getElementById('dashFitMosaicCameras');
-  if (fitMosaic) fitMosaic.classList.toggle('dash-control-hidden', layout !== 'mosaic');
+  if (addMapTile) {
+    addMapTile.textContent = dashboardState.mapAsTile ? 'Map tile added' : '+ Map tile';
+    addMapTile.disabled = mode !== 'mosaic' || dashboardState.mapAsTile;
+  }
+  const lockBtn = document.getElementById('dashLockMosaic');
+  if (lockBtn) {
+    lockBtn.textContent = dashboardState.lockLayout ? 'Unlock layout' : 'Lock layout';
+    lockBtn.classList.toggle('active', !!dashboardState.lockLayout);
+    lockBtn.disabled = mode !== 'mosaic';
+  }
 }
 
 function updateDashboardMapPresentation() {
@@ -8212,20 +9168,29 @@ function updateDashboardMapPresentation() {
   const addMapTile = document.getElementById('dashAddMapTile');
   if (!pane || !resize) return;
 
+  const sideAllowed = dashboardSideMapAllowed();
   const drawer = dashboardShouldUseMapDrawer();
-  document.body.classList.toggle('dashboard-map-drawer', drawer && activeView === 'dashboard' && dashboardState.mapVisible);
-  pane.classList.toggle('collapsed', !dashboardState.mapVisible);
-  resize.classList.toggle('collapsed', !dashboardState.mapVisible || drawer);
+  const showSideMap = sideAllowed && dashboardState.mapVisible;
+
+  document.body.classList.toggle('dashboard-map-drawer', drawer && activeView === 'dashboard' && showSideMap);
+  pane.classList.toggle('collapsed', !showSideMap);
+  resize.classList.toggle('collapsed', !showSideMap || drawer);
 
   if (toggle) toggle.textContent = dashboardState.mapVisible ? 'Hide map' : 'Show map';
   if (collapse) collapse.textContent = 'Collapse';
   if (addMapTile) {
-    addMapTile.textContent = dashboardState.mapTileVisible ? 'Map tile added' : '+ Map tile';
-    addMapTile.disabled = dashboardState.layout !== 'mosaic' || dashboardState.mapTileVisible;
+    addMapTile.textContent = dashboardState.mapAsTile ? 'Map tile added' : '+ Map tile';
+    addMapTile.disabled = dashboardMode() !== 'mosaic' || dashboardState.mapAsTile;
+  }
+  const lockBtn = document.getElementById('dashLockMosaic');
+  if (lockBtn) {
+    lockBtn.textContent = dashboardState.lockLayout ? 'Unlock layout' : 'Lock layout';
+    lockBtn.classList.toggle('active', !!dashboardState.lockLayout);
+    lockBtn.disabled = dashboardMode() !== 'mosaic';
   }
   updateDashboardToolbarVisibility();
 
-  if (dashboardMap && dashboardState.mapVisible) {
+  if (dashboardMap && showSideMap) {
     setTimeout(() => dashboardMap.invalidateSize(), 30);
   }
 }
@@ -8235,6 +9200,7 @@ function ensureDashboardMapResponsive() {
 }
 
 function toggleDashboardMap(force) {
+  if (!dashboardSideMapAllowed()) return;
   dashboardState.mapVisible = typeof force === 'boolean' ? force : !dashboardState.mapVisible;
   updateDashboardMapPresentation();
   saveDashboardState();
@@ -8285,7 +9251,7 @@ function renderDashboardLocalResults(query, origin=null) {
   }
 
   list.innerHTML = candidates.map(cam => {
-    const exists = dashboardState.cameras.includes(String(cam.id));
+    const exists = dashboardState.order.includes(String(cam.id));
     const full = false;
     const dist = typeof cam._dashDist === 'number'
       ? (cam._dashDist < 1 ? `${Math.round(cam._dashDist * 1000)} m away` : `${cam._dashDist.toFixed(1)} km away`)
@@ -9009,10 +9975,10 @@ function replaceDashboardWithAreaSelection() {
   if (limitedIds.length < requestedIds.length) {
     showUpgradePrompt('Your current tier allows up to ' + getPlanLimits().maxDashboardCameras + ' dashboard cameras. Only the first ' + limitedIds.length + ' camera(s) were added.');
   }
-  dashboardState.cameras = limitedIds;
-  dashboardState.page = 0;
-  dashboardState.focusCameraId = dashboardState.cameras[0] || null;
-  dashboardState.selectedCameraId = dashboardState.focusCameraId;
+  dashboardState.order = limitedIds;
+  dashboardState.currentPage = 0;
+  dashboardState.selectedCameraId = dashboardState.order[0] || null;
+  dashboardState.selectedCameraId = dashboardState.selectedCameraId;
   dashboardState._fitPending = true;
   saveDashboardState();
   updateDashboardBadge();
@@ -9023,7 +9989,7 @@ function replaceDashboardWithAreaSelection() {
 
 function addAreaSelectionToDashboard() {
   if (!areaSelection.matchedIds.length) return;
-  const existing = new Set(dashboardState.cameras.map(String));
+  const existing = new Set(dashboardState.order.map(String));
   const additions = areaSelection.matchedIds.map(String).filter(id => !existing.has(String(id)));
   const remaining = dashboardCameraCapacityRemaining();
   if (remaining <= 0) {
@@ -9034,10 +10000,10 @@ function addAreaSelectionToDashboard() {
   if (limitedAdditions.length < additions.length) {
     showUpgradePrompt('Your current tier allows up to ' + getPlanLimits().maxDashboardCameras + ' dashboard cameras. Only ' + limitedAdditions.length + ' new camera(s) were added.');
   }
-  dashboardState.cameras.push(...limitedAdditions);
-  if (!dashboardState.focusCameraId && dashboardState.cameras.length) dashboardState.focusCameraId = dashboardState.cameras[0];
-  if (!dashboardState.selectedCameraId && dashboardState.focusCameraId) dashboardState.selectedCameraId = dashboardState.focusCameraId;
-  if (limitedAdditions.length) dashboardState.page = dashboardPageIndexForId(limitedAdditions[0]);
+  dashboardState.order.push(...limitedAdditions);
+  if (!dashboardState.selectedCameraId && dashboardState.order.length) dashboardState.selectedCameraId = dashboardState.order[0];
+  if (!dashboardState.selectedCameraId && dashboardState.selectedCameraId) dashboardState.selectedCameraId = dashboardState.selectedCameraId;
+  if (limitedAdditions.length) dashboardState.currentPage = dashboardPageIndexForId(limitedAdditions[0]);
   dashboardState._fitPending = true;
   saveDashboardState();
   updateDashboardBadge();
@@ -9127,7 +10093,7 @@ async function requestSimpleTextInput(title, note, value = '', okText = 'OK') {
 async function saveCurrentDashboardView() {
   if (!requireSaveAccess()) return;
 
-  if (!dashboardState.cameras.length) {
+  if (!dashboardState.order.length) {
     if (!(await confirmAppAction('Save empty dashboard?', 'This dashboard currently has no cameras. Save it anyway?', 'Save empty', false))) return;
   }
 
@@ -9232,10 +10198,10 @@ async function loadSavedDashboardView() {
 
   dashboardState = normaliseDashboardState({ ...dashboardState, ...restored });
 
-  const maxPage = Math.max(0, Math.ceil(dashboardState.cameras.length / dashboardPageSize()) - 1);
-  dashboardState.page = Math.min(dashboardState.page || 0, maxPage);
-  if (!dashboardState.focusCameraId && dashboardState.cameras.length) dashboardState.focusCameraId = dashboardState.cameras[0];
-  if (!dashboardState.selectedCameraId && dashboardState.focusCameraId) dashboardState.selectedCameraId = dashboardState.focusCameraId;
+  const maxPage = Math.max(0, Math.ceil(dashboardState.order.length / dashboardPageSize()) - 1);
+  dashboardState.currentPage = Math.min(dashboardState.currentPage || 0, maxPage);
+  if (!dashboardState.selectedCameraId && dashboardState.order.length) dashboardState.selectedCameraId = dashboardState.order[0];
+  if (!dashboardState.selectedCameraId && dashboardState.selectedCameraId) dashboardState.selectedCameraId = dashboardState.selectedCameraId;
 
   saveDashboardState();
   updateDashboardBadge();
@@ -9385,10 +10351,10 @@ async function loadSavedDashboardViewObject(view) {
 
   dashboardState = normaliseDashboardState({ ...dashboardState, ...restored });
 
-  const maxPage = Math.max(0, Math.ceil(dashboardState.cameras.length / dashboardPageSize()) - 1);
-  dashboardState.page = Math.min(dashboardState.page || 0, maxPage);
-  if (!dashboardState.focusCameraId && dashboardState.cameras.length) dashboardState.focusCameraId = dashboardState.cameras[0];
-  if (!dashboardState.selectedCameraId && dashboardState.focusCameraId) dashboardState.selectedCameraId = dashboardState.focusCameraId;
+  const maxPage = Math.max(0, Math.ceil(dashboardState.order.length / dashboardPageSize()) - 1);
+  dashboardState.currentPage = Math.min(dashboardState.currentPage || 0, maxPage);
+  if (!dashboardState.selectedCameraId && dashboardState.order.length) dashboardState.selectedCameraId = dashboardState.order[0];
+  if (!dashboardState.selectedCameraId && dashboardState.selectedCameraId) dashboardState.selectedCameraId = dashboardState.selectedCameraId;
 
   saveDashboardState();
   updateDashboardBadge();
@@ -9771,6 +10737,12 @@ window.startBillingPortal = startBillingPortal;
     btn.onclick = () => setDashboardGrid(btn.dataset.grid);
   });
   document.getElementById('dashRefreshAll').onclick = refreshDashboardAll;
+  const dashRefreshInterval = document.getElementById('dashRefreshInterval');
+  if (dashRefreshInterval) {
+    loadDashboardRefreshSettings();
+    dashRefreshInterval.onchange = () => updateDashboardRefreshInterval(dashRefreshInterval.value);
+  }
+  startDashboardStaleWatcher();
   document.getElementById('dashAddCamera').onclick = openDashboardAddPanel;
   document.getElementById('dashFitMap').onclick = fitDashboardMap;
   document.getElementById('dashMapFitHeader').onclick = fitDashboardMap;
@@ -9779,6 +10751,8 @@ window.startBillingPortal = startBillingPortal;
   if (dashAddMapTile) dashAddMapTile.onclick = () => toggleDashboardMapTile(true);
   const dashFitMosaicCameras = document.getElementById('dashFitMosaicCameras');
   if (dashFitMosaicCameras) dashFitMosaicCameras.onclick = fitMosaicCameraTiles;
+  const dashLockMosaic = document.getElementById('dashLockMosaic');
+  if (dashLockMosaic) dashLockMosaic.onclick = () => toggleMosaicLayoutLock();
   document.getElementById('dashMapCollapseHeader').onclick = () => toggleDashboardMap(false);
   document.getElementById('dashClearAll').onclick = clearDashboard;
   document.getElementById('dashSaveView').onclick = saveCurrentDashboardView;
@@ -9948,6 +10922,103 @@ window.startBillingPortal = startBillingPortal;
 .saved-dash-action.danger:hover { background: rgba(220,38,38,0.08); border-color: rgba(220,38,38,0.25); }
 .saved-dash-empty { padding: 22px 16px; color: var(--c-text3); font-size:12px; line-height:1.55; }
 .saved-dash-count-pill { font-family:var(--mono); font-size:10px; color:var(--c-text3); border:1px solid var(--c-border); background:var(--c-surface2); border-radius:999px; padding:3px 7px; }
+
+
+/* ─── PATCH: stable dashboard command bar + theme-aware mosaic chrome ───
+   The dashboard command bar must not depend on the flexible tile wall height.
+   Keep it visible at normal browser zoom, prevent awkward wrapping, and align
+   all button labels/icons consistently. */
+body.dashboard-active #dashboardView {
+  bottom: var(--bar-h) !important;
+}
+body.dashboard-active #dashboardFeedPane {
+  padding-bottom: 46px !important;
+}
+body.dashboard-active #dashboardBar {
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: var(--bar-h) !important;
+  min-height: 42px !important;
+  height: 42px !important;
+  max-height: 42px !important;
+  z-index: 220 !important;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  gap: 7px !important;
+  padding: 6px 10px !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  background: var(--c-surface) !important;
+  border-top: 1px solid var(--c-border) !important;
+  box-shadow: 0 -1px 3px rgba(15,23,42,0.06) !important;
+  scrollbar-width: thin;
+}
+[data-theme="dark"] body.dashboard-active #dashboardBar {
+  box-shadow: 0 -1px 8px rgba(0,0,0,0.28) !important;
+}
+body.dashboard-active #dashboardBar .dash-seg,
+body.dashboard-active #dashboardBar .dash-page-controls,
+body.dashboard-active #dashboardBar .dashboard-refresh-control,
+body.dashboard-active #dashboardBar #dashboardStatus,
+body.dashboard-active #dashboardBar #dashboardAutosaveStatus {
+  flex: 0 0 auto !important;
+  align-items: center !important;
+}
+body.dashboard-active #dashboardBar .dash-seg button,
+body.dashboard-active #dashboardBar .dash-small-btn,
+body.dashboard-active #dashboardBar .dash-page-btn,
+body.dashboard-active #dashboardBar select {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 30px !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  vertical-align: middle !important;
+}
+body.dashboard-active #dashboardBar .dash-small-btn {
+  flex: 0 0 auto !important;
+  gap: 6px !important;
+}
+body.dashboard-active #dashboardBar .density-icon {
+  display: inline-grid !important;
+  place-items: center !important;
+  align-self: center !important;
+}
+body.dashboard-active #dashboardBar .dash-control-hidden {
+  display: none !important;
+}
+body.dashboard-active #dashboardFeedWall {
+  min-height: 0 !important;
+}
+
+/* Mosaic follows the global theme for the canvas/chrome, while the actual
+   camera viewport remains dark in both themes for image contrast. */
+#dashboardFeedWall.mode-mosaic {
+  background-color: var(--dash-canvas, var(--c-bg)) !important;
+  background-image:
+    linear-gradient(90deg, var(--dash-grid-line, rgba(148,163,184,0.12)) 1px, transparent 1px),
+    linear-gradient(var(--dash-grid-line, rgba(148,163,184,0.12)) 1px, transparent 1px) !important;
+}
+#dashboardFeedWall.mode-mosaic .dash-card {
+  background: var(--dash-tile-bg, var(--c-surface)) !important;
+  border-color: var(--dash-tile-border, var(--c-border)) !important;
+  color: var(--dash-title, var(--c-text)) !important;
+}
+#dashboardFeedWall.mode-mosaic .dash-meta {
+  background: var(--dash-meta-bg, var(--c-surface)) !important;
+  border-top-color: var(--dash-meta-border, var(--c-border)) !important;
+  color: var(--dash-sub, var(--c-text2)) !important;
+}
+#dashboardFeedWall.mode-mosaic .dash-title { color: var(--dash-title, var(--c-text)) !important; }
+#dashboardFeedWall.mode-mosaic .dash-sub { color: var(--dash-sub, var(--c-text2)) !important; }
+#dashboardFeedWall.mode-mosaic .dash-media { background: var(--dash-feed-bg, #020617) !important; }
+#dashboardFeedWall.mode-mosaic .dash-card.offline,
+#dashboardFeedWall.mode-mosaic .dash-card.stale {
+  background: var(--dash-offline-bg, var(--c-surface2)) !important;
+}
 </style>
 
 <script>
@@ -10145,7 +11216,7 @@ window.startBillingPortal = startBillingPortal;
 
   window.saveCurrentDashboardView = async function saveCurrentDashboardViewPatched() {
     if (!requireSaveAccess()) return;
-    if (!dashboardState.cameras.length) {
+    if (!dashboardState.order.length) {
       const ok = await confirmDashboardAction('Save empty dashboard?', 'This dashboard currently has no cameras. Save it anyway?', 'Save empty', false);
       if (!ok) return;
     }
@@ -10480,7 +11551,7 @@ window.startBillingPortal = startBillingPortal;
 
   function hasDashboardContent() {
     try {
-      return !!(typeof dashboardState !== 'undefined' && dashboardState && Array.isArray(dashboardState.cameras) && dashboardState.cameras.length);
+      return !!(typeof dashboardState !== 'undefined' && dashboardState && Array.isArray(dashboardState.order) && dashboardState.order.length);
     } catch (_) {
       return false;
     }
@@ -10753,7 +11824,7 @@ window.startBillingPortal = startBillingPortal;
 
     document.addEventListener('click', function autosaveMutationClickListener(e) {
       const target = e.target && e.target.closest ? e.target.closest(
-        '#dashRefreshAll,#dashFitMap,#dashToggleMap,#dashFitMosaicCameras,.dash-mini-btn,.dash-result button,.dashboard-map-popup button,.dash-seg button,.dash-small-btn,.area-btn'
+        '#dashRefreshAll,#dashFitMap,#dashToggleMap,#dashFitMosaicCameras,.dash-menu-item,.dash-mini-btn,.dash-result button,.dashboard-map-popup button,.dash-seg button,.dash-small-btn,.area-btn'
       ) : null;
       if (!target) return;
       window.setTimeout(() => markDashboardDirty('dashboard_click'), 220);
@@ -11655,7 +12726,7 @@ window.startBillingPortal = startBillingPortal;
     mergeCamera(cam);
     const result = originalAddCameraToDashboard(cam, options);
     hydrateCameraDetail(cam).then(full => {
-      if (full && dashboardState.cameras.includes(String(full.id))) {
+      if (full && dashboardState.order.includes(String(full.id))) {
         renderDashboard();
         if (dashboardMap) renderDashboardMap();
       }
@@ -11711,7 +12782,7 @@ window.startBillingPortal = startBillingPortal;
     results.forEach(cam => {
       const item = document.createElement('div');
       item.className = 'sr-item';
-      const exists = dashboardState.cameras.includes(String(cam.id));
+      const exists = dashboardState.order.includes(String(cam.id));
       const meta = [cam.roadway || cam.road, cam.city, cam.state, cam.country].filter(Boolean).join(' · ') || cam.id;
       item.innerHTML = `
         <div class="sr-row-main">
@@ -11764,7 +12835,7 @@ window.startBillingPortal = startBillingPortal;
       return;
     }
     list.innerHTML = results.map(cam => {
-      const exists = dashboardState.cameras.includes(String(cam.id));
+      const exists = dashboardState.order.includes(String(cam.id));
       const meta = [cam.roadway || cam.road, cam.city, cam.state, cam.country].filter(Boolean).join(' · ') || cam.id;
       return `<div class="dash-result" data-id="${escapeHtml(cam.id)}">
         <div class="dash-result-name">${escapeHtml(cameraTitle(cam))}</div>
@@ -11782,7 +12853,7 @@ window.startBillingPortal = startBillingPortal;
   };
 
   function hydrateSavedDashboardCameras() {
-    const ids = Array.isArray(dashboardState?.cameras) ? dashboardState.cameras.map(String) : [];
+    const ids = Array.isArray(dashboardState?.cameras) ? dashboardState.order.map(String) : [];
     if (!ids.length) return Promise.resolve([]);
     return Promise.allSettled(ids.map(id => hydrateCameraDetail(id))).then(() => {
       updateDashboardBadge();
@@ -12060,21 +13131,21 @@ window.startBillingPortal = startBillingPortal;
     // saved dashboard the source of truth, not the currently visible map source.
     dashboardState = normaliseDashboardState({ ...dashboardState, ...restored });
 
-    if (!dashboardState.focusCameraId && dashboardState.cameras.length) dashboardState.focusCameraId = dashboardState.cameras[0];
-    if (!dashboardState.selectedCameraId && dashboardState.focusCameraId) dashboardState.selectedCameraId = dashboardState.focusCameraId;
+    if (!dashboardState.selectedCameraId && dashboardState.order.length) dashboardState.selectedCameraId = dashboardState.order[0];
+    if (!dashboardState.selectedCameraId && dashboardState.selectedCameraId) dashboardState.selectedCameraId = dashboardState.selectedCameraId;
 
-    const maxPageBefore = Math.max(0, Math.ceil((dashboardState.cameras || []).length / (typeof dashboardPageSize === 'function' ? dashboardPageSize() : 16)) - 1);
-    dashboardState.page = Math.min(dashboardState.page || 0, maxPageBefore);
+    const maxPageBefore = Math.max(0, Math.ceil((dashboardState.order || []).length / (typeof dashboardPageSize === 'function' ? dashboardPageSize() : 16)) - 1);
+    dashboardState.currentPage = Math.min(dashboardState.currentPage || 0, maxPageBefore);
 
     if (typeof showVigilToast === 'function') showVigilToast('Loading dashboard cameras…', view.name || 'Saved dashboard', 'info', 2200);
 
     // Fetch authoritative camera details by ID. This is the important part:
     // no saved dashboard should require the user to have pre-loaded a bbox,
     // search result, or uploaded source first.
-    await hydrateSavedDashboardIds(dashboardState.cameras);
+    await hydrateSavedDashboardIds(dashboardState.order);
 
-    const maxPageAfter = Math.max(0, Math.ceil((dashboardState.cameras || []).length / (typeof dashboardPageSize === 'function' ? dashboardPageSize() : 16)) - 1);
-    dashboardState.page = Math.min(dashboardState.page || 0, maxPageAfter);
+    const maxPageAfter = Math.max(0, Math.ceil((dashboardState.order || []).length / (typeof dashboardPageSize === 'function' ? dashboardPageSize() : 16)) - 1);
+    dashboardState.currentPage = Math.min(dashboardState.currentPage || 0, maxPageAfter);
 
     if (typeof saveDashboardState === 'function') saveDashboardState();
     if (typeof updateDashboardBadge === 'function') updateDashboardBadge();
@@ -12360,5 +13431,42 @@ window.startBillingPortal = startBillingPortal;
 })();
 </script>
 
+
+<script>
+/* PATCH: make dashboard command bar robust after dashboard load/render. */
+(function(){
+  function stabiliseDashboardBar(){
+    var bar = document.getElementById('dashboardBar');
+    if (!bar) return;
+    bar.style.display = 'flex';
+    bar.style.position = 'fixed';
+    bar.style.left = '0';
+    bar.style.right = '0';
+    bar.style.bottom = 'var(--bar-h)';
+    bar.style.zIndex = '220';
+    bar.style.flexWrap = 'nowrap';
+    var pane = document.getElementById('dashboardFeedPane');
+    if (pane) pane.style.paddingBottom = '46px';
+  }
+  document.addEventListener('DOMContentLoaded', stabiliseDashboardBar);
+  window.addEventListener('resize', stabiliseDashboardBar);
+  var originalRender = window.renderDashboard;
+  if (typeof originalRender === 'function') {
+    window.renderDashboard = function(){
+      var result = originalRender.apply(this, arguments);
+      requestAnimationFrame(stabiliseDashboardBar);
+      return result;
+    };
+  }
+  var originalLoadCloudDashboard = window.loadCloudDashboard;
+  if (typeof originalLoadCloudDashboard === 'function') {
+    window.loadCloudDashboard = async function(){
+      var result = await originalLoadCloudDashboard.apply(this, arguments);
+      requestAnimationFrame(stabiliseDashboardBar);
+      return result;
+    };
+  }
+})();
+</script>
 </body>
 </html>
