@@ -1776,6 +1776,29 @@ body.dashboard-active #searchResults {
 }
 
 .dash-card.menu-open .dash-tile-menu { display: block; }
+/* Patch: keep the tile action menu visible outside the card bounds.
+   Cards normally clip media for clean rounded corners; when a menu is open,
+   temporarily allow overflow and lift the card above neighbouring tiles so
+   the menu is not cut off by the tile height. */
+.dash-card.menu-open {
+  overflow: visible;
+  z-index: 80;
+}
+.dash-card.menu-open .dash-tile-menu {
+  display: block;
+  z-index: 120;
+}
+#dashboardFeedWall.grid-2x2 .dash-card.menu-open,
+#dashboardFeedWall.grid-3x3 .dash-card.menu-open,
+#dashboardFeedWall.grid-4x4 .dash-card.menu-open,
+#dashboardFeedWall.mode-focus .dash-card.menu-open,
+#dashboardFeedWall.mode-single .dash-card.menu-open {
+  z-index: 80;
+}
+#dashboardFeedWall.mode-mosaic .dash-card.menu-open {
+  z-index: 90;
+}
+
 
 .dash-menu-item {
   width: 100%;
