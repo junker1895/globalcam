@@ -1182,6 +1182,114 @@ body {
   #minimap .leaflet-control-attribution { display: none; }
   #minimap .leaflet-control-zoom { display: none; }
 
+
+
+/* ─── DASHBOARD KEYBOARD SHORTCUTS OVERLAY ─── */
+#dashboardShortcutOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1350;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15,23,42,0.38);
+  backdrop-filter: blur(4px);
+}
+#dashboardShortcutOverlay.open { display: flex; }
+.dashboard-shortcut-card {
+  width: 560px;
+  max-width: calc(100vw - 28px);
+  max-height: calc(100vh - 80px);
+  overflow: hidden;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  box-shadow: 0 24px 80px rgba(15,23,42,0.35);
+}
+.dashboard-shortcut-head {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--c-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.dashboard-shortcut-title { font-size: 15px; font-weight: 800; color: var(--c-text); }
+.dashboard-shortcut-close {
+  width: 28px; height: 28px; border: none; border-radius: 7px;
+  background: transparent; color: var(--c-text3); font-size: 20px; line-height: 1;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.dashboard-shortcut-close:hover { background: var(--c-surface2); color: var(--c-text); }
+.dashboard-shortcut-body {
+  padding: 14px 16px 16px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 18px;
+}
+.shortcut-row {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--c-text2);
+  font-size: 12px;
+}
+.shortcut-row kbd {
+  min-width: 26px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 5px;
+  border: 1px solid var(--c-border2);
+  background: var(--c-surface2);
+  color: var(--c-text);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 -1px 0 rgba(15,23,42,0.08);
+  white-space: nowrap;
+}
+
+/* Dashboard shortcut discoverability */
+.dash-shortcut-btn {
+  min-width: 34px;
+  padding: 0 9px;
+  font-family: var(--mono);
+  font-weight: 800;
+}
+.dash-menu-shortcut {
+  margin-left: auto;
+  padding-left: 12px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--c-text3);
+  white-space: nowrap;
+}
+.dash-menu-item:hover .dash-menu-shortcut { color: var(--c-text2); }
+.dashboard-shortcut-section {
+  padding: 8px 0 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-text3);
+}
+.dashboard-shortcut-section:first-child { padding-top: 0; }
+
+.dashboard-shortcut-foot {
+  padding: 10px 16px;
+  border-top: 1px solid var(--c-border);
+  color: var(--c-text3);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
 /* ─── DASHBOARD VIEW ─── */
 #dashboardView {
   position: fixed;
@@ -2880,6 +2988,48 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
 </div>
 
 
+
+<!-- ─── DASHBOARD SHORTCUTS OVERLAY ─── -->
+<div id="dashboardShortcutOverlay" aria-modal="true" role="dialog" aria-labelledby="dashboardShortcutTitle">
+  <div class="dashboard-shortcut-card">
+    <div class="dashboard-shortcut-head">
+      <div class="dashboard-shortcut-title" id="dashboardShortcutTitle">Keyboard shortcuts</div>
+      <button class="dashboard-shortcut-close" id="dashboardShortcutClose" type="button" aria-label="Close shortcuts">×</button>
+    </div>
+    <div class="dashboard-shortcut-body">
+      <div class="dashboard-shortcut-section">Modes</div>
+      <div class="shortcut-row"><span>Grid mode</span><kbd>G</kbd></div>
+      <div class="shortcut-row"><span>Mosaic mode</span><kbd>O</kbd></div>
+      <div class="shortcut-row"><span>Focus selected / Focus mode</span><kbd>F</kbd></div>
+      <div class="shortcut-row"><span>Single selected / Single mode</span><kbd>S</kbd></div>
+      <div class="shortcut-row"><span>Grid density</span><kbd>2 / 3 / 4</kbd></div>
+
+      <div class="dashboard-shortcut-section">Navigation</div>
+      <div class="shortcut-row"><span>Previous / next page</span><kbd>[ / ]</kbd></div>
+      <div class="shortcut-row"><span>Previous / next single feed</span><kbd>← / →</kbd></div>
+      <div class="shortcut-row"><span>Cycle selected tile</span><kbd>Tab</kbd></div>
+      <div class="shortcut-row"><span>Cycle backwards</span><kbd>Shift+Tab</kbd></div>
+      <div class="shortcut-row"><span>Fit map extent</span><kbd>0</kbd></div>
+
+      <div class="dashboard-shortcut-section">Tile actions</div>
+      <div class="shortcut-row"><span>Open selected in Focus</span><kbd>Enter</kbd></div>
+      <div class="shortcut-row"><span>Open selected in Single</span><kbd>Shift+Enter</kbd></div>
+      <div class="shortcut-row"><span>Move selected earlier/later</span><kbd>Shift+← / Shift+→</kbd></div>
+      <div class="shortcut-row"><span>Width span down/up</span><kbd>− / +</kbd></div>
+      <div class="shortcut-row"><span>Remove selected Mosaic tile</span><kbd>Delete</kbd></div>
+
+      <div class="dashboard-shortcut-section">Refresh and layout</div>
+      <div class="shortcut-row"><span>Refresh selected</span><kbd>R</kbd></div>
+      <div class="shortcut-row"><span>Refresh all</span><kbd>Shift+R</kbd></div>
+      <div class="shortcut-row"><span>Pause auto-refresh while held</span><kbd>Space</kbd></div>
+      <div class="shortcut-row"><span>Toggle map</span><kbd>M</kbd></div>
+      <div class="shortcut-row"><span>Lock Mosaic layout</span><kbd>L</kbd></div>
+      <div class="shortcut-row"><span>Save dashboard</span><kbd>Ctrl/Cmd+S</kbd></div>
+      <div class="shortcut-row"><span>Close panels/menus</span><kbd>Esc</kbd></div>
+    <div class="dashboard-shortcut-foot">Press ? or the ? button in the dashboard bar to show or hide this panel.</div>
+  </div>
+</div>
+
 <!-- ─── DASHBOARD VIEW ─── -->
 <div id="dashboardView">
   <div id="dashboardShell">
@@ -2887,23 +3037,23 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
       <div id="dashboardFeedWall" class="grid-2x2"></div>
       <div id="dashboardBar">
         <div class="dash-seg" aria-label="Dashboard layout">
-          <button id="dashModeGrid" data-mode="grid" class="active">Grid</button>
-          <button id="dashModeMosaic" data-mode="mosaic">Mosaic</button>
-          <button id="dashModeFocus" data-mode="focus">Focus</button>
-          <button id="dashModeSingle" data-mode="single">Single</button>
+          <button id="dashModeGrid" data-mode="grid" class="active" title="Grid mode (G)" aria-label="Grid mode, shortcut G">Grid</button>
+          <button id="dashModeMosaic" data-mode="mosaic" title="Mosaic mode (O)" aria-label="Mosaic mode, shortcut O">Mosaic</button>
+          <button id="dashModeFocus" data-mode="focus" title="Focus mode (F)" aria-label="Focus mode, shortcut F">Focus</button>
+          <button id="dashModeSingle" data-mode="single" title="Single mode (S)" aria-label="Single mode, shortcut S">Single</button>
         </div>
         <div class="dash-seg dash-density-seg dash-control-grid" aria-label="Dashboard tile size">
-          <button id="dashGrid2" data-grid="2x2" class="active" title="Large tiles" aria-label="Large tiles">
+          <button id="dashGrid2" data-grid="2x2" class="active" title="Large tiles · 2×2 (2)" aria-label="Large tiles, 2 by 2, shortcut 2">
             <span class="density-icon density-large" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
           </button>
-          <button id="dashGrid3" data-grid="3x3" title="Medium tiles" aria-label="Medium tiles">
+          <button id="dashGrid3" data-grid="3x3" title="Medium tiles · 3×3 (3)" aria-label="Medium tiles, 3 by 3, shortcut 3">
             <span class="density-icon density-medium" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
           </button>
-          <button id="dashGrid4" data-grid="4x4" title="Small tiles" aria-label="Small tiles">
+          <button id="dashGrid4" data-grid="4x4" title="Small tiles · 4×4 (4)" aria-label="Small tiles, 4 by 4, shortcut 4">
             <span class="density-icon density-small" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
           </button>
         </div>
-        <button class="dash-small-btn" id="dashRefreshAll" title="Refresh visible dashboard feeds in a staggered wave">↻ Refresh all</button>
+        <button class="dash-small-btn" id="dashRefreshAll" title="Refresh visible dashboard feeds in a staggered wave (Shift+R)">↻ Refresh all</button>
         <label class="dashboard-refresh-control" title="Automatic refresh cadence for visible dashboard feeds">
           Auto
           <select id="dashRefreshInterval" aria-label="Dashboard auto refresh interval">
@@ -2914,16 +3064,17 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
           </select>
           <span class="dashboard-refresh-note">staggered</span>
         </label>
-        <button class="dash-small-btn" id="dashAddCamera">+ Add camera</button>
-        <button class="dash-small-btn dash-control-map" id="dashFitMap" title="Frame all dashboard cameras on the 2D map">Map extent</button>
-        <button class="dash-small-btn dash-control-map" id="dashToggleMap">Hide map</button>
+        <button class="dash-small-btn" id="dashAddCamera" title="Add a camera to this dashboard">+ Add camera</button>
+        <button class="dash-small-btn dash-control-map" id="dashFitMap" title="Frame all dashboard cameras on the 2D map (0)">Map extent</button>
+        <button class="dash-small-btn dash-control-map" id="dashToggleMap" title="Toggle map (M)">Hide map</button>
         <button class="dash-small-btn dash-control-mosaic" id="dashAddMapTile" title="Add the 2D map as a draggable Mosaic tile">+ Map tile</button>
         <button class="dash-small-btn dash-control-mosaic" id="dashFitMosaicCameras" title="Arrange Mosaic camera tiles so they fit cleanly without overlapping">Fit cameras</button>
-        <button class="dash-small-btn dash-control-mosaic" id="dashLockMosaic" title="Lock Mosaic layout so tiles cannot be dragged or resized">Lock layout</button>
-        <button class="dash-small-btn" id="dashClearAll">Clear</button>
-        <button class="dash-small-btn" id="dashSaveView">Save view</button>
+        <button class="dash-small-btn dash-control-mosaic" id="dashLockMosaic" title="Lock Mosaic layout so tiles cannot be dragged or resized (L)">Lock layout</button>
+        <button class="dash-small-btn" id="dashClearAll" title="Clear this dashboard">Clear</button>
+        <button class="dash-small-btn" id="dashSaveView" title="Save view now (Ctrl/Cmd+S)">Save view</button>
         <button class="dash-small-btn" id="dashLoadView" title="Right-click to delete a saved view">Load view</button>
         <div class="dash-page-controls" id="dashPageButtons" aria-label="Dashboard pages"></div>
+        <button class="dash-small-btn dash-shortcut-btn" id="dashShortcutHelp" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
         <div id="dashboardStatus">0 cameras · ready</div>
       </div>
     </section>
@@ -4352,6 +4503,7 @@ function createDefaultDashboardState() {
     gridSpans: {},
     mosaicLayout: {},
     mapVisible: true,
+    mapWidth: 440,
     mapAsTile: false,
     lockLayout: false,
     pageSize: DASHBOARD_PAGE_SIZE,
@@ -4368,6 +4520,7 @@ function installDashboardStateCompatibilityAliases(state) {
     page: { get: () => state.currentPage, set: value => { state.currentPage = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0; } },
     mosaic: { get: () => state.mosaicLayout, set: value => { state.mosaicLayout = value && typeof value === 'object' ? value : {}; } },
     mapTileVisible: { get: () => !!state.mapAsTile, set: value => { state.mapAsTile = !!value; } },
+    mapPanelWidth: { get: () => state.mapWidth, set: value => { const n = Number(value); state.mapWidth = Number.isFinite(n) ? Math.max(380, Math.min(520, Math.round(n))) : 440; } },
     mosaicLocked: { get: () => !!state.lockLayout, set: value => { state.lockLayout = !!value; } },
     focusCameraId: { get: () => state.selectedCameraId, set: value => { state.selectedCameraId = value != null ? String(value) : null; } }
   };
@@ -4384,41 +4537,87 @@ function installDashboardStateCompatibilityAliases(state) {
   return state;
 }
 
-function normaliseDashboardState(raw = {}) {
+function clampDashboardMapWidth(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(380, Math.min(520, Math.round(n))) : 440;
+}
+
+function hydrateDashboardState(raw = {}) {
   const base = raw && typeof raw === 'object' ? raw : {};
   const state = createDefaultDashboardState();
+
+  // Canonical read path. It accepts the new model plus legacy fields used by
+  // older saved dashboards/localStorage entries.
   const order = Array.isArray(base.order) ? base.order : (Array.isArray(base.cameras) ? base.cameras : []);
   state.order = Array.from(new Set(order.map(String).filter(Boolean)));
   state.mode = ['grid','mosaic','focus','single'].includes(base.mode || base.layout) ? (base.mode || base.layout) : 'grid';
   state.density = ['2x2','3x3','4x4'].includes(base.density || base.gridSize) ? (base.density || base.gridSize) : '2x2';
   state.currentPage = Number.isFinite(base.currentPage) ? Math.max(0, Math.floor(base.currentPage)) : (Number.isFinite(base.page) ? Math.max(0, Math.floor(base.page)) : 0);
+
   const selected = base.selectedCameraId != null ? String(base.selectedCameraId) : (base.focusCameraId != null ? String(base.focusCameraId) : null);
   state.selectedCameraId = selected && state.order.includes(selected) ? selected : (state.order[0] || null);
+
   state.gridSpans = base.gridSpans && typeof base.gridSpans === 'object' ? { ...base.gridSpans } : {};
   state.mosaicLayout = base.mosaicLayout && typeof base.mosaicLayout === 'object' ? { ...base.mosaicLayout } : (base.mosaic && typeof base.mosaic === 'object' ? { ...base.mosaic } : {});
   state.mapVisible = base.mapVisible !== false;
+  state.mapWidth = clampDashboardMapWidth(base.mapWidth ?? base.mapPanelWidth ?? base.sideMapWidth);
   state.mapAsTile = !!(base.mapAsTile || base.mapTileVisible);
   state.lockLayout = !!(base.lockLayout || base.mosaicLocked);
   state.pageSize = DASHBOARD_PAGE_SIZE;
   state.mediaFit = base.mediaFit === 'cover' ? 'cover' : 'contain';
+
   return installDashboardStateCompatibilityAliases(state);
 }
 
-function serialiseDashboardStateForStorage() {
-  return {
-    mode: dashboardState.mode || 'grid',
-    density: dashboardState.density || '2x2',
-    currentPage: dashboardState.currentPage || 0,
-    selectedCameraId: dashboardState.selectedCameraId || null,
-    order: Array.isArray(dashboardState.order) ? dashboardState.order.map(String) : [],
-    gridSpans: dashboardState.gridSpans || {},
-    mosaicLayout: dashboardState.mosaicLayout || {},
+function normaliseDashboardState(raw = {}) {
+  return hydrateDashboardState(raw);
+}
+
+function captureDashboardMapWidthFromDom() {
+  const pane = document.getElementById('dashboardMapPane');
+  if (!pane || pane.classList.contains('collapsed')) return;
+  const rect = pane.getBoundingClientRect();
+  if (rect && Number.isFinite(rect.width) && rect.width > 0) {
+    dashboardState.mapWidth = clampDashboardMapWidth(rect.width);
+  }
+}
+
+function serializeDashboardState() {
+  captureDashboardMapWidthFromDom();
+  const order = Array.isArray(dashboardState.order) ? dashboardState.order.map(String).filter(Boolean) : [];
+  const state = {
+    mode: ['grid','mosaic','focus','single'].includes(dashboardState.mode) ? dashboardState.mode : 'grid',
+    density: ['2x2','3x3','4x4'].includes(dashboardState.density) ? dashboardState.density : '2x2',
+    currentPage: Number.isFinite(dashboardState.currentPage) ? Math.max(0, Math.floor(dashboardState.currentPage)) : 0,
+    selectedCameraId: dashboardState.selectedCameraId != null ? String(dashboardState.selectedCameraId) : (order[0] || null),
+    order,
+    gridSpans: dashboardState.gridSpans && typeof dashboardState.gridSpans === 'object' ? { ...dashboardState.gridSpans } : {},
+    mosaicLayout: dashboardState.mosaicLayout && typeof dashboardState.mosaicLayout === 'object' ? { ...dashboardState.mosaicLayout } : {},
     mapVisible: dashboardState.mapVisible !== false,
+    mapWidth: clampDashboardMapWidth(dashboardState.mapWidth),
     mapAsTile: !!dashboardState.mapAsTile,
     lockLayout: !!dashboardState.lockLayout,
     pageSize: DASHBOARD_PAGE_SIZE,
     mediaFit: dashboardState.mediaFit === 'cover' ? 'cover' : 'contain'
   };
+
+  // Legacy aliases are intentionally saved too so older dashboard loaders do
+  // not lose the state. The canonical fields above remain the source of truth.
+  state.cameras = state.order.slice();
+  state.layout = state.mode;
+  state.gridSize = state.density;
+  state.page = state.currentPage;
+  state.focusCameraId = state.selectedCameraId;
+  state.mosaic = { ...state.mosaicLayout };
+  state.mapTileVisible = state.mapAsTile;
+  state.mosaicLocked = state.lockLayout;
+  state.mapPanelWidth = state.mapWidth;
+  state.sideMapWidth = state.mapWidth;
+  return state;
+}
+
+function serialiseDashboardStateForStorage() {
+  return serializeDashboardState();
 }
 
 function dashboardOrderFromStateValue(state) {
@@ -7966,7 +8165,7 @@ function dashboardTileMenuHtml(cam, manualSpan) {
          const dim = dashboardGridDimension();
          const disabled = n > dim ? ' disabled' : '';
          const check = Number(manualSpan) === n ? '<span class="dash-menu-check">✓</span>' : '';
-         return `<button class="dash-menu-item" data-action="set-span" data-span="${n}"${disabled}>${n}×${check}</button>`;
+         return `<button class="dash-menu-item" data-action="set-span" data-span="${n}"${disabled} title="Set tile width to ${n}× (+ / −)">${n}×${check}<span class="dash-menu-shortcut">+/−</span></button>`;
        }).join('')}`
     : '';
   const focusLabel = mode === 'focus' ? 'Set as focus' : 'Focus';
@@ -7974,16 +8173,16 @@ function dashboardTileMenuHtml(cam, manualSpan) {
   return `<div class="dash-actions">
     <button class="dash-menu-trigger" data-action="tile-menu" type="button" aria-haspopup="menu" aria-expanded="false" title="Tile actions">⋯</button>
     <div class="dash-tile-menu" role="menu">
-      <button class="dash-menu-item" data-action="focus" role="menuitem">${focusLabel}</button>
-      <button class="dash-menu-item" data-action="single" role="menuitem">${singleLabel}</button>
-      <button class="dash-menu-item" data-action="locate" role="menuitem">Locate on map</button>
-      <button class="dash-menu-item" data-action="refresh" role="menuitem">Refresh now</button>
+      <button class="dash-menu-item" data-action="focus" role="menuitem" title="Focus selected tile (Enter)">${focusLabel}<span class="dash-menu-shortcut">Enter</span></button>
+      <button class="dash-menu-item" data-action="single" role="menuitem" title="Open selected tile in Single mode (Shift+Enter)">${singleLabel}<span class="dash-menu-shortcut">⇧ Enter</span></button>
+      <button class="dash-menu-item" data-action="locate" role="menuitem" title="Locate this camera on the dashboard map">Locate on map</button>
+      <button class="dash-menu-item" data-action="refresh" role="menuitem" title="Refresh this tile (R)">Refresh now<span class="dash-menu-shortcut">R</span></button>
       <div class="dash-menu-sep"></div>
-      <button class="dash-menu-item" data-action="move-earlier" role="menuitem"${canMoveEarlier ? '' : ' disabled'}>Move earlier</button>
-      <button class="dash-menu-item" data-action="move-later" role="menuitem"${canMoveLater ? '' : ' disabled'}>Move later</button>
+      <button class="dash-menu-item" data-action="move-earlier" role="menuitem"${canMoveEarlier ? '' : ' disabled'} title="Move this tile earlier (Shift+←)">Move earlier<span class="dash-menu-shortcut">⇧←</span></button>
+      <button class="dash-menu-item" data-action="move-later" role="menuitem"${canMoveLater ? '' : ' disabled'} title="Move this tile later (Shift+→)">Move later<span class="dash-menu-shortcut">⇧→</span></button>
       ${widthControls}
       <div class="dash-menu-sep"></div>
-      <button class="dash-menu-item danger" data-action="remove" role="menuitem">Remove from dashboard</button>
+      <button class="dash-menu-item danger" data-action="remove" role="menuitem" title="Remove selected tile in Mosaic (Delete)">Remove from dashboard<span class="dash-menu-shortcut">Del</span></button>
     </div>
   </div>`;
 }
@@ -7992,7 +8191,7 @@ function dashboardMapTileMenuHtml() {
   return `<div class="dash-actions">
     <button class="dash-menu-trigger" data-action="tile-menu" type="button" aria-haspopup="menu" aria-expanded="false" title="Tile actions">⋯</button>
     <div class="dash-tile-menu" role="menu">
-      <button class="dash-menu-item" data-action="fit-map-tile" role="menuitem">Fit cameras</button>
+      <button class="dash-menu-item" data-action="fit-map-tile" role="menuitem" title="Fit map to dashboard cameras (0)">Fit cameras<span class="dash-menu-shortcut">0</span></button>
       <div class="dash-menu-sep"></div>
       <button class="dash-menu-item danger" data-action="remove-map-tile" role="menuitem">Remove map tile</button>
     </div>
@@ -8643,7 +8842,7 @@ function updateDashboardStatus() {
   renderDashboardPagination();
   updateDashboardToolbarVisibility();
   const refreshed = last ? 'last refresh ' + new Date(last).toLocaleTimeString() : 'ready';
-  const cadence = `auto ${dashboardRefreshIntervalSec}s · staggered`;
+  const cadence = dashboardRefreshPaused ? 'auto refresh paused' : `auto ${dashboardRefreshIntervalSec}s · staggered`;
   if (mode === 'grid') el.textContent = `${total} cameras · page ${page}/${pageCount} · ${visible} visible · ${cadence} · ${refreshed}`;
   else if (mode === 'mosaic') el.textContent = `${total} cameras · snapped mosaic${dashboardState.lockLayout ? ' · locked' : ''} · ${cadence} · ${refreshed}`;
   else if (mode === 'focus') el.textContent = `${total} cameras · focus preview · ${cadence} · ${refreshed}`;
@@ -8921,19 +9120,170 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeDashboardTileMenus();
 });
 
-// keyboard left/right support for Single dashboard mode
 
-document.addEventListener('keydown', e => {
-  if (activeView !== 'dashboard' || dashboardMode() !== 'single') return;
-  const tag = (e.target && e.target.tagName ? e.target.tagName : '').toLowerCase();
-  if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable) return;
-  if (e.key === 'ArrowLeft') {
+// Dashboard keyboard shortcuts: mode-aware operational controls.
+function dashboardShortcutInputActive(target) {
+  const tag = (target && target.tagName ? target.tagName : '').toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || !!target?.isContentEditable;
+}
+
+function selectedDashboardCameraId() {
+  const id = String(dashboardState.selectedCameraId || '');
+  if (id && (dashboardState.order || []).map(String).includes(id)) return id;
+  const fallback = String((dashboardPageCameras()[0] || dashboardCameras()[0] || {}).id || '');
+  if (fallback) dashboardState.selectedCameraId = fallback;
+  return fallback;
+}
+
+function cycleDashboardSelection(delta) {
+  const order = (dashboardState.order || []).map(String);
+  if (!order.length) return;
+  const current = selectedDashboardCameraId();
+  const idx = Math.max(0, order.indexOf(String(current)));
+  const next = order[(idx + delta + order.length) % order.length];
+  setDashboardSelected(next);
+}
+
+function refreshSelectedDashboardTile() {
+  const id = selectedDashboardCameraId();
+  if (!id) return;
+  const cam = dashboardCameraById(id);
+  if (!cam) return;
+  mountDashboardFeed(cam, Math.max(0, (dashboardState.order || []).map(String).indexOf(id)), { forceHydrate: true });
+}
+
+function adjustSelectedDashboardSpan(delta) {
+  if (dashboardMode() !== 'grid') return;
+  const id = selectedDashboardCameraId();
+  if (!id) return;
+  const dim = dashboardGridDimension();
+  const current = dashboardGridSpanForId(id);
+  setDashboardGridSpan(id, Math.max(1, Math.min(dim, current + delta)));
+}
+
+function openDashboardShortcutOverlay(force) {
+  const overlay = document.getElementById('dashboardShortcutOverlay');
+  if (!overlay) return;
+  const open = typeof force === 'boolean' ? force : !overlay.classList.contains('open');
+  overlay.classList.toggle('open', open);
+}
+
+function closeDashboardTransientUi() {
+  closeDashboardTileMenus();
+  document.getElementById('dashboardShortcutOverlay')?.classList.remove('open');
+  document.getElementById('dashboardAddPanel')?.classList.remove('open');
+  document.getElementById('savedDashboardsPanel')?.classList.remove('open');
+  document.getElementById('areaSelectionPanel')?.classList.remove('open');
+  document.getElementById('searchResults')?.style && (document.getElementById('searchResults').style.display = 'none');
+  document.getElementById('authModal')?.classList.remove('open');
+  document.getElementById('appMessageModal')?.classList.remove('open');
+  document.getElementById('accountMenu')?.classList.remove('open');
+}
+
+function handleDashboardShortcut(e) {
+  if (activeView !== 'dashboard') return;
+  if (dashboardShortcutInputActive(e.target)) return;
+
+  const key = e.key;
+  const lower = key.toLowerCase();
+  const mode = dashboardMode();
+
+  if (key === '?' || (key === '/' && e.shiftKey)) {
     e.preventDefault();
-    navigateDashboardSingle(-1);
-  } else if (e.key === 'ArrowRight') {
-    e.preventDefault();
-    navigateDashboardSingle(1);
+    openDashboardShortcutOverlay();
+    return;
   }
+
+  if (key === 'Escape') {
+    e.preventDefault();
+    closeDashboardTransientUi();
+    return;
+  }
+
+  if ((e.ctrlKey || e.metaKey) && lower === 's') {
+    e.preventDefault();
+    saveCurrentDashboardView();
+    return;
+  }
+
+  if (key === 'Tab') {
+    e.preventDefault();
+    cycleDashboardSelection(e.shiftKey ? -1 : 1);
+    return;
+  }
+
+  if (key === ' ') {
+    e.preventDefault();
+    if (!dashboardRefreshPaused) {
+      dashboardRefreshPaused = true;
+      dashboardRefreshTimers.forEach(t => clearTimeout(t));
+      dashboardRefreshTimers.clear();
+      updateDashboardStatus();
+    }
+    return;
+  }
+
+  if (key === 'ArrowLeft' || key === 'ArrowRight') {
+    e.preventDefault();
+    const dir = key === 'ArrowLeft' ? -1 : 1;
+    if (e.shiftKey) moveDashboardCameraRelative(selectedDashboardCameraId(), dir);
+    else if (mode === 'single') navigateDashboardSingle(dir);
+    else cycleDashboardSelection(dir);
+    return;
+  }
+
+  if (key === '[' || key === ']') {
+    e.preventDefault();
+    setDashboardPage((dashboardState.currentPage || 0) + (key === '[' ? -1 : 1));
+    return;
+  }
+
+  if (key === 'Delete' || key === 'Backspace') {
+    if (mode === 'mosaic') {
+      const id = selectedDashboardCameraId();
+      if (id) {
+        e.preventDefault();
+        removeCameraFromDashboard(id);
+      }
+    }
+    return;
+  }
+
+  if (key === '+' || key === '=') { e.preventDefault(); adjustSelectedDashboardSpan(1); return; }
+  if (key === '-' || key === '_') { e.preventDefault(); adjustSelectedDashboardSpan(-1); return; }
+
+  if (key === '0') { e.preventDefault(); fitDashboardMap(); return; }
+  if (key === '2') { e.preventDefault(); setDashboardLayout('grid'); setDashboardGrid('2x2'); return; }
+  if (key === '3') { e.preventDefault(); setDashboardLayout('grid'); setDashboardGrid('3x3'); return; }
+  if (key === '4') { e.preventDefault(); setDashboardLayout('grid'); setDashboardGrid('4x4'); return; }
+
+  if (lower === 'g') { e.preventDefault(); setDashboardLayout('grid'); return; }
+  if (lower === 'o') { e.preventDefault(); setDashboardLayout('mosaic'); return; }
+  if (lower === 'f') { e.preventDefault(); dashboardState.selectedCameraId = selectedDashboardCameraId(); setDashboardLayout('focus'); return; }
+  if (lower === 's') { e.preventDefault(); dashboardState.selectedCameraId = selectedDashboardCameraId(); setDashboardLayout('single'); return; }
+  if (lower === 'm') { e.preventDefault(); mode === 'mosaic' ? toggleDashboardMapTile() : toggleDashboardMap(); return; }
+  if (lower === 'l') { e.preventDefault(); toggleMosaicLayoutLock(); return; }
+  if (lower === 'r') { e.preventDefault(); e.shiftKey ? refreshDashboardAll() : refreshSelectedDashboardTile(); return; }
+  if (key === 'Enter') { e.preventDefault(); dashboardState.selectedCameraId = selectedDashboardCameraId(); setDashboardLayout(e.shiftKey ? 'single' : 'focus'); return; }
+}
+
+document.addEventListener('keydown', handleDashboardShortcut);
+document.getElementById('dashShortcutHelp')?.addEventListener('click', () => openDashboardShortcutOverlay(true));
+document.getElementById('dashboardShortcutOverlay')?.addEventListener('click', (e) => {
+  if (e.target && e.target.id === 'dashboardShortcutOverlay') openDashboardShortcutOverlay(false);
+});
+
+document.addEventListener('keyup', e => {
+  if (activeView !== 'dashboard') return;
+  if (e.key !== ' ') return;
+  if (dashboardShortcutInputActive(e.target)) return;
+  dashboardRefreshPaused = document.hidden;
+  if (!dashboardRefreshPaused) scheduleDashboardRefreshWave({ immediate: false, forceHydrate: false, reason: 'resume-shortcut' });
+  updateDashboardStatus();
+});
+document.getElementById('dashboardShortcutClose')?.addEventListener('click', () => openDashboardShortcutOverlay(false));
+document.getElementById('dashboardShortcutOverlay')?.addEventListener('click', e => {
+  if (e.target && e.target.id === 'dashboardShortcutOverlay') openDashboardShortcutOverlay(false);
 });
 
 function initDashboardMap() {
@@ -9171,6 +9521,11 @@ function updateDashboardMapPresentation() {
   const sideAllowed = dashboardSideMapAllowed();
   const drawer = dashboardShouldUseMapDrawer();
   const showSideMap = sideAllowed && dashboardState.mapVisible;
+  dashboardState.mapWidth = clampDashboardMapWidth(dashboardState.mapWidth);
+  if (!drawer) {
+    pane.style.width = dashboardState.mapWidth + 'px';
+    pane.style.flexBasis = dashboardState.mapWidth + 'px';
+  }
 
   document.body.classList.toggle('dashboard-map-drawer', drawer && activeView === 'dashboard' && showSideMap);
   pane.classList.toggle('collapsed', !showSideMap);
@@ -9315,8 +9670,10 @@ function setupDashboardResize() {
     if (!dashboardResizeActive) return;
     if (dashboardShouldUseMapDrawer()) return;
     const shellRect = document.getElementById('dashboardShell').getBoundingClientRect();
-    const px = Math.max(380, Math.min(520, shellRect.right - e.clientX));
+    const px = clampDashboardMapWidth(shellRect.right - e.clientX);
+    dashboardState.mapWidth = px;
     pane.style.width = px + 'px';
+    pane.style.flexBasis = px + 'px';
     if (dashboardMap) dashboardMap.invalidateSize();
   });
 
@@ -9325,6 +9682,9 @@ function setupDashboardResize() {
     dashboardResizeActive = false;
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
+    captureDashboardMapWidthFromDom();
+    saveDashboardState();
+    if (typeof markDashboardDirty === 'function') markDashboardDirty('map_resize');
   });
 }
 
@@ -10034,7 +10394,7 @@ function normaliseSavedDashboardState(state) {
 }
 
 function dashboardStateForPreset() {
-  return serialiseDashboardStateForStorage();
+  return serializeDashboardState();
 }
 
 function normaliseCloudDashboardRow(row) {
@@ -10984,8 +11344,17 @@ body.dashboard-active #dashboardBar .dash-small-btn {
 }
 body.dashboard-active #dashboardBar .density-icon {
   display: inline-grid !important;
-  place-items: center !important;
   align-self: center !important;
+  /* Keep the mini-grid cells stretched. place-items:center collapses the
+     empty <i> cells to 0x0, which makes the density icons disappear. */
+  align-items: stretch !important;
+  justify-items: stretch !important;
+}
+body.dashboard-active #dashboardBar .density-icon i {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 2px !important;
+  min-height: 2px !important;
 }
 body.dashboard-active #dashboardBar .dash-control-hidden {
   display: none !important;
@@ -13014,25 +13383,10 @@ body.dashboard-active #dashboardFeedWall {
   }
 
   function coerceSavedDashboardState(state) {
-    if (typeof normaliseDashboardState === 'function') return normaliseDashboardState(state);
-    const base = state && typeof state === 'object' ? state : {};
-    const ids = savedDashIdList(base);
-    const mode = ['grid', 'mosaic', 'focus', 'single'].includes(base.mode || base.layout) ? (base.mode || base.layout) : 'grid';
-    const density = ['2x2', '3x3', '4x4'].includes(base.density || base.gridSize) ? (base.density || base.gridSize) : '2x2';
-    const selectedId = savedDashIdExistsInState(ids, base.selectedCameraId) ? String(base.selectedCameraId) : (savedDashIdExistsInState(ids, base.focusCameraId) ? String(base.focusCameraId) : (ids[0] || null));
-    return {
-      order: ids,
-      mode,
-      density,
-      mapVisible: base.mapVisible !== false,
-      selectedCameraId: selectedId,
-      mosaicLayout: base.mosaicLayout && typeof base.mosaicLayout === 'object' ? base.mosaicLayout : (base.mosaic && typeof base.mosaic === 'object' ? base.mosaic : {}),
-      currentPage: Number.isFinite(base.currentPage) ? Math.max(0, Math.floor(base.currentPage)) : (Number.isFinite(base.page) ? Math.max(0, Math.floor(base.page)) : 0),
-      pageSize: typeof DASHBOARD_PAGE_SIZE !== 'undefined' ? DASHBOARD_PAGE_SIZE : 16,
-      mediaFit: base.mediaFit === 'cover' ? 'cover' : 'contain',
-      mapAsTile: !!(base.mapAsTile || base.mapTileVisible),
-      gridSpans: base.gridSpans && typeof base.gridSpans === 'object' ? base.gridSpans : {}
-    };
+    const restored = typeof hydrateDashboardState === 'function'
+      ? hydrateDashboardState(state)
+      : (typeof normaliseDashboardState === 'function' ? normaliseDashboardState(state) : state);
+    return installDashboardStateCompatibilityAliases(restored);
   }
 
   // Replace the old normaliser. The old version filtered camera IDs through
