@@ -3927,20 +3927,104 @@ function setLocalPlanForTesting(plan) {
 }
 window.setLocalPlanForTesting = setLocalPlanForTesting;
 let activeView = 'globe';
-let dashboardState = {
-  cameras: [],
-  layout: 'grid',
-  gridSize: '2x2',
-  mapVisible: true,
-  focusCameraId: null,
-  selectedCameraId: null,
-  mosaic: {},
-  page: 0,
-  pageSize: DASHBOARD_PAGE_SIZE,
-  mediaFit: 'contain',
-  mapTileVisible: false,
-  gridSpans: {}
-};
+function createDefaultDashboardState() {
+  return {
+    // Canonical dashboard model. Keep mode/density/order/page/map state here so
+    // grid, mosaic, focus, single, pagination, map tile, and saved views do not
+    // each maintain their own competing state.
+    mode: 'grid',
+    density: '2x2',
+    currentPage: 0,
+    selectedCameraId: null,
+    order: [],
+    gridSpans: {},
+    mosaicLayout: {},
+    mapVisible: true,
+    mapAsTile: false,
+    pageSize: DASHBOARD_PAGE_SIZE,
+    mediaFit: 'contain'
+  };
+}
+
+function installDashboardStateCompatibilityAliases(state) {
+  if (!state || typeof state !== 'object') return state;
+  const aliases = {
+    cameras: { get: () => state.order, set: value => { state.order = Array.isArray(value) ? value.map(String) : []; } },
+    layout: { get: () => state.mode, set: value => { state.mode = ['grid','mosaic','focus','single'].includes(value) ? value : 'grid'; } },
+    gridSize: { get: () => state.density, set: value => { state.density = ['2x2','3x3','4x4'].includes(value) ? value : '2x2'; } },
+    page: { get: () => state.currentPage, set: value => { state.currentPage = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0; } },
+    mosaic: { get: () => state.mosaicLayout, set: value => { state.mosaicLayout = value && typeof value === 'object' ? value : {}; } },
+    mapTileVisible: { get: () => !!state.mapAsTile, set: value => { state.mapAsTile = !!value; } },
+    focusCameraId: { get: () => state.selectedCameraId, set: value => { state.selectedCameraId = value != null ? String(value) : null; } }
+  };
+  Object.keys(aliases).forEach(key => {
+    try {
+      Object.defineProperty(state, key, {
+        configurable: true,
+        enumerable: false,
+        get: aliases[key].get,
+        set: aliases[key].set
+      });
+    } catch (_) {}
+  });
+  return state;
+}
+
+function normaliseDashboardState(raw = {}) {
+  const base = raw && typeof raw === 'object' ? raw : {};
+  const state = createDefaultDashboardState();
+  const order = Array.isArray(base.order) ? base.order : (Array.isArray(base.cameras) ? base.cameras : []);
+  state.order = Array.from(new Set(order.map(String).filter(Boolean)));
+  state.mode = ['grid','mosaic','focus','single'].includes(base.mode || base.layout) ? (base.mode || base.layout) : 'grid';
+  state.density = ['2x2','3x3','4x4'].includes(base.density || base.gridSize) ? (base.density || base.gridSize) : '2x2';
+  state.currentPage = Number.isFinite(base.currentPage) ? Math.max(0, Math.floor(base.currentPage)) : (Number.isFinite(base.page) ? Math.max(0, Math.floor(base.page)) : 0);
+  const selected = base.selectedCameraId != null ? String(base.selectedCameraId) : (base.focusCameraId != null ? String(base.focusCameraId) : null);
+  state.selectedCameraId = selected && state.order.includes(selected) ? selected : (state.order[0] || null);
+  state.gridSpans = base.gridSpans && typeof base.gridSpans === 'object' ? { ...base.gridSpans } : {};
+  state.mosaicLayout = base.mosaicLayout && typeof base.mosaicLayout === 'object' ? { ...base.mosaicLayout } : (base.mosaic && typeof base.mosaic === 'object' ? { ...base.mosaic } : {});
+  state.mapVisible = base.mapVisible !== false;
+  state.mapAsTile = !!(base.mapAsTile || base.mapTileVisible);
+  state.pageSize = DASHBOARD_PAGE_SIZE;
+  state.mediaFit = base.mediaFit === 'cover' ? 'cover' : 'contain';
+  return installDashboardStateCompatibilityAliases(state);
+}
+
+function serialiseDashboardStateForStorage() {
+  return {
+    mode: dashboardState.mode || 'grid',
+    density: dashboardState.density || '2x2',
+    currentPage: dashboardState.currentPage || 0,
+    selectedCameraId: dashboardState.selectedCameraId || null,
+    order: Array.isArray(dashboardState.order) ? dashboardState.order.map(String) : [],
+    gridSpans: dashboardState.gridSpans || {},
+    mosaicLayout: dashboardState.mosaicLayout || {},
+    mapVisible: dashboardState.mapVisible !== false,
+    mapAsTile: !!dashboardState.mapAsTile,
+    pageSize: DASHBOARD_PAGE_SIZE,
+    mediaFit: dashboardState.mediaFit === 'cover' ? 'cover' : 'contain'
+  };
+}
+
+function dashboardOrderFromStateValue(state) {
+  if (!state || typeof state !== 'object') return [];
+  const raw = Array.isArray(state.order) ? state.order : (Array.isArray(state.cameras) ? state.cameras : []);
+  return raw.map(String).filter(Boolean);
+}
+
+function dashboardCameraCountFromStateValue(state, fallback = 0) {
+  const order = dashboardOrderFromStateValue(state);
+  return order.length || fallback || 0;
+}
+
+function dashboardModeFromStateValue(state) {
+  return state && (state.mode || state.layout) ? (state.mode || state.layout) : 'grid';
+}
+
+function dashboardDensityFromStateValue(state) {
+  return state && (state.density || state.gridSize) ? (state.density || state.gridSize) : '';
+}
+
+let dashboardState = normaliseDashboardState();
 let dashboardMap = null;
 let dashboardMapLayer = null;
 let dashboardMapTile = null;
@@ -6905,39 +6989,19 @@ async function resolveDashboardCameraFeed(cam, { forceHydrate = false } = {}) {
 function loadDashboardState() {
   try {
     const saved = JSON.parse(localStorage.getItem(DASHBOARD_STORAGE_KEY) || '{}');
-    dashboardState = {
-      ...dashboardState,
-      ...saved,
-      cameras: Array.isArray(saved.cameras) ? saved.cameras.map(String) : [],
-      focusCameraId: saved.focusCameraId != null ? String(saved.focusCameraId) : null,
-      selectedCameraId: saved.selectedCameraId != null ? String(saved.selectedCameraId) : null,
-      mosaic: saved.mosaic || {},
-      page: Number.isFinite(saved.page) ? Math.max(0, saved.page) : 0,
-      pageSize: DASHBOARD_PAGE_SIZE,
-      mediaFit: saved.mediaFit === 'cover' ? 'cover' : 'contain',
-      mapTileVisible: !!saved.mapTileVisible,
-      gridSpans: saved.gridSpans && typeof saved.gridSpans === 'object' ? saved.gridSpans : {}
-    };
-    dashboardState.cameras = enforceDashboardCameraLimit(dashboardState.cameras);
-    if (dashboardState.focusCameraId && !dashboardState.cameras.includes(String(dashboardState.focusCameraId))) dashboardState.focusCameraId = dashboardState.cameras[0] || null;
-    if (dashboardState.selectedCameraId && !dashboardState.cameras.includes(String(dashboardState.selectedCameraId))) dashboardState.selectedCameraId = dashboardState.focusCameraId || null;
-  } catch (_) {}
+    dashboardState = normaliseDashboardState(saved);
+    dashboardState.order = enforceDashboardCameraLimit(dashboardState.order);
+    if (dashboardState.selectedCameraId && !dashboardState.order.includes(String(dashboardState.selectedCameraId))) {
+      dashboardState.selectedCameraId = dashboardState.order[0] || null;
+    }
+    installDashboardStateCompatibilityAliases(dashboardState);
+  } catch (_) {
+    dashboardState = normaliseDashboardState();
+  }
 }
 
 function saveDashboardState() {
-  localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify({
-    cameras: dashboardState.cameras,
-    layout: dashboardState.layout,
-    gridSize: dashboardState.gridSize,
-    mapVisible: dashboardState.mapVisible,
-    focusCameraId: dashboardState.focusCameraId,
-    selectedCameraId: dashboardState.selectedCameraId,
-    mosaic: dashboardState.mosaic,
-    page: dashboardState.page || 0,
-    mediaFit: dashboardState.mediaFit === 'cover' ? 'cover' : 'contain',
-    mapTileVisible: !!dashboardState.mapTileVisible,
-    gridSpans: dashboardState.gridSpans || {}
-  }));
+  localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(serialiseDashboardStateForStorage()));
 }
 
 function dashboardCameras() {
@@ -8992,36 +9056,19 @@ function addAreaSelectionToDashboard() {
 // pattern is: app loads the global camera source automatically, then saved
 // dashboards restore by stable camera IDs.
 function normaliseSavedDashboardState(state) {
-  const base = state && typeof state === 'object' ? state : {};
-  return {
-    cameras: Array.isArray(base.cameras) ? base.cameras.map(String).filter(id => cameraMap.has(id)) : [],
-    layout: ['grid', 'mosaic', 'focus', 'single'].includes(base.layout) ? base.layout : 'grid',
-    gridSize: ['2x2', '3x3', '4x4'].includes(base.gridSize) ? base.gridSize : '2x2',
-    mapVisible: base.mapVisible !== false,
-    focusCameraId: base.focusCameraId != null && cameraMap.has(String(base.focusCameraId)) ? String(base.focusCameraId) : null,
-    selectedCameraId: base.selectedCameraId != null && cameraMap.has(String(base.selectedCameraId)) ? String(base.selectedCameraId) : null,
-    mosaic: base.mosaic && typeof base.mosaic === 'object' ? base.mosaic : {},
-    page: Number.isFinite(base.page) ? Math.max(0, Math.floor(base.page)) : 0,
-    pageSize: DASHBOARD_PAGE_SIZE,
-    mediaFit: base.mediaFit === 'cover' ? 'cover' : 'contain',
-    mapTileVisible: !!base.mapTileVisible
-  };
+  const restored = normaliseDashboardState(state);
+  // Local file/upload dashboard loads should only include cameras already available
+  // in the current source. API/cloud saved-dashboard loading is overridden later so
+  // saved IDs can be hydrated by ID instead of filtered out here.
+  restored.order = restored.order.filter(id => cameraMap.has(String(id)));
+  if (restored.selectedCameraId && !restored.order.includes(String(restored.selectedCameraId))) {
+    restored.selectedCameraId = restored.order[0] || null;
+  }
+  return installDashboardStateCompatibilityAliases(restored);
 }
 
 function dashboardStateForPreset() {
-  return {
-    cameras: Array.isArray(dashboardState.cameras) ? dashboardState.cameras.map(String) : [],
-    layout: dashboardState.layout || 'grid',
-    gridSize: dashboardState.gridSize || '2x2',
-    mapVisible: dashboardState.mapVisible !== false,
-    focusCameraId: dashboardState.focusCameraId || null,
-    selectedCameraId: dashboardState.selectedCameraId || null,
-    mosaic: dashboardState.mosaic || {},
-    page: dashboardState.page || 0,
-    pageSize: DASHBOARD_PAGE_SIZE,
-    mediaFit: dashboardState.mediaFit === 'cover' ? 'cover' : 'contain',
-    mapTileVisible: !!dashboardState.mapTileVisible
-  };
+  return serialiseDashboardStateForStorage();
 }
 
 function normaliseCloudDashboardRow(row) {
@@ -9033,7 +9080,7 @@ function normaliseCloudDashboardRow(row) {
     name: row.name || 'Untitled dashboard',
     createdAt: row.created_at || null,
     updatedAt: row.updated_at || null,
-    cameraCount: Number.isFinite(row.camera_count) ? row.camera_count : (Array.isArray(state.cameras) ? state.cameras.length : 0),
+    cameraCount: Number.isFinite(row.camera_count) ? row.camera_count : (dashboardCameraCountFromStateValue(state)),
     state
   };
 }
@@ -9108,7 +9155,7 @@ async function saveCurrentDashboardView() {
     user_id: currentUser.id,
     name: cleanName,
     dashboard_json: state,
-    camera_count: state.cameras.length,
+    camera_count: dashboardCameraCountFromStateValue(state),
     updated_at: new Date().toISOString()
   };
 
@@ -9153,7 +9200,7 @@ async function chooseSavedDashboardView(actionText) {
   }
 
   const list = views.map((v, i) => {
-    const count = v.state && Array.isArray(v.state.cameras) ? v.state.cameras.length : v.cameraCount || 0;
+    const count = dashboardCameraCountFromStateValue(v.state, v.cameraCount || 0);
     const updated = v.updatedAt ? new Date(v.updatedAt).toLocaleString() : 'unknown date';
     return String(i + 1) + '. ' + v.name + ' (' + count + ' cameras · ' + updated + ')';
   }).join('\n');
@@ -9177,16 +9224,13 @@ async function loadSavedDashboardView() {
   const view = await chooseSavedDashboardView('Load saved dashboard');
   if (!view) return;
 
-  const requestedCameraCount = Array.isArray(view.state && view.state.cameras) ? view.state.cameras.length : 0;
+  const requestedCameraCount = dashboardCameraCountFromStateValue(view.state);
   const restored = normaliseSavedDashboardState(view.state);
-  if (restored.cameras.length !== requestedCameraCount) {
-    notifyApp('Dashboard partly loaded', (requestedCameraCount - restored.cameras.length) + ' camera(s) were not found in the currently loaded camera source.', 'warn');
+  if (restored.order.length !== requestedCameraCount) {
+    notifyApp('Dashboard partly loaded', (requestedCameraCount - restored.order.length) + ' camera(s) were not found in the currently loaded camera source.', 'warn');
   }
 
-  dashboardState = {
-    ...dashboardState,
-    ...restored
-  };
+  dashboardState = normaliseDashboardState({ ...dashboardState, ...restored });
 
   const maxPage = Math.max(0, Math.ceil(dashboardState.cameras.length / dashboardPageSize()) - 1);
   dashboardState.page = Math.min(dashboardState.page || 0, maxPage);
@@ -9294,7 +9338,7 @@ async function renderSavedDashboardsPanel(forceRefresh = false) {
   }
 
   list.innerHTML = views.map(v => {
-    const count = v.state && Array.isArray(v.state.cameras) ? v.state.cameras.length : v.cameraCount || 0;
+    const count = dashboardCameraCountFromStateValue(v.state, v.cameraCount || 0);
     const updated = v.updatedAt ? new Date(v.updatedAt).toLocaleString() : 'unknown date';
     return `
       <div class="saved-dash-row" data-id="${escapeHtml(v.id)}" style="padding:11px 13px;border-bottom:1px solid var(--c-border);display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:5px 7px;align-items:center;">
@@ -9333,16 +9377,13 @@ async function renderSavedDashboardsPanel(forceRefresh = false) {
 async function loadSavedDashboardViewObject(view) {
   if (!view) return;
 
-  const requestedCameraCount = Array.isArray(view.state && view.state.cameras) ? view.state.cameras.length : 0;
+  const requestedCameraCount = dashboardCameraCountFromStateValue(view.state);
   const restored = normaliseSavedDashboardState(view.state);
-  if (restored.cameras.length !== requestedCameraCount) {
-    notifyApp('Dashboard partly loaded', (requestedCameraCount - restored.cameras.length) + ' camera(s) were not found in the currently loaded camera source.', 'warn');
+  if (restored.order.length !== requestedCameraCount) {
+    notifyApp('Dashboard partly loaded', (requestedCameraCount - restored.order.length) + ' camera(s) were not found in the currently loaded camera source.', 'warn');
   }
 
-  dashboardState = {
-    ...dashboardState,
-    ...restored
-  };
+  dashboardState = normaliseDashboardState({ ...dashboardState, ...restored });
 
   const maxPage = Math.max(0, Math.ceil(dashboardState.cameras.length / dashboardPageSize()) - 1);
   dashboardState.page = Math.min(dashboardState.page || 0, maxPage);
@@ -10047,8 +10088,8 @@ window.startBillingPortal = startBillingPortal;
 
   function currentDashboardSummary() {
     const state = dashboardStateForPreset();
-    const cameras = Array.isArray(state.cameras) ? state.cameras.length : 0;
-    return cameras + ' camera' + (cameras === 1 ? '' : 's') + ' · ' + (state.layout || 'grid') + ' layout';
+    const cameras = dashboardCameraCountFromStateValue(state);
+    return cameras + ' camera' + (cameras === 1 ? '' : 's') + ' · ' + dashboardModeFromStateValue(state) + ' layout';
   }
 
   async function upsertDashboardViewByName(name, mode = 'save') {
@@ -10076,7 +10117,7 @@ window.startBillingPortal = startBillingPortal;
       user_id: currentUser.id,
       name: cleanName,
       dashboard_json: state,
-      camera_count: Array.isArray(state.cameras) ? state.cameras.length : 0,
+      camera_count: dashboardCameraCountFromStateValue(state),
       updated_at: new Date().toISOString()
     };
     let result;
@@ -10205,9 +10246,10 @@ window.startBillingPortal = startBillingPortal;
     }
 
     list.innerHTML = views.map(v => {
-      const stateCams = v.state && Array.isArray(v.state.cameras) ? v.state.cameras.length : v.cameraCount || 0;
-      const layout = v.state && v.state.layout ? v.state.layout : 'grid';
-      const grid = v.state && v.state.gridSize ? ' · ' + v.state.gridSize : '';
+      const stateCams = dashboardCameraCountFromStateValue(v.state, v.cameraCount || 0);
+      const layout = dashboardModeFromStateValue(v.state);
+      const gridValue = dashboardDensityFromStateValue(v.state);
+      const grid = gridValue ? ' · ' + gridValue : '';
       const updated = formatSavedDashDate(v.updatedAt);
       const created = formatSavedDashDate(v.createdAt);
       return `
@@ -10291,7 +10333,7 @@ window.startBillingPortal = startBillingPortal;
     const state = dashboardStateForPreset();
     const { error } = await client
       .from('dashboards')
-      .update({ dashboard_json: state, camera_count: state.cameras.length, updated_at: new Date().toISOString() })
+      .update({ dashboard_json: state, camera_count: dashboardCameraCountFromStateValue(state), updated_at: new Date().toISOString() })
       .eq('id', view.id)
       .eq('user_id', currentUser.id);
     if (error) throw error;
@@ -10334,7 +10376,7 @@ window.startBillingPortal = startBillingPortal;
       throw new Error('Another dashboard already uses that name.');
     }
     const state = view.state && typeof view.state === 'object' ? view.state : {};
-    const cameraCount = Array.isArray(state.cameras) ? state.cameras.length : (view.cameraCount || 0);
+    const cameraCount = dashboardCameraCountFromStateValue(state, view.cameraCount || 0);
     const { error } = await client
       .from('dashboards')
       .insert({ user_id: currentUser.id, name: cleanName, dashboard_json: state, camera_count: cameraCount, updated_at: new Date().toISOString() });
@@ -10557,7 +10599,7 @@ window.startBillingPortal = startBillingPortal;
         user_id: currentUser.id,
         name: activeDashboardName || AUTOSAVE_DEFAULT_NAME,
         dashboard_json: state,
-        camera_count: Array.isArray(state.cameras) ? state.cameras.length : 0,
+        camera_count: dashboardCameraCountFromStateValue(state),
         updated_at: new Date().toISOString()
       };
 
@@ -11882,7 +11924,7 @@ window.startBillingPortal = startBillingPortal;
   const SAVED_DASHBOARD_HYDRATE_BATCH = 6;
 
   function savedDashIdList(state) {
-    const raw = state && Array.isArray(state.cameras) ? state.cameras : [];
+    const raw = state && Array.isArray(state.order) ? state.order : (state && Array.isArray(state.cameras) ? state.cameras : []);
     const out = [];
     const seen = new Set();
     raw.forEach(id => {
@@ -11901,24 +11943,23 @@ window.startBillingPortal = startBillingPortal;
   }
 
   function coerceSavedDashboardState(state) {
+    if (typeof normaliseDashboardState === 'function') return normaliseDashboardState(state);
     const base = state && typeof state === 'object' ? state : {};
     const ids = savedDashIdList(base);
-    const layout = ['grid', 'mosaic', 'focus', 'single'].includes(base.layout) ? base.layout : 'grid';
-    const gridSize = ['2x2', '3x3', '4x4'].includes(base.gridSize) ? base.gridSize : '2x2';
-    const focusId = savedDashIdExistsInState(ids, base.focusCameraId) ? String(base.focusCameraId) : (ids[0] || null);
-    const selectedId = savedDashIdExistsInState(ids, base.selectedCameraId) ? String(base.selectedCameraId) : focusId;
+    const mode = ['grid', 'mosaic', 'focus', 'single'].includes(base.mode || base.layout) ? (base.mode || base.layout) : 'grid';
+    const density = ['2x2', '3x3', '4x4'].includes(base.density || base.gridSize) ? (base.density || base.gridSize) : '2x2';
+    const selectedId = savedDashIdExistsInState(ids, base.selectedCameraId) ? String(base.selectedCameraId) : (savedDashIdExistsInState(ids, base.focusCameraId) ? String(base.focusCameraId) : (ids[0] || null));
     return {
-      cameras: ids,
-      layout,
-      gridSize,
+      order: ids,
+      mode,
+      density,
       mapVisible: base.mapVisible !== false,
-      focusCameraId: focusId,
       selectedCameraId: selectedId,
-      mosaic: base.mosaic && typeof base.mosaic === 'object' ? base.mosaic : {},
-      page: Number.isFinite(base.page) ? Math.max(0, Math.floor(base.page)) : 0,
+      mosaicLayout: base.mosaicLayout && typeof base.mosaicLayout === 'object' ? base.mosaicLayout : (base.mosaic && typeof base.mosaic === 'object' ? base.mosaic : {}),
+      currentPage: Number.isFinite(base.currentPage) ? Math.max(0, Math.floor(base.currentPage)) : (Number.isFinite(base.page) ? Math.max(0, Math.floor(base.page)) : 0),
       pageSize: typeof DASHBOARD_PAGE_SIZE !== 'undefined' ? DASHBOARD_PAGE_SIZE : 16,
       mediaFit: base.mediaFit === 'cover' ? 'cover' : 'contain',
-      mapTileVisible: !!base.mapTileVisible,
+      mapAsTile: !!(base.mapAsTile || base.mapTileVisible),
       gridSpans: base.gridSpans && typeof base.gridSpans === 'object' ? base.gridSpans : {}
     };
   }
@@ -12017,10 +12058,7 @@ window.startBillingPortal = startBillingPortal;
 
     // Install the full saved ID list before hydration/rendering. This makes the
     // saved dashboard the source of truth, not the currently visible map source.
-    dashboardState = {
-      ...dashboardState,
-      ...restored
-    };
+    dashboardState = normaliseDashboardState({ ...dashboardState, ...restored });
 
     if (!dashboardState.focusCameraId && dashboardState.cameras.length) dashboardState.focusCameraId = dashboardState.cameras[0];
     if (!dashboardState.selectedCameraId && dashboardState.focusCameraId) dashboardState.selectedCameraId = dashboardState.focusCameraId;
@@ -12192,9 +12230,10 @@ window.startBillingPortal = startBillingPortal;
     }
 
     list.innerHTML = views.map(v => {
-      const stateCams = v.state && Array.isArray(v.state.cameras) ? v.state.cameras.length : (v.cameraCount || 0);
-      const layout = v.state && v.state.layout ? v.state.layout : 'grid';
-      const grid = v.state && v.state.gridSize ? ' · ' + v.state.gridSize : '';
+      const stateCams = dashboardCameraCountFromStateValue(v.state, v.cameraCount || 0);
+      const layout = dashboardModeFromStateValue(v.state);
+      const gridValue = dashboardDensityFromStateValue(v.state);
+      const grid = gridValue ? ' · ' + gridValue : '';
       return `
         <div class="saved-dash-row2" data-id="${sdEscape(v.id)}">
           <div style="min-width:0;">
