@@ -1350,6 +1350,50 @@ body.dashboard-active #clusterLoadingStatus {
   font-size: 10px;
 }
 
+
+
+/* Dashboard map marker hierarchy:
+   - dashboard-selected / dashboard-added = cameras already in the dashboard
+   - available-camera = nearby cameras that can be added */
+.dashboard-direction-icon .dashboard-added {
+  filter: drop-shadow(0 2px 5px rgba(15,23,42,0.34));
+}
+.dashboard-direction-icon .dashboard-selected {
+  filter:
+    drop-shadow(0 0 0 rgba(0,0,0,0))
+    drop-shadow(0 0 7px rgba(37,99,235,0.58))
+    drop-shadow(0 3px 8px rgba(15,23,42,0.42));
+}
+.dashboard-direction-icon.available-camera {
+  opacity: 0.72;
+  filter: grayscale(0.35);
+}
+.dashboard-direction-icon.available-camera:hover {
+  opacity: 1;
+  filter: none;
+}
+
+.dashboard-map-available-note {
+  position: absolute;
+  right: 12px;
+  top: 56px;
+  z-index: 405;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: rgba(15,23,42,0.74);
+  color: rgba(248,250,252,0.88);
+  font-family: var(--mono);
+  font-size: 10px;
+  pointer-events: none;
+  backdrop-filter: blur(8px);
+}
+.dashboard-direction-icon.available-camera {
+  filter: grayscale(0.2);
+}
+.dashboard-direction-icon.available-camera .dash-dir-marker {
+  transform: scale(0.86);
+}
+
 /* ─── DASHBOARD VIEW ─── */
 #dashboardView {
   position: fixed;
@@ -4781,6 +4825,14 @@ let dashboardMosaicDrag = null;
 let dashboardOrderDragId = null;
 let dashboardMapMoveTimer = null;
 let dashboardSearchContext = null;
+let dashboardAvailableLayer = null;
+let dashboardAvailableCameras = [];
+let dashboardAvailableRequestSeq = 0;
+let dashboardAvailableLoading = false;
+let dashboardAvailableLastKey = '';
+let dashboardAvailableLastFetchAt = 0;
+let dashboardAvailableRefreshTimer = null;
+const DASHBOARD_AVAILABLE_MIN_ZOOM = 7;
 const MOSAIC_GRID_COLS = 12;
 const MOSAIC_ROW_HEIGHT = 76;
 const MOSAIC_GAP = 8;
@@ -5256,27 +5308,28 @@ function dashboardCameraMarker(cam, options = {}) {
 
   if (heading === null) {
     return L.circleMarker([cam.lat, cam.lng], {
-      radius: selected ? 9 : available ? 5 : 7,
-      color: selected ? '#0f172a' : available ? '#334155' : '#fff',
-      weight: selected ? 3 : available ? 1.4 : 2,
-      opacity: available ? 0.72 : 1,
-      fillColor: color,
-      fillOpacity: available ? 0.42 : 0.98,
+      radius: selected ? 11 : available ? 4.5 : 8.5,
+      color: selected ? '#020617' : available ? '#475569' : '#ffffff',
+      weight: selected ? 3.5 : available ? 1.4 : 2.5,
+      opacity: available ? 0.58 : 1,
+      fillColor: available ? '#cbd5e1' : color,
+      fillOpacity: available ? 0.34 : 0.98,
       interactive: true
     });
   }
 
-  const size = selected ? 28 : available ? 21 : 24;
-  const opacity = available ? 0.76 : 1;
-  const border = selected ? '#0f172a' : available ? '#334155' : '#ffffff';
-  const borderWidth = selected ? 3 : available ? 1.5 : 2;
-  const ring = selected ? 3 : 0;
-  const html = `<div class="dash-dir-marker" style="--marker-size:${size}px;--marker-heading:${heading}deg;--marker-color:${color};--marker-opacity:${opacity};--marker-border:${border};--marker-border-width:${borderWidth}px;--marker-ring:${ring}px;"><span class="dash-dir-arrow"></span><span class="dash-dir-dot"></span></div>`;
+  const size = selected ? 32 : available ? 18 : 28;
+  const opacity = available ? 0.52 : 1;
+  const border = selected ? '#020617' : available ? '#64748b' : '#ffffff';
+  const borderWidth = selected ? 3.5 : available ? 1.2 : 2.5;
+  const ring = selected ? 5 : 2;
+  const markerClass = selected ? 'dash-dir-marker dashboard-selected' : available ? 'dash-dir-marker dashboard-available' : 'dash-dir-marker dashboard-added';
+  const html = `<div class="${markerClass}" style="--marker-size:${size}px;--marker-heading:${heading}deg;--marker-color:${color};--marker-opacity:${opacity};--marker-border:${border};--marker-border-width:${borderWidth}px;--marker-ring:${ring}px;"><span class="dash-dir-arrow"></span><span class="dash-dir-dot"></span></div>`;
 
   return L.marker([cam.lat, cam.lng], {
     interactive: true,
     icon: L.divIcon({
-      className: 'dashboard-direction-icon',
+      className: available ? 'dashboard-direction-icon available-camera' : 'dashboard-direction-icon',
       html,
       iconSize: [size, size],
       iconAnchor: [size / 2, size / 2],
@@ -7914,6 +7967,7 @@ function setDashboardPage(page) {
   dashboardState.currentPage = Math.max(0, Math.min(page, dashboardPageCount() - 1));
   saveDashboardState();
   renderDashboard();
+  scheduleDashboardAvailableCamerasRefresh(80);
 }
 
 function dashboardPaginationItems(current, total) {
@@ -8043,6 +8097,8 @@ function addCameraToDashboard(cam, options = {}) {
   saveDashboardState();
   updateDashboardBadge();
   renderDashboard();
+  dashboardAvailableCameras = dashboardAvailableCameras.filter(c => String(c.id) !== id);
+  renderDashboardAvailableLayer();
 
   // As soon as a camera is added, fit the dashboard map automatically.
   // This keeps the map situational without needing the user to press Fit.
@@ -9451,17 +9507,23 @@ function initDashboardMap() {
     attributionControl: false
   }).setView([20, 0], 2);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(dashboardMap);
+  dashboardAvailableLayer = L.layerGroup().addTo(dashboardMap);
   dashboardMapLayer = L.layerGroup().addTo(dashboardMap);
+  try { dashboardAvailableLayer.bringToBack(); dashboardMapLayer.bringToFront(); } catch (_) {}
   dashboardMap.on('moveend zoomend', () => {
     if (dashboardState._fitPending) return;
     clearTimeout(dashboardMapMoveTimer);
-    dashboardMapMoveTimer = setTimeout(() => renderDashboardMap(), 120);
+    dashboardMapMoveTimer = setTimeout(() => {
+      scheduleDashboardAvailableCamerasRefresh();
+      renderDashboardMap();
+    }, 120);
   });
   dashboardMap.on('click', e => {
     if (areaSelection.active && areaSelection.source === 'dashboard') {
       addDashboardAreaPoint(e.latlng);
     }
   });
+  setTimeout(() => scheduleDashboardAvailableCamerasRefresh(10), 80);
 }
 
 function dashboardFrustumLatLngs(cam) {
@@ -9507,45 +9569,244 @@ function bindDashboardMapPopupAdd(layer, cam) {
   });
 }
 
-function dashboardCandidateCamerasForMap() {
-  if (!dashboardMap) return [];
 
-  // Available/non-selected cameras are a close-zoom context layer, not a world overview layer.
-  // This prevents the dashboard map from showing random global dots when zoomed out.
-  const zoom = dashboardMap.getZoom();
-  if (zoom < 10) return [];
+function dashboardMapAvailableZoomEnabled() {
+  return !!dashboardMap && dashboardMap.getZoom() >= DASHBOARD_AVAILABLE_MIN_ZOOM;
+}
+
+function dashboardMapAvailableFetchLimit() {
+  const z = dashboardMap ? dashboardMap.getZoom() : 0;
+  return z >= 14 ? 1400 : z >= 11 ? 900 : 600;
+}
+
+function dashboardMapBoundsKey() {
+  if (!dashboardMap) return '';
+  const z = dashboardMap.getZoom();
+  if (!dashboardMapAvailableZoomEnabled()) return `z:${z}:disabled`;
+  const b = dashboardMap.getBounds().pad(0.08);
+  const round = n => Math.round(Number(n) * 100) / 100;
+  return [
+    z,
+    round(b.getWest()),
+    round(b.getSouth()),
+    round(b.getEast()),
+    round(b.getNorth()),
+    dashboardState.order.map(String).sort().join(',')
+  ].join('|');
+}
+
+function setDashboardAvailableLoading(isLoading) {
+  dashboardAvailableLoading = !!isLoading;
+  renderDashboardAvailableStatus();
+}
+
+function renderDashboardAvailableStatus() {
+  const pane = document.getElementById('dashboardMapPane');
+  if (!pane) return;
+  let note = document.getElementById('dashboardAvailableNote');
+
+  if (!dashboardMapAvailableZoomEnabled()) {
+    if (note) note.remove();
+    return;
+  }
+
+  const count = dashboardAvailableCameras.length;
+
+  // Do not leave a persistent "no cameras" badge over the dashboard UI.
+  // Only show the badge while loading or when there are actually available cameras.
+  if (!dashboardAvailableLoading && !count) {
+    if (note) note.remove();
+    return;
+  }
+
+  const text = dashboardAvailableLoading
+    ? 'Loading nearby cameras…'
+    : `${count} nearby camera${count === 1 ? '' : 's'} available`;
+
+  if (!note) {
+    note = document.createElement('div');
+    note.id = 'dashboardAvailableNote';
+    note.className = 'dashboard-map-available-note';
+    pane.appendChild(note);
+  }
+  note.textContent = text;
+}
+
+function normaliseDashboardAvailableCamera(row) {
+  const cam = (typeof toCamelCamera === 'function') ? toCamelCamera(row) : row;
+  if (!cam || cam.id == null) return null;
+  if (!Number.isFinite(Number(cam.lat)) || !Number.isFinite(Number(cam.lng))) return null;
+  return cam;
+}
+
+function dashboardCameraApiConfig() {
+  const baseUrl = (window.VIGIL_CAMERA_API_URL || 'https://xqppficzlzhhtoaetuma.supabase.co/rest/v1/rpc/').replace(/\/?$/, '/');
+  const key = window.VIGIL_CAMERA_API_KEY || 'sb_publishable_uZgctoeLTYIz0dmfmhwc_A_NEuFki3c';
+  return { baseUrl, key };
+}
+
+function dashboardCameraApiHeaders() {
+  const { key } = dashboardCameraApiConfig();
+  return {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json'
+  };
+}
+
+async function fetchDashboardAvailableCamerasRpcBox(box, maxResults) {
+  const { baseUrl } = dashboardCameraApiConfig();
+  const res = await fetch(baseUrl + 'get_cameras_bbox', {
+    method: 'POST',
+    headers: dashboardCameraApiHeaders(),
+    body: JSON.stringify({
+      west: box.west,
+      south: box.south,
+      east: box.east,
+      north: box.north,
+      max_results: maxResults
+    })
+  });
+
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(`get_cameras_bbox failed ${res.status}: ${msg.slice(0, 240)}`);
+  }
+
+  const rows = await res.json();
+  return Array.isArray(rows) ? rows : [];
+}
+
+function normaliseDashboardAvailableCamera(row) {
+  const cam = (typeof toCamelCamera === 'function') ? toCamelCamera(row) : row;
+  if (!cam || cam.id == null) return null;
+  const lat = Number(cam.lat ?? cam.latitude);
+  const lng = Number(cam.lng ?? cam.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  cam.lat = lat;
+  cam.lng = lng;
+  return cam;
+}
+
+async function fetchDashboardAvailableCamerasForBounds(seq) {
+  if (!dashboardMap || !dashboardMapAvailableZoomEnabled()) {
+    dashboardAvailableCameras = [];
+    renderDashboardAvailableLayer();
+    renderDashboardAvailableStatus();
+    return;
+  }
+
+  const bounds = dashboardMap.getBounds().pad(0.06);
+  const west = Math.max(-180, Math.min(180, Number(bounds.getWest())));
+  const east = Math.max(-180, Math.min(180, Number(bounds.getEast())));
+  const south = Math.max(-85, Math.min(85, Number(bounds.getSouth())));
+  const north = Math.max(-85, Math.min(85, Number(bounds.getNorth())));
+  const maxResults = dashboardMapAvailableFetchLimit();
+
+  const boxes = west <= east
+    ? [{ west, south, east, north }]
+    : [{ west, south, east: 180, north }, { west: -180, south, east, north }];
+
+  setDashboardAvailableLoading(true);
+  try {
+    const parts = await Promise.all(boxes.map(box => fetchDashboardAvailableCamerasRpcBox(box, maxResults)));
+    if (seq !== dashboardAvailableRequestSeq) return;
+
+    const selectedIds = new Set(dashboardState.order.map(String));
+    const seen = new Set();
+    dashboardAvailableCameras = parts.flat()
+      .map(normaliseDashboardAvailableCamera)
+      .filter(Boolean)
+      .filter(cam => {
+        const id = String(cam.id);
+        if (selectedIds.has(id) || seen.has(id)) return false;
+        seen.add(id);
+        cameraMap.set(id, cam);
+        cameraMap.set(cam.id, cam);
+        return true;
+      });
+
+    console.info('[dashboard available cameras]', {
+      zoom: dashboardMap.getZoom(),
+      bbox: { west, south, east, north },
+      returned: parts.flat().length,
+      available: dashboardAvailableCameras.length
+    });
+
+    renderDashboardAvailableLayer();
+  } catch (err) {
+    console.warn('Dashboard available camera load failed:', err);
+    if (seq === dashboardAvailableRequestSeq) {
+      dashboardAvailableCameras = [];
+      renderDashboardAvailableLayer();
+    }
+  } finally {
+    if (seq === dashboardAvailableRequestSeq) setDashboardAvailableLoading(false);
+  }
+}
+
+function scheduleDashboardAvailableCamerasRefresh(delay = 140) {
+  if (!dashboardMap) return;
+  clearTimeout(dashboardAvailableRefreshTimer);
+
+  const key = dashboardMapBoundsKey();
+  const now = Date.now();
+  if (key === dashboardAvailableLastKey && now - dashboardAvailableLastFetchAt < 650) {
+    renderDashboardAvailableLayer();
+    renderDashboardAvailableStatus();
+    return;
+  }
+
+  dashboardAvailableRefreshTimer = setTimeout(() => {
+    dashboardAvailableLastKey = key;
+    dashboardAvailableLastFetchAt = Date.now();
+    const seq = ++dashboardAvailableRequestSeq;
+    fetchDashboardAvailableCamerasForBounds(seq);
+  }, delay);
+}
+
+function renderDashboardAvailableLayer() {
+  if (!dashboardMap) return;
+  if (!dashboardAvailableLayer) dashboardAvailableLayer = L.layerGroup().addTo(dashboardMap);
+  dashboardAvailableLayer.clearLayers();
+
+  if (!dashboardMapAvailableZoomEnabled()) {
+    dashboardAvailableCameras = [];
+    renderDashboardAvailableStatus();
+    return;
+  }
 
   const selectedIds = new Set(dashboardState.order.map(String));
-  const selected = dashboardCameras();
-  const limit = zoom >= 13 ? 1200 : zoom >= 11 ? 650 : 300;
 
-  const pool = cameras.filter(cam => cam.lat && cam.lng && !selectedIds.has(String(cam.id)));
-  const mapBounds = dashboardMap.getBounds();
-  const inView = pool.filter(cam => mapBounds.pad(0.10).contains([cam.lat, cam.lng]));
-  if (inView.length) return inView.slice(0, limit);
+  dashboardAvailableCameras
+    .filter(cam => !selectedIds.has(String(cam.id)))
+    .forEach(cam => {
+      // Available cameras are deliberately neutral/muted so they read as
+      // "can add" context, not cameras already in the dashboard.
+      const marker = L.circleMarker([Number(cam.lat), Number(cam.lng)], {
+        radius: 4.5,
+        color: '#475569',
+        weight: 1.4,
+        opacity: 0.58,
+        fillColor: '#cbd5e1',
+        fillOpacity: 0.34,
+        interactive: true,
+        pane: 'markerPane'
+      }).addTo(dashboardAvailableLayer);
 
-  // If the user searched from the dashboard and is close enough, seed the context layer
-  // around the searched place even before the next map movement event fires.
-  if (dashboardSearchContext) {
-    return pool
-      .map(cam => ({ cam, dist: haversineKm(dashboardSearchContext.lat, dashboardSearchContext.lng, cam.lat, cam.lng) }))
-      .sort((a, b) => a.dist - b.dist)
-      .slice(0, limit)
-      .map(x => x.cam);
-  }
+      marker.bindTooltip(`${cameraTitle(cam)} · available to add`, { direction: 'top' });
+      marker.bindPopup(mapPopupHtml(cam, false));
+      bindDashboardMapPopupAdd(marker, cam);
+    });
 
-  if (selected.length) {
-    const centre = selected.reduce((acc, cam) => ({ lat: acc.lat + cam.lat, lng: acc.lng + cam.lng }), { lat: 0, lng: 0 });
-    centre.lat /= selected.length;
-    centre.lng /= selected.length;
-    return pool
-      .map(cam => ({ cam, dist: haversineKm(centre.lat, centre.lng, cam.lat, cam.lng) }))
-      .sort((a, b) => a.dist - b.dist)
-      .slice(0, limit)
-      .map(x => x.cam);
-  }
+  try { dashboardAvailableLayer.bringToBack(); if (dashboardMapLayer) dashboardMapLayer.bringToFront(); } catch (_) {}
+  renderDashboardAvailableStatus();
+}
 
-  return [];
+function dashboardCandidateCamerasForMap() {
+  // Deprecated: available cameras now load from Supabase by dashboard map bounds.
+  return dashboardAvailableCameras;
 }
 
 function renderDashboardMap() {
@@ -9558,17 +9819,6 @@ function renderDashboardMap() {
   const selectedIds = new Set(dashboardState.order.map(String));
   const bounds = [];
 
-  // Faint available cameras: clickable context layer for adding nearby/visible cameras.
-  // Capped so 140k+ camera datasets do not freeze Leaflet.
-  dashboardCandidateCamerasForMap().forEach(cam => {
-    const heading = inferHeading(cam);
-    const color = heading !== null ? (DIR_COLORS[heading] || '#64748b') : '#64748b';
-    const marker = dashboardCameraMarker(cam, { available: true, color }).addTo(dashboardMapLayer);
-    marker.bindTooltip(cameraTitle(cam), { direction: 'top' });
-    marker.bindPopup(mapPopupHtml(cam, false));
-    bindDashboardMapPopupAdd(marker, cam);
-  });
-
   // Selected dashboard cameras: prominent pins and 2D frustums.
   cams.forEach(cam => {
     const heading = inferHeading(cam);
@@ -9579,9 +9829,10 @@ function renderDashboardMap() {
       const poly = L.polygon(cone, {
         color,
         fillColor: color,
-        fillOpacity: selected ? 0.34 : 0.20,
-        opacity: selected ? 1 : 0.78,
-        weight: selected ? 3.2 : 1.8
+        fillOpacity: selected ? 0.38 : 0.24,
+        opacity: selected ? 1 : 0.92,
+        weight: selected ? 3.6 : 2.4,
+        dashArray: selected ? null : '6 4'
       }).addTo(dashboardMapLayer);
       poly.bindTooltip(cameraTitle(cam), { direction: 'top' });
       cone.forEach(p => bounds.push(p));
@@ -9605,6 +9856,8 @@ function renderDashboardMap() {
     if (savedMatches.length) highlightAreaMatches();
   }
 
+  renderDashboardAvailableLayer();
+  scheduleDashboardAvailableCamerasRefresh(10);
   renderDashboardMapTile();
 
   if (bounds.length && activeView === 'dashboard' && dashboardState._fitPending) {
@@ -12707,6 +12960,8 @@ function setClusterLoadingStatus(isLoading, message = 'Loading clusters…') {
 
   window.VIGIL_CAMERA_API_MODE = API_MODE;
   window.VIGIL_CAMERA_API_STATE = apiState;
+  window.VIGIL_CAMERA_API_URL = API_URL;
+  window.VIGIL_CAMERA_API_KEY = API_KEY;
 
   function apiHeaders() {
     return {
