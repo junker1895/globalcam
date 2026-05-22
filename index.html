@@ -748,6 +748,63 @@ body {
   color: var(--c-danger);
 }
 
+
+
+/* ─── CLUSTER LOADING STATUS ─── */
+#clusterLoadingStatus {
+  position: fixed;
+  left: 50%;
+  top: 96px;
+  transform: translateX(-50%) translateY(-8px);
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 220px;
+  padding: 14px 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(15,23,42,0.88);
+  color: #f8fafc;
+  box-shadow:
+    0 12px 34px rgba(0,0,0,0.42),
+    0 2px 10px rgba(0,0,0,0.24);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+#clusterLoadingStatus.loading {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.cluster-loading-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 3px solid rgba(255,255,255,0.18);
+  border-top-color: #60a5fa;
+  animation: tilesSpin 700ms linear infinite;
+  flex: 0 0 auto;
+}
+
+#clusterLoadingText {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+body.dashboard-active #clusterLoadingStatus {
+  display: none !important;
+}
+
+
 /* ─── SIDE PANEL ─── */
 #sidePanel {
   position: fixed;
@@ -3085,6 +3142,12 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
 </div>
 
 <!-- ─── DASHBOARD VIEW ─── -->
+
+<div id="clusterLoadingStatus" aria-live="polite">
+  <span class="cluster-loading-spinner"></span>
+  <span id="clusterLoadingText">Loading clusters…</span>
+</div>
+
 <div id="dashboardView">
   <div id="dashboardShell">
     <section id="dashboardFeedPane">
@@ -12583,6 +12646,31 @@ body.dashboard-active #dashboardFeedWall {
 
 
 <script>
+
+function setClusterLoadingStatus(isLoading, message = 'Loading clusters…') {
+  const el = document.getElementById('clusterLoadingStatus');
+  const text = document.getElementById('clusterLoadingText');
+  if (!el) return;
+
+  // This overlay is only for cluster-mode loading. At close zooms the app is
+  // deliberately loading individual cameras, so showing "Loading clusters"
+  // there is wrong and can appear stuck.
+  const api = window.VIGIL_CAMERA_API_STATE;
+  const inClusterMode = !api || api.pendingMode === 'clusters' || api.lastDesiredMode === 'clusters' || api.lastRenderedMode === 'clusters';
+  const shouldShow = !!isLoading && inClusterMode && !document.body.classList.contains('dashboard-active');
+
+  if (text) {
+    text.textContent = message || 'Loading clusters…';
+  }
+
+  el.classList.toggle('loading', shouldShow);
+
+  if (!shouldShow) {
+    el.style.pointerEvents = 'none';
+  }
+}
+
+
 // ==========================================================
 //  SUPABASE CAMERA API MODE — viewport clusters + bbox cameras
 //  This layer deliberately does NOT download the full camera index.
@@ -13280,25 +13368,40 @@ function visibleViewportSpanDegrees() {
   }
 
   async function fetchClustersForView(seq) {
-    const boxes = getViewBboxes();
-    const grid = gridDegreesForHeight(cameraHeight());
-    const parts = await Promise.all(boxes.map(b => rpc('get_camera_clusters_bbox', {
-      west: b.west, south: b.south, east: b.east, north: b.north,
-      grid_degrees: grid,
-      max_clusters: maxClustersForHeight(cameraHeight()),
-    })));
-    if (seq !== apiState.requestSeq) return;
-    const seen = new Set();
-    const clusters = [];
-    parts.flat().forEach(c => {
-      const key = c.cluster_id || `${c.longitude},${c.latitude}`;
-      if (seen.has(key)) return;
-      seen.add(key); clusters.push(c);
-    });
-    renderApiEntities(clusters, 'clusters');
+    const globalView = cameraHeight() > 4500000;
+    setClusterLoadingStatus(
+      true,
+      globalView ? 'Loading global camera clusters…' : 'Loading nearby camera clusters…'
+    );
+    const startedAt = Date.now();
+    try {
+      const boxes = getViewBboxes();
+      const grid = gridDegreesForHeight(cameraHeight());
+      const parts = await Promise.all(boxes.map(b => rpc('get_camera_clusters_bbox', {
+        west: b.west, south: b.south, east: b.east, north: b.north,
+        grid_degrees: grid,
+        max_clusters: maxClustersForHeight(cameraHeight()),
+      })));
+      if (seq !== apiState.requestSeq) return;
+      const seen = new Set();
+      const clusters = [];
+      parts.flat().forEach(c => {
+        const key = c.cluster_id || `${c.longitude},${c.latitude}`;
+        if (seen.has(key)) return;
+        seen.add(key); clusters.push(c);
+      });
+      renderApiEntities(clusters, 'clusters');
+    } finally {
+      // Avoid a distracting flash for very fast cache hits, but hide promptly.
+      const elapsed = Date.now() - startedAt;
+      setTimeout(() => {
+        if (seq === apiState.requestSeq) setClusterLoadingStatus(false);
+      }, elapsed < 180 ? 180 - elapsed : 0);
+    }
   }
 
   async function fetchCamerasForView(seq) {
+    setClusterLoadingStatus(false);
     const boxes = getCameraFetchBboxes();
     const parts = await Promise.all(boxes.map(b => rpc('get_cameras_bbox', {
       west: b.west, south: b.south, east: b.east, north: b.north,
@@ -13315,6 +13418,7 @@ function visibleViewportSpanDegrees() {
       seen.add(cam.id); rows.push(cam);
     });
     renderApiEntities(rows, 'cameras');
+    setClusterLoadingStatus(false);
   }
 
   async function refreshApiViewport(force = false) {
@@ -13338,14 +13442,16 @@ function visibleViewportSpanDegrees() {
     const seq = ++apiState.requestSeq;
     const status = document.getElementById('statusCameras');
 
-    if (status) status.textContent = desiredMode === 'clusters' ? 'Loading clusters…' : 'Loading visible cameras…';
+    if (desiredMode !== 'clusters') setClusterLoadingStatus(false);
+    if (status) status.textContent = desiredMode === 'clusters' ? '' : 'Loading visible cameras…';
     try {
       if (desiredMode === 'clusters') await fetchClustersForView(seq);
       else await fetchCamerasForView(seq);
     } catch (err) {
       if (seq === apiState.requestSeq) {
         console.error('Camera API viewport refresh failed:', err);
-        if (status) status.textContent = 'Camera API error';
+        setClusterLoadingStatus(false);
+        if (status) status.textContent = '';
       }
     }
   }
