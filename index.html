@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Viewport — Global Camera Intelligence</title>
 <!-- Patch: professional selected-FOV resolver. Normal 3D cameras are fixed-height symbols with persistent locator beams; selected beacon/frustum appears only after rendered 3D tile height is validated. -->
-<script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js">window.addEventListener('load', () => setTimeout(applyInitialPro3DModeIfNeeded, 250));
+</script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -4183,6 +4184,7 @@ async function initAuth() {
     await applyAuthSession(data && data.session ? data.session : null);
 
     client.auth.onAuthStateChange(async (_event, session) => {
+      setTimeout(applyInitialPro3DModeIfNeeded, 50);
       await applyAuthSession(session || null);
     });
 
@@ -4302,6 +4304,7 @@ function notifyApp(title, message = '', type = 'ok') {
   else showAppMessage({ title, message, type });
 }
 function updateAuthUI() {
+  applyInitialPro3DModeIfNeeded();
   const status = document.getElementById('authStatus');
   const loginBtn = document.getElementById('btnAuthLogin');
   const signupBtn = document.getElementById('btnAuthSignup');
@@ -10897,6 +10900,38 @@ document.addEventListener('click', function handleUpgradeClick(e) {
   toggleAccountMenu(false);
   startProCheckout();
 }, true);
+
+
+
+let hasAppliedInitialPro3DMode = false;
+
+function isLoggedInProUserForInitialMode() {
+  try {
+    const email = (authState && authState.user && authState.user.email) ? String(authState.user.email) : '';
+    const plan = (authState && authState.plan) ? String(authState.plan).toLowerCase() : '';
+    const isProFlag = !!(authState && (authState.isPro || authState.pro || authState.hasPro));
+    return !!email && (isProFlag || plan === 'pro' || plan === 'paid');
+  } catch (_) {
+    return false;
+  }
+}
+
+function applyInitialPro3DModeIfNeeded() {
+  if (hasAppliedInitialPro3DMode) return;
+  if (!isLoggedInProUserForInitialMode()) return;
+  if (typeof setGlobeRenderMode !== 'function') return;
+
+  hasAppliedInitialPro3DMode = true;
+
+  // Defer one frame so Cesium/auth/UI state has finished initialising.
+  requestAnimationFrame(() => {
+    try {
+      setGlobeRenderMode('3d', { source: 'initial-pro-login' });
+    } catch (err) {
+      console.warn('Initial PRO 3D mode failed:', err);
+    }
+  });
+}
 
 
 function rotateGlobeNorthUp() {
