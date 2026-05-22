@@ -12712,7 +12712,49 @@ body.dashboard-active #dashboardFeedWall {
     return 0.35;
   }
 
-  function visibleViewportSpanDegrees() {
+  
+function showExistingClustersImmediately(reason = 'cluster-fast-restore') {
+  if (!viewer || !apiState) return;
+
+  try {
+    // A selected camera can leave the app in an individual-camera hold/recovery
+    // state. When the visible footprint is back in cluster range, that hold must
+    // not delay the cluster layer coming back.
+    apiState.lastDesiredMode = 'clusters';
+    apiState.lastRenderedMode = 'clusters';
+    apiState.pendingMode = null;
+    apiState.pendingCameraMode = false;
+    apiState.forceCameraMode = false;
+    apiState.holdCameraMode = false;
+    apiState.selectedCameraMode = false;
+    apiState.lastSelectedCameraId = null;
+
+    if (apiState.clusterEntities && Array.isArray(apiState.clusterEntities)) {
+      apiState.clusterEntities.forEach(entity => {
+        if (entity) entity.show = true;
+      });
+    }
+
+    if (apiState.cameraEntities && Array.isArray(apiState.cameraEntities)) {
+      apiState.cameraEntities.forEach(entity => {
+        if (entity) entity.show = false;
+      });
+    }
+
+    if (apiState.clusterDataSource) apiState.clusterDataSource.show = true;
+    if (apiState.cameraDataSource) apiState.cameraDataSource.show = false;
+
+    if (typeof clearSelectedApiCameraHighlight === 'function') {
+      clearSelectedApiCameraHighlight();
+    }
+
+    if (viewer.scene) viewer.scene.requestRender();
+  } catch (err) {
+    console.warn('Cluster fast restore failed:', reason, err);
+  }
+}
+
+function visibleViewportSpanDegrees() {
     // Camera height alone is not reliable when the Cesium view is pitched/oblique:
     // a low camera can still see a very large ground footprint. Use the computed
     // view rectangle as the second LOD signal so clusters reliably return when
@@ -13410,14 +13452,19 @@ body.dashboard-active #dashboardFeedWall {
         // If the user has zoomed back out far enough for clusters, force the
         // transition immediately. This is the exact path that was getting stuck.
         if (desired === 'clusters') {
-          recoverApiViewport('camera.changed-clusters', { force: true, delay: 1 });
+          // Fast zoom-out path: show the existing cluster layer immediately,
+          // even after a camera has been clicked/selected. The selected-camera
+          // state must not keep the map in individual-camera mode.
+          showExistingClustersImmediately('camera.changed-clusters-fast-after-select');
+          enforceImmediateModeTransition('camera.changed-clusters-fast-after-select');
+          scheduleApiViewportRefresh(false, 1);
         } else if (now - apiState.lastRecoveryAt > 220) {
           runViewportRecoverySequence('camera.changed');
         } else {
           enforceImmediateModeTransition('camera.changed');
         }
       } else {
-        scheduleApiViewportRefresh(false, 70);
+        scheduleApiViewportRefresh(false, desired === 'clusters' ? 1 : 70);
       }
     });
 
