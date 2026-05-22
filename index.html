@@ -9911,11 +9911,10 @@ async function uploadAreaFromFile(file) {
     areaSelection.source = 'uploaded-area';
     areaSelection.points = polygons[0].slice();
     areaSelection.polygons = polygons;
-    const matched = findCamerasInsidePolygons(polygons);
-    areaSelection.matchedIds = matched.map(cam => String(cam.id));
     redrawAreaSelectionGraphics();
-    highlightAreaMatches();
     openAreaPanel();
+    await resolveAreaSelectionMatches(polygons);
+    highlightAreaMatches();
     updateAreaPanel();
 
     if (activeView === 'dashboard') initDashboardMap();
@@ -10007,7 +10006,7 @@ function renderUploadedLayerGraphics() {
   }
 }
 
-function selectUploadedLayerFeature(index) {
+async function selectUploadedLayerFeature(index) {
   const feature = uploadedLayerState.features[index];
   if (!feature) return;
   uploadedLayerState.selectedIndex = index;
@@ -10018,11 +10017,14 @@ function selectUploadedLayerFeature(index) {
   areaSelection.source = 'uploaded-layer';
   areaSelection.points = (feature.polygons[0] || []).slice();
   areaSelection.polygons = flattenFeaturePolygons([feature]);
-  const matched = findCamerasInsidePolygons(areaSelection.polygons);
-  areaSelection.matchedIds = matched.map(cam => String(cam.id));
   redrawAreaSelectionGraphics();
-  highlightAreaMatches();
   openAreaPanel();
+  try {
+    await resolveAreaSelectionMatches(areaSelection.polygons);
+    highlightAreaMatches();
+  } catch (err) {
+    notifyApp('Could not query cameras in selected feature', (err.message || String(err)), 'err');
+  }
   updateAreaPanel();
   setTimeout(() => fitAreaSelectionView(), 80);
 }
@@ -10084,6 +10086,7 @@ function pointInPolygonLatLng(lat, lng, polygon) {
   return inside;
 }
 
+
 function findCamerasInsidePolygon(polygon) {
   return findCamerasInsidePolygons([polygon]);
 }
@@ -10095,28 +10098,157 @@ function areaSelectionPolygons() {
   return polys.map(cleanPolygonRing).filter(poly => poly.length >= 3);
 }
 
-function findCamerasInsidePolygons(polygons) {
+function indexPolygonsForContainment(polygons) {
   const cleanPolys = (polygons || []).map(cleanPolygonRing).filter(poly => poly.length >= 3);
-  if (!cleanPolys.length) return [];
-
-  const indexed = cleanPolys.map(poly => {
+  return cleanPolys.map(poly => {
     let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
     poly.forEach(p => {
-      minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat);
+      minLat = Math.min(minLat, Number(p.lat)); maxLat = Math.max(maxLat, Number(p.lat));
       minLng = Math.min(minLng, normaliseLng(p.lng)); maxLng = Math.max(maxLng, normaliseLng(p.lng));
     });
     return { poly, minLat, maxLat, minLng, maxLng };
   });
+}
 
-  return cameras.filter(cam => {
-    if (!Number.isFinite(cam.lat) || !Number.isFinite(cam.lng)) return false;
-    const lng = normaliseLng(cam.lng);
-    return indexed.some(item => {
-      if (cam.lat < item.minLat || cam.lat > item.maxLat || lng < item.minLng || lng > item.maxLng) return false;
-      return pointInPolygonLatLng(cam.lat, cam.lng, item.poly);
-    });
+function cameraInsideIndexedPolygons(cam, indexed) {
+  const lat = Number(cam && (cam.lat ?? cam.latitude));
+  const lngRaw = Number(cam && (cam.lng ?? cam.longitude));
+  if (!Number.isFinite(lat) || !Number.isFinite(lngRaw)) return false;
+  const lng = normaliseLng(lngRaw);
+  return indexed.some(item => {
+    if (lat < item.minLat || lat > item.maxLat || lng < item.minLng || lng > item.maxLng) return false;
+    return pointInPolygonLatLng(lat, lngRaw, item.poly);
   });
 }
+
+function findCamerasInsidePolygonsLocal(polygons) {
+  const indexed = indexPolygonsForContainment(polygons);
+  if (!indexed.length) return [];
+  return cameras.filter(cam => cameraInsideIndexedPolygons(cam, indexed));
+}
+
+function polygonQueryBboxes(polygons) {
+  const indexed = indexPolygonsForContainment(polygons);
+  const boxes = [];
+
+  indexed.forEach(item => {
+    const latSpan = Math.max(0.01, item.maxLat - item.minLat);
+    const lngSpan = Math.max(0.01, item.maxLng - item.minLng);
+    const padLat = Math.min(0.25, Math.max(0.01, latSpan * 0.03));
+    const padLng = Math.min(0.25, Math.max(0.01, lngSpan * 0.03));
+
+    const west = Math.max(-180, item.minLng - padLng);
+    const east = Math.min(180, item.maxLng + padLng);
+    const south = Math.max(-85, item.minLat - padLat);
+    const north = Math.min(85, item.maxLat + padLat);
+
+    // Avoid the server-side max_results cap for large polygons by splitting the
+    // bbox into moderate tiles. Polygon filtering below removes false positives.
+    const targetLngStep = 4.0;
+    const targetLatStep = 4.0;
+    const cols = Math.max(1, Math.min(12, Math.ceil((east - west) / targetLngStep)));
+    const rows = Math.max(1, Math.min(12, Math.ceil((north - south) / targetLatStep)));
+
+    for (let r = 0; r < rows; r += 1) {
+      const s = south + (north - south) * (r / rows);
+      const n = south + (north - south) * ((r + 1) / rows);
+      for (let c = 0; c < cols; c += 1) {
+        const w = west + (east - west) * (c / cols);
+        const e = west + (east - west) * ((c + 1) / cols);
+        boxes.push({ west: w, south: s, east: e, north: n });
+      }
+    }
+  });
+
+  return boxes;
+}
+
+async function fetchCamerasForPolygonBboxes(polygons) {
+  const boxes = polygonQueryBboxes(polygons);
+  if (!boxes.length) return [];
+
+  const endpoint = `${SUPABASE_URL}/rest/v1/rpc/get_cameras_bbox`;
+  const headers = {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json'
+  };
+
+  const rows = [];
+  const concurrency = 6;
+  let next = 0;
+
+  async function worker() {
+    while (next < boxes.length) {
+      const box = boxes[next++];
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          west: box.west,
+          south: box.south,
+          east: box.east,
+          north: box.north,
+          max_results: 5000
+        })
+      });
+      if (!res.ok) {
+        const message = await res.text().catch(() => '');
+        throw new Error(`Polygon camera query failed ${res.status}: ${message.slice(0, 240)}`);
+      }
+      const part = await res.json();
+      if (Array.isArray(part)) rows.push(...part);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, boxes.length) }, worker));
+
+  const seen = new Set();
+  const cams = [];
+  rows.forEach(row => {
+    const cam = (typeof toCamelCamera === 'function') ? toCamelCamera(row) : row;
+    const id = cam && cam.id != null ? String(cam.id) : '';
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    cams.push(cam);
+    if (typeof cameraMap !== 'undefined' && cameraMap) {
+      cameraMap.set(id, cam);
+      cameraMap.set(cam.id, cam);
+    }
+  });
+  return cams;
+}
+
+async function findCamerasInsidePolygons(polygons) {
+  const indexed = indexPolygonsForContainment(polygons);
+  if (!indexed.length) return [];
+
+  // In API/Supabase mode, polygon selection must query the camera data source.
+  // It must not depend on the currently rendered markers, because zoomed-out
+  // globe/dashboard views show clusters rather than individual cameras.
+  const useApi = !!window.VIGIL_CAMERA_API_MODE;
+  const candidates = useApi
+    ? await fetchCamerasForPolygonBboxes(polygons)
+    : findCamerasInsidePolygonsLocal(polygons);
+
+  return candidates.filter(cam => cameraInsideIndexedPolygons(cam, indexed));
+}
+
+async function resolveAreaSelectionMatches(polygons, statusText = 'Finding cameras inside area…') {
+  areaSelection.matching = true;
+  areaSelection.matchedIds = [];
+  updateAreaPanel(statusText);
+  try {
+    const matched = await findCamerasInsidePolygons(polygons);
+    areaSelection.matchedIds = matched.map(cam => String(cam.id));
+    return matched;
+  } finally {
+    areaSelection.matching = false;
+    updateAreaPanel();
+  }
+}
+
 function openAreaPanel() {
   const panel = document.getElementById('areaSelectionPanel');
   if (panel) panel.classList.add('open');
@@ -10132,6 +10264,7 @@ function closeAreaPanel() {
 function updateAreaPanel() {
   const pointCount = areaSelection.points.length;
   const matchedCount = areaSelection.matchedIds.length;
+  const matching = !!areaSelection.matching;
   const sourceEl = document.getElementById('areaSelectionSource');
   const textEl = document.getElementById('areaSelectionText');
   const pointEl = document.getElementById('areaPointCount');
@@ -10154,7 +10287,7 @@ function updateAreaPanel() {
   if (pointEl) pointEl.textContent = polyCount > 1
     ? `${polyCount} polygons`
     : `${pointCount} point${pointCount === 1 ? '' : 's'}`;
-  if (camEl) camEl.textContent = `${matchedCount} camera${matchedCount === 1 ? '' : 's'} found`;
+  if (camEl) camEl.textContent = matching ? 'Searching cameras…' : `${matchedCount} camera${matchedCount === 1 ? '' : 's'} found`;
 
   if (textEl) {
     if (areaSelection.active) {
@@ -10182,9 +10315,9 @@ function updateAreaPanel() {
       textEl.textContent = 'Click Draw area, Upload area, or Upload layer to select cameras by polygon.';
     }
   }
-  if (finishBtn) finishBtn.disabled = !areaSelection.active || pointCount < 3;
-  if (replaceBtn) replaceBtn.disabled = areaSelection.active || matchedCount < 1;
-  if (addBtn) addBtn.disabled = areaSelection.active || matchedCount < 1;
+  if (finishBtn) finishBtn.disabled = matching || !areaSelection.active || pointCount < 3;
+  if (replaceBtn) replaceBtn.disabled = matching || areaSelection.active || matchedCount < 1;
+  if (addBtn) addBtn.disabled = matching || areaSelection.active || matchedCount < 1;
 }
 
 function startAreaSelection(source) {
@@ -10203,15 +10336,18 @@ function startAreaSelection(source) {
   updateAreaPanel();
 }
 
-function finishAreaSelection() {
-  if (!areaSelection.active || areaSelection.points.length < 3) return;
+async function finishAreaSelection() {
+  if (!areaSelection.active || areaSelection.points.length < 3 || areaSelection.matching) return;
   areaSelection.active = false;
   document.body.classList.remove('area-drawing');
   areaSelection.polygons = [areaSelection.points.slice()];
-  const matched = findCamerasInsidePolygons(areaSelection.polygons);
-  areaSelection.matchedIds = matched.map(cam => String(cam.id));
   redrawAreaSelectionGraphics();
-  highlightAreaMatches();
+  try {
+    await resolveAreaSelectionMatches(areaSelection.polygons);
+    highlightAreaMatches();
+  } catch (err) {
+    notifyApp('Could not query cameras in area', (err.message || String(err)), 'err');
+  }
   updateAreaPanel();
 }
 
@@ -10222,6 +10358,7 @@ function clearAreaSelection() {
   areaSelection.points = [];
   areaSelection.polygons = [];
   areaSelection.matchedIds = [];
+  areaSelection.matching = false;
   document.body.classList.remove('area-drawing');
   updateAreaPanel();
   const panel = document.getElementById('areaSelectionPanel');
@@ -10397,7 +10534,7 @@ function highlightAreaMatches() {
 }
 
 function replaceDashboardWithAreaSelection() {
-  if (!areaSelection.matchedIds.length) return;
+  if (areaSelection.matching || !areaSelection.matchedIds.length) return;
   dashboardRefreshTimers.forEach(t => clearTimeout(t));
   dashboardRefreshTimers.clear();
   dashboardHls.forEach(h => h.destroy());
@@ -10422,7 +10559,7 @@ function replaceDashboardWithAreaSelection() {
 }
 
 function addAreaSelectionToDashboard() {
-  if (!areaSelection.matchedIds.length) return;
+  if (areaSelection.matching || !areaSelection.matchedIds.length) return;
   const existing = new Set(dashboardState.order.map(String));
   const additions = areaSelection.matchedIds.map(String).filter(id => !existing.has(String(id)));
   const remaining = dashboardCameraCapacityRemaining();
