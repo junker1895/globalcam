@@ -2386,7 +2386,7 @@ body.area-drawing #dashboardMap { cursor: crosshair; }
 .dash-dir-marker .dash-dir-arrow {
   position: absolute;
   left: 50%;
-  top: 0;
+  top: calc(var(--marker-size, 22px) * -0.16);
   transform: translateX(-50%);
   width: 0;
   height: 0;
@@ -2918,6 +2918,12 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
       </svg>
       <svg id="iconDark" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
         <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+      </svg>
+    </button>
+
+    <button class="tbtn tbtn-icon" id="btnNorthUp" title="Rotate map so north is up" aria-label="North up">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 3l5 18-5-4-5 4 5-18z"/>
       </svg>
     </button>
 
@@ -3574,11 +3580,12 @@ function renderUnselectedCameraEntity(entity, cam) {
     }
     if (entity.billboard) {
       entity.billboard.show = heading !== null;
-      entity.billboard.width = 20;
-      entity.billboard.height = 20;
-      entity.billboard.pixelOffset = new Cesium.Cartesian2(0, -13);
+      entity.billboard.width = 28;
+      entity.billboard.height = 28;
+      entity.billboard.pixelOffset = new Cesium.Cartesian2(0, 0);
       entity.billboard.scaleByDistance = new Cesium.NearFarScalar(300, 1.25, 400000, 0.5);
       entity.billboard.heightReference = google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND;
+      applyCameraArrowOrientation(entity.billboard, cam, heading);
       entity.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
     if (entity.label) {
@@ -5086,28 +5093,34 @@ function cameraArrowCanvasDataUrl(colorCss) {
   if (CESIUM_CAMERA_ARROW_CACHE.has(key)) return CESIUM_CAMERA_ARROW_CACHE.get(key);
 
   const canvas = document.createElement('canvas');
-  canvas.width = 32;
-  canvas.height = 32;
+  canvas.width = 48;
+  canvas.height = 48;
   const ctx = canvas.getContext('2d');
-  ctx.clearRect(0, 0, 32, 32);
+  ctx.clearRect(0, 0, 48, 48);
 
-  // Small north-facing arrow. Cesium rotates this image per camera heading.
+  // North-facing direction glyph. The camera dot is drawn by Cesium as a
+  // separate point centred at this billboard's anchor. Therefore the arrow must
+  // protrude beyond the dot rather than sit underneath it. Keep the base just
+  // behind the dot and place the head well outside the dot radius, so it remains
+  // visible in both tilted 2D and 3D views.
   ctx.save();
-  ctx.translate(16, 16);
-  ctx.shadowColor = 'rgba(15, 23, 42, 0.45)';
-  ctx.shadowBlur = 3;
+  ctx.translate(24, 24);
+  ctx.shadowColor = 'rgba(15, 23, 42, 0.50)';
+  ctx.shadowBlur = 4;
   ctx.shadowOffsetY = 1;
   ctx.fillStyle = key;
-  ctx.strokeStyle = 'rgba(255,255,255,0.92)';
-  ctx.lineWidth = 1.8;
+  ctx.strokeStyle = 'rgba(255,255,255,0.96)';
+  ctx.lineWidth = 2.2;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
   ctx.beginPath();
-  ctx.moveTo(0, -14);
-  ctx.lineTo(7, 1);
-  ctx.lineTo(2.4, -0.5);
-  ctx.lineTo(2.4, 10);
-  ctx.lineTo(-2.4, 10);
-  ctx.lineTo(-2.4, -0.5);
-  ctx.lineTo(-7, 1);
+  ctx.moveTo(0, -20);
+  ctx.lineTo(9.5, -5.5);
+  ctx.lineTo(3.6, -7.2);
+  ctx.lineTo(3.6, 2.5);
+  ctx.lineTo(-3.6, 2.5);
+  ctx.lineTo(-3.6, -7.2);
+  ctx.lineTo(-9.5, -5.5);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
@@ -5116,6 +5129,32 @@ function cameraArrowCanvasDataUrl(colorCss) {
   const url = canvas.toDataURL('image/png');
   CESIUM_CAMERA_ARROW_CACHE.set(key, url);
   return url;
+}
+
+
+function screenSpaceRotationForCameraBearing(cam, headingDeg) {
+  // Camera direction markers are UI glyphs, not 3D frustums. Keep them in the
+  // horizontal compass plane and compensate for map yaw only. Do not project
+  // the heading through the tilted camera pitch, because that makes north/south
+  // arrows aim up toward the horizon/sky in oblique 2D or 3D views.
+  const heading = normaliseBearingDegrees(headingDeg);
+  if (heading === null) return 0;
+  const viewYaw = viewer && viewer.camera && Number.isFinite(viewer.camera.heading)
+    ? viewer.camera.heading
+    : 0;
+  return viewYaw - Cesium.Math.toRadians(heading);
+}
+
+function cameraArrowRotationProperty(cam, heading) {
+  return new Cesium.CallbackProperty(function () {
+    return screenSpaceRotationForCameraBearing(cam, heading);
+  }, false);
+}
+
+function applyCameraArrowOrientation(billboard, cam, heading) {
+  if (!billboard || heading === null) return;
+  billboard.alignedAxis = Cesium.Cartesian3.ZERO;
+  billboard.rotation = cameraArrowRotationProperty(cam, heading);
 }
 
 function dashboardCameraMarker(cam, options = {}) {
@@ -6415,10 +6454,11 @@ async function createCameraEntities(cams) {
       if (heading !== null) {
         entityGraphics.billboard = {
           image: cameraArrowCanvasDataUrl(cesiumColorToCss(color, getHeadingColorCss(heading))),
-          width: 20,
-          height: 20,
-          rotation: -Cesium.Math.toRadians(heading),
-          pixelOffset: new Cesium.Cartesian2(0, -13),
+          width: 28,
+          height: 28,
+          rotation: cameraArrowRotationProperty(cam, heading),
+          alignedAxis: Cesium.Cartesian3.ZERO,
+          pixelOffset: new Cesium.Cartesian2(0, -14),
           scaleByDistance: new Cesium.NearFarScalar(300, 1.25, 400000, 0.5),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
           eyeOffset: new Cesium.Cartesian3(0, 0, -80),
@@ -6604,11 +6644,14 @@ async function selectCamera(cam) {
   } else {
     // 2D/satellite fallback is just an ellipsoid globe. Keep this view
     // intentionally top-down and high enough that Cesium does not clip into
-    // black space. This also keeps the selected camera dot centred on screen.
+    // black space. Preserve the user's current map rotation when selecting a
+    // camera in 2D; do not rotate to the camera feed direction. The 3D branch
+    // above is intentionally unchanged.
+    const current2DHeading = Number.isFinite(viewer.camera.heading) ? viewer.camera.heading : 0;
     viewer.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(cam.lng, cam.lat, 28000),
       orientation: {
-        heading: Cesium.Math.toRadians(cameraHeading),
+        heading: current2DHeading,
         pitch:   Cesium.Math.toRadians(-90),
         roll: 0,
       },
@@ -10855,6 +10898,27 @@ document.addEventListener('click', function handleUpgradeClick(e) {
   startProCheckout();
 }, true);
 
+
+function rotateGlobeNorthUp() {
+  if (!viewer || !viewer.camera) return;
+
+  const camera = viewer.camera;
+  const currentPosition = Cesium.Cartesian3.clone(camera.positionWC || camera.position);
+  const currentPitch = camera.pitch;
+  const currentRoll = camera.roll || 0;
+
+  camera.flyTo({
+    destination: currentPosition,
+    orientation: {
+      heading: 0,
+      pitch: currentPitch,
+      roll: currentRoll
+    },
+    duration: 0.35,
+    easingFunction: Cesium.EasingFunction.QUADRATIC_OUT
+  });
+}
+
 // ==========================================================
 //  UI WIRING
 // ==========================================================
@@ -11039,6 +11103,11 @@ window.startBillingPortal = startBillingPortal;
       settingsPanelOpen = false;
     }
   };
+
+  const btnNorthUp = document.getElementById('btnNorthUp');
+  if (btnNorthUp) {
+    btnNorthUp.onclick = rotateGlobeNorthUp;
+  }
 
   // 2D / 3D mode switch. These are now authoritative render-mode selectors.
   // 2D is always available. 3D is Pro-only and uses Google Photorealistic 3D Tiles.
@@ -12643,13 +12712,43 @@ body.dashboard-active #dashboardFeedWall {
     return 0.35;
   }
 
+  function visibleViewportSpanDegrees() {
+    // Camera height alone is not reliable when the Cesium view is pitched/oblique:
+    // a low camera can still see a very large ground footprint. Use the computed
+    // view rectangle as the second LOD signal so clusters reliably return when
+    // the user zooms or scrolls back out.
+    try {
+      const boxes = getViewBboxes();
+      let lonSpan = 0;
+      let latSpan = 0;
+      boxes.forEach(b => {
+        const w = Number(b.west), e = Number(b.east), s = Number(b.south), n = Number(b.north);
+        if (![w, e, s, n].every(Number.isFinite)) return;
+        lonSpan += Math.max(0, e - w);
+        latSpan = Math.max(latSpan, Math.max(0, n - s));
+      });
+      return { lonSpan, latSpan };
+    } catch (_) {
+      return { lonSpan: 0, latSpan: 0 };
+    }
+  }
+
   function chooseApiLayerMode() {
     const h = cameraHeight();
-    // Hysteresis: do not use a single hard threshold or the layer can get stuck
-    // flickering between clusters and clickable cameras near the boundary.
-    if (apiState.lastRenderedMode === 'cameras') return h > 1200000 ? 'clusters' : 'cameras';
-    if (apiState.lastRenderedMode === 'clusters') return h < 700000 ? 'cameras' : 'clusters';
-    return h > 900000 ? 'clusters' : 'cameras';
+    const span = visibleViewportSpanDegrees();
+    const wideEnoughForClusters = span.lonSpan > 4.0 || span.latSpan > 2.6;
+    const tightEnoughForCameras = span.lonSpan < 2.2 && span.latSpan < 1.5;
+
+    // Hysteresis: use both eye height and visible ground footprint. This prevents
+    // the app getting stuck in individual-camera mode after zooming back out,
+    // especially in tilted 2D/3D views.
+    if (apiState.lastRenderedMode === 'cameras') {
+      return (h > 1200000 || wideEnoughForClusters) ? 'clusters' : 'cameras';
+    }
+    if (apiState.lastRenderedMode === 'clusters') {
+      return (h < 700000 && tightEnoughForCameras) ? 'cameras' : 'clusters';
+    }
+    return (h > 900000 || wideEnoughForClusters) ? 'clusters' : 'cameras';
   }
 
   function shouldUseClusters() {
@@ -12866,8 +12965,9 @@ body.dashboard-active #dashboardFeedWall {
         image: cameraArrowCanvasDataUrl(cesiumColorToCss(color, getHeadingColorCss(heading))),
         width: 20,
         height: 20,
-        rotation: -Cesium.Math.toRadians(heading),
-        pixelOffset: new Cesium.Cartesian2(0, -13),
+        rotation: cameraArrowRotationProperty(cam, heading),
+        alignedAxis: Cesium.Cartesian3.ZERO,
+        pixelOffset: new Cesium.Cartesian2(0, -14),
         scaleByDistance: new Cesium.NearFarScalar(300, 1.25, 400000, 0.5),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
         eyeOffset: new Cesium.Cartesian3(0, 0, -80),
@@ -13307,8 +13407,15 @@ body.dashboard-active #dashboardFeedWall {
       const desired = chooseApiLayerMode();
       if (desired !== apiState.lastRenderedMode || desired !== apiState.lastDesiredMode) {
         const now = Date.now();
-        if (now - apiState.lastRecoveryAt > 220) runViewportRecoverySequence('camera.changed');
-        else enforceImmediateModeTransition('camera.changed');
+        // If the user has zoomed back out far enough for clusters, force the
+        // transition immediately. This is the exact path that was getting stuck.
+        if (desired === 'clusters') {
+          recoverApiViewport('camera.changed-clusters', { force: true, delay: 1 });
+        } else if (now - apiState.lastRecoveryAt > 220) {
+          runViewportRecoverySequence('camera.changed');
+        } else {
+          enforceImmediateModeTransition('camera.changed');
+        }
       } else {
         scheduleApiViewportRefresh(false, 70);
       }
