@@ -12900,27 +12900,63 @@ body.dashboard-active #dashboardFeedWall {
 
 <script>
 
-function setClusterLoadingStatus(isLoading, message = 'Loading clusters…') {
+let clusterLoadingShowTimer = null;
+let clusterLoadingHideTimer = null;
+let clusterLoadingVisibleSince = 0;
+let clusterLoadingToken = 0;
+
+function setClusterLoadingStatus(isLoading, message = 'Loading clusters…', options = {}) {
   const el = document.getElementById('clusterLoadingStatus');
   const text = document.getElementById('clusterLoadingText');
   if (!el) return;
 
-  // This overlay is only for cluster-mode loading. At close zooms the app is
-  // deliberately loading individual cameras, so showing "Loading clusters"
-  // there is wrong and can appear stuck.
   const api = window.VIGIL_CAMERA_API_STATE;
   const inClusterMode = !api || api.pendingMode === 'clusters' || api.lastDesiredMode === 'clusters' || api.lastRenderedMode === 'clusters';
-  const shouldShow = !!isLoading && inClusterMode && !document.body.classList.contains('dashboard-active');
+  const canShow = !!isLoading && inClusterMode && !document.body.classList.contains('dashboard-active');
 
-  if (text) {
-    text.textContent = message || 'Loading clusters…';
+  const showDelay = Number.isFinite(options.showDelay) ? options.showDelay : 220;
+  const minVisible = Number.isFinite(options.minVisible) ? options.minVisible : 650;
+  const token = Number.isFinite(options.token) ? options.token : ++clusterLoadingToken;
+
+  if (text) text.textContent = message || 'Loading clusters…';
+
+  clearTimeout(clusterLoadingShowTimer);
+  clearTimeout(clusterLoadingHideTimer);
+
+  if (canShow) {
+    clusterLoadingToken = token;
+    clusterLoadingShowTimer = setTimeout(() => {
+      if (token !== clusterLoadingToken) return;
+      if (document.body.classList.contains('dashboard-active')) return;
+      if (text) text.textContent = message || 'Loading clusters…';
+      clusterLoadingVisibleSince = Date.now();
+      el.classList.add('loading');
+    }, showDelay);
+    return;
   }
 
-  el.classList.toggle('loading', shouldShow);
+  // Only the newest request should be able to hide the badge. This prevents
+  // older edge-case requests from briefly hiding then re-showing the loader.
+  if (options.token != null && token !== clusterLoadingToken) return;
 
-  if (!shouldShow) {
+  const visibleFor = clusterLoadingVisibleSince ? Date.now() - clusterLoadingVisibleSince : 0;
+  const hideDelay = el.classList.contains('loading') ? Math.max(0, minVisible - visibleFor) : 0;
+
+  clusterLoadingHideTimer = setTimeout(() => {
+    if (options.token != null && token !== clusterLoadingToken) return;
+    el.classList.remove('loading');
     el.style.pointerEvents = 'none';
-  }
+    clusterLoadingVisibleSince = 0;
+  }, hideDelay);
+}
+
+function hideClusterLoadingStatusNow() {
+  clusterLoadingToken += 1;
+  clearTimeout(clusterLoadingShowTimer);
+  clearTimeout(clusterLoadingHideTimer);
+  const el = document.getElementById('clusterLoadingStatus');
+  if (el) el.classList.remove('loading');
+  clusterLoadingVisibleSince = 0;
 }
 
 
@@ -13623,10 +13659,12 @@ function visibleViewportSpanDegrees() {
   }
 
   async function fetchClustersForView(seq) {
+    const loadingToken = ++clusterLoadingToken;
     const globalView = cameraHeight() > 4500000;
     setClusterLoadingStatus(
       true,
-      globalView ? 'Loading global camera clusters…' : 'Loading nearby camera clusters…'
+      globalView ? 'Loading global camera clusters…' : 'Loading nearby camera clusters…',
+      { token: loadingToken, showDelay: globalView ? 260 : 180, minVisible: 750 }
     );
     const startedAt = Date.now();
     try {
@@ -13650,13 +13688,15 @@ function visibleViewportSpanDegrees() {
       // Avoid a distracting flash for very fast cache hits, but hide promptly.
       const elapsed = Date.now() - startedAt;
       setTimeout(() => {
-        if (seq === apiState.requestSeq) setClusterLoadingStatus(false);
+        if (seq === apiState.requestSeq) {
+          setClusterLoadingStatus(false, '', { token: loadingToken, minVisible: 750 });
+        }
       }, elapsed < 180 ? 180 - elapsed : 0);
     }
   }
 
   async function fetchCamerasForView(seq) {
-    setClusterLoadingStatus(false);
+    hideClusterLoadingStatusNow();
     const boxes = getCameraFetchBboxes();
     const parts = await Promise.all(boxes.map(b => rpc('get_cameras_bbox', {
       west: b.west, south: b.south, east: b.east, north: b.north,
@@ -13673,7 +13713,7 @@ function visibleViewportSpanDegrees() {
       seen.add(cam.id); rows.push(cam);
     });
     renderApiEntities(rows, 'cameras');
-    setClusterLoadingStatus(false);
+    hideClusterLoadingStatusNow();
   }
 
   async function refreshApiViewport(force = false) {
@@ -13705,7 +13745,7 @@ function visibleViewportSpanDegrees() {
     } catch (err) {
       if (seq === apiState.requestSeq) {
         console.error('Camera API viewport refresh failed:', err);
-        setClusterLoadingStatus(false);
+        hideClusterLoadingStatusNow();
         if (status) status.textContent = '';
       }
     }
