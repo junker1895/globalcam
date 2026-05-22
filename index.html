@@ -1322,6 +1322,34 @@ body.dashboard-active #btnLegend {
   display: none !important;
 }
 
+body.dashboard-active #btnDrawArea,
+body.dashboard-active #btnUploadArea,
+body.dashboard-active #btnUploadLayer {
+  display: none !important;
+}
+
+body.dashboard-active #btnNorthUp,
+body.dashboard-active #btn2DMode,
+body.dashboard-active #btn3DMode {
+  display: none !important;
+}
+
+body.dashboard-active .globe-mode-controls > *:not(#themeToggle):not(#btnThemeToggle) {
+  display: none !important;
+}
+
+body.dashboard-active .topbar-globe-controls .tbtn-mode,
+body.dashboard-active .topbar-globe-controls #btnNorthUp,
+body.dashboard-active .topbar-globe-controls #btn2DMode,
+body.dashboard-active .topbar-globe-controls #btn3DMode {
+  display: none !important;
+}
+
+body.dashboard-active button[title*="3D"],
+body.dashboard-active button[aria-label*="3D"] {
+  display: none !important;
+}
+
 body.dashboard-active #searchResults {
   top: calc(var(--top-h) + 8px);
   left: 360px;
@@ -2884,13 +2912,6 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
   <button class="tbtn" id="btnLegend">Legend</button>
 
   <div id="barRight">
-    <button class="tbtn" id="btnFit">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/>
-      </svg>
-      Fit
-    </button>
-
     <button class="tbtn" id="btnDrawArea" title="Draw a polygon and build dashboard from cameras inside it">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M5 3l14 4-3 13-12-5z"/><circle cx="5" cy="3" r="1.5"/><circle cx="19" cy="7" r="1.5"/><circle cx="16" cy="20" r="1.5"/><circle cx="4" cy="15" r="1.5"/>
@@ -11356,8 +11377,7 @@ window.startBillingPortal = startBillingPortal;
   updateGlobeModeButtons();
 
   // Fit
-  document.getElementById('btnFit').onclick = fitToData;
-  document.getElementById('btnDrawArea').onclick = () => startAreaSelection('globe');
+document.getElementById('btnDrawArea').onclick = () => startAreaSelection('globe');
   document.getElementById('btnUploadArea').onclick = () => document.getElementById('areaUploadInput').click();
   document.getElementById('btnUploadLayer').onclick = () => document.getElementById('layerUploadInput').click();
   document.getElementById('areaUploadInput').onchange = e => {
