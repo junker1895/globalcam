@@ -5847,10 +5847,10 @@ function setupCesiumCameraGroundGuard() {
 //  CESIUM INIT
 // ==========================================================
 function initCesium() {
-  Cesium.Ion.defaultAccessToken =
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.' +
-    'eyJqdGkiOiJlYWE1OWUxNy1mMWZiLTQzYjYtYTQ0OS1kMWFjYmFkNjc4OTkiLCJpZCI6NTc3MzMsImlhdCI6MTYyNzg0NTE4Mn0.' +
-    'XcKpgANiY19MC4bdFUXMVEBToBmqS8kuYpUlxJHYZxk';
+  // Do not commit a Cesium Ion token in the client bundle.
+  // 2D mode uses non-Ion fallback imagery. Pro 3D obtains its token securely
+  // through fetchProCesiumToken() immediately before loading the 3D tiles.
+  Cesium.Ion.defaultAccessToken = '';
 
   viewer = new Cesium.Viewer('cesiumContainer', {
     // Satellite fallback before the user enables Google Photorealistic 3D Tiles.
