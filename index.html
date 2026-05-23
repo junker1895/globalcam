@@ -3467,6 +3467,11 @@ const CAMERA_3D_FOV_SAMPLE_WIDTH_PX = 0.35;
 const CAMERA_3D_POLE_BASE_HEIGHT_M = 0;
 const CAMERA_3D_POLE_WIDTH_PX = 1.35;
 
+// Temporary altitude CSV test cache. This is intentionally app-local only.
+// It lets a loaded height CSV apply to cameras that are fetched later as the
+// user zooms/pans, instead of only to cameras already present at upload time.
+const altitudeTestByCameraId = new Map();
+
 function cameraAltitudeFirstNonEmpty(...values) {
   for (const v of values) {
     if (v !== null && v !== undefined && String(v).trim() !== '') return v;
@@ -3482,6 +3487,16 @@ function cameraAltitudeParseNullableNumber(value) {
 
 function cameraApproxGroundHeight(cam) {
   if (!cam) return null;
+
+  // Prefer the temporary uploaded CSV lookup when present. This makes the
+  // testing CSV independent of when individual cameras were loaded from
+  // Supabase/clusters into the current viewport.
+  const lookupId = cam.id != null ? String(cam.id).trim() : '';
+  if (lookupId && altitudeTestByCameraId.has(lookupId)) {
+    const cached = cameraAltitudeParseNullableNumber(altitudeTestByCameraId.get(lookupId));
+    if (Number.isFinite(cached) && cached > -500 && cached < 9000) return cached;
+  }
+
   const meta = cam.metadata && typeof cam.metadata === 'object' ? cam.metadata : {};
   const raw = cameraAltitudeFirstNonEmpty(
     cam.altitudeM,
@@ -7602,6 +7617,22 @@ function refreshCameraAltitudeVisuals() {
     if (isSelectedCameraId(cam.id) && hasResolvedSelectedCameraAnchor()) return;
     renderUnselectedCameraEntity(entity, cam);
   });
+
+  // Cesium EntityCluster can keep screen billboards derived from stale entity
+  // positions until the cluster collection is rebuilt. Force a cheap recluster
+  // after applying a test height CSV so dots visibly move immediately.
+  try {
+    if (dataSource.clustering) {
+      const clustering = dataSource.clustering;
+      const wasEnabled = !!clustering.enabled;
+      const oldPixelRange = clustering.pixelRange;
+      clustering.enabled = false;
+      clustering.enabled = wasEnabled;
+      clustering.pixelRange = oldPixelRange + 0.001;
+      clustering.pixelRange = oldPixelRange;
+    }
+  } catch (_) {}
+
   try { viewer?.scene?.requestRender?.(); } catch (_) {}
 }
 
@@ -7614,7 +7645,8 @@ function applyAltitudeRowsToExistingCameras(rows) {
     const alt = cameraAltitudeParseNullableNumber(cameraAltitudeFirstNonEmpty(row.altitude_m, row.altitudeM));
     if (!Number.isFinite(alt)) return;
     withAltitude += 1;
-    const existing = cameraMap.get(id) || cameraMap.get(String(id));
+    altitudeTestByCameraId.set(id.trim(), alt);
+    const existing = cameraMap.get(id) || cameraMap.get(String(id)) || cameraMap.get(id.trim());
     if (!existing) return;
     existing.altitudeM = alt;
     existing.altitudeSource = cameraAltitudeFirstNonEmpty(row.altitude_source, row.altitudeSource, existing.altitudeSource);
@@ -7635,7 +7667,7 @@ function loadAltitudeTestCsv(file) {
     try {
       const rows = parseCameraCsvText(e.target.result);
       const stats = applyAltitudeRowsToExistingCameras(rows);
-      const msg = `Rows in CSV: ${stats.total.toLocaleString()}\nRows with altitude_m: ${stats.withAltitude.toLocaleString()}\nMatched current cameras: ${stats.matched.toLocaleString()}\n\nNormal 3D dots now use altitude_m + ${CAMERA_3D_NORMAL_ALTITUDE_OFFSET_M}m where matched. Selected cameras still use the accurate Cesium sampling path.`;
+      const msg = `Rows in CSV: ${stats.total.toLocaleString()}\nRows with altitude_m: ${stats.withAltitude.toLocaleString()}\nMatched current cameras: ${stats.matched.toLocaleString()}\n\nNormal 3D dots now use altitude_m + ${CAMERA_3D_NORMAL_ALTITUDE_OFFSET_M}m for matched cameras and for cameras loaded later from the uploaded CSV lookup. Selected cameras still use the accurate Cesium sampling path.`;
       if (typeof notifyApp === 'function') notifyApp('Height test CSV loaded', msg, stats.matched ? 'ok' : 'warn');
       else alert(msg);
     } catch (err) {
