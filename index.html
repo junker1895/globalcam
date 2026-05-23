@@ -7439,7 +7439,7 @@ async function selectCamera(cam) {
   // Aim the initial flight from the normal elevated marker anchor, then refit
   // to the validated selected anchor after refineSelectedCameraSurfaceAfterTiles().
   const camPos = google3DEnabled
-    ? cameraEntityPosition(cam.lng, cam.lat, CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, CAMERA_3D_MARKER_LIFT_M)
+    ? Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), normalCameraMarkerHeight(cam))
     : selectedCameraEntityPosition(cam.lng, cam.lat, groundH, CAMERA_3D_SELECTED_LIFT_M);
   const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(camPos);
 
