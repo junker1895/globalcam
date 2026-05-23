@@ -7238,38 +7238,45 @@ async function updatePlaceLabels() {
     ? Number(viewer.camera.positionCartographic.height)
     : 0;
 
-  const maxLabels = cameraHeightNow > 9000000 ? 12 : cameraHeightNow > 2800000 ? 42 : 72;
+  // Keep global label count deliberately low, but make the labels large enough
+  // to read over satellite/3D imagery. More labels appear as the camera comes in.
+  const maxLabels = cameraHeightNow > 9000000 ? 10 : cameraHeightNow > 2800000 ? 36 : 76;
   const places = MAP_CONTEXT_STARTER_PLACES
     .filter(place => placeLabelVisibleForHeight(place, cameraHeightNow))
     .slice(0, maxLabels);
 
-  const cs = getComputedStyle(document.documentElement);
-  const fill = (cs.getPropertyValue('--c-surface').trim() || '#ffffff');
-  const outline = (cs.getPropertyValue('--c-text').trim() || '#0f172a');
-
   places.forEach(place => {
     const isCountry = place.level === 'country';
-    const labelHeight = isCountry ? 260000 : (google3DEnabled ? 450 : 8000);
-    const fontSize = isCountry ? 12 : 13;
+    const labelHeight = isCountry ? 320000 : (google3DEnabled ? 1200 : 12000);
+    const fontSize = isCountry ? 14 : 16;
+    const maxDistance = placeLabelMaxDistance(place);
     ds.entities.add({
       position: Cesium.Cartesian3.fromDegrees(place.lng, place.lat, labelHeight),
       label: {
         text: place.name,
-        font: `${isCountry ? 800 : 700} ${fontSize}px Inter, system-ui, sans-serif`,
-        fillColor: Cesium.Color.fromCssColorString(fill).withAlpha(isCountry ? 0.72 : 0.92),
-        outlineColor: Cesium.Color.fromCssColorString(outline).withAlpha(0.82),
-        outlineWidth: isCountry ? 2 : 3,
+        font: `${isCountry ? 800 : 750} ${fontSize}px Inter, system-ui, sans-serif`,
+        fillColor: Cesium.Color.WHITE.withAlpha(isCountry ? 0.88 : 0.98),
+        outlineColor: Cesium.Color.BLACK.withAlpha(0.82),
+        outlineWidth: isCountry ? 4 : 5,
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        showBackground: !isCountry,
+        backgroundColor: Cesium.Color.fromCssColorString('#0f172a').withAlpha(0.34),
+        backgroundPadding: new Cesium.Cartesian2(8, 4),
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
-        pixelOffset: new Cesium.Cartesian2(0, 0),
+        pixelOffset: new Cesium.Cartesian2(0, -6),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
           placeLabelMinDistance(place),
-          placeLabelMaxDistance(place)
+          maxDistance
         ),
-        scaleByDistance: new Cesium.NearFarScalar(5000, 1.08, placeLabelMaxDistance(place), isCountry ? 0.72 : 0.56),
-        translucencyByDistance: new Cesium.NearFarScalar(placeLabelMaxDistance(place) * 0.55, 1.0, placeLabelMaxDistance(place), 0.12),
+        scaleByDistance: new Cesium.NearFarScalar(
+          500000,
+          isCountry ? 1.0 : 1.15,
+          maxDistance,
+          isCountry ? 0.78 : 0.75
+        ),
+        translucencyByDistance: new Cesium.NearFarScalar(maxDistance * 0.72, 1.0, maxDistance, 0.22),
       }
     });
   });
