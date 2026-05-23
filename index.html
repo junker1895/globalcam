@@ -7111,10 +7111,18 @@ const mapContextState = {
   remoteDetailPlaceLabelsLoading: false,
   remoteDetailPlaceLabelsLoaded: false,
   remoteDetailPlaceLabelsError: null,
+  detailPlaceTileCache: new Map(),
+  detailPlaceTileLoading: new Set(),
+  activeDetailPlaceLabels: [],
 };
 
 const PLACE_LABELS_URL = 'https://pub-b5d5f6cb30d643b492c7f785b34ce15f.r2.dev/places_50m.json';
-const PLACE_LABELS_DETAIL_URL = 'https://pub-b5d5f6cb30d643b492c7f785b34ce15f.r2.dev/places_10m.json';
+// Detailed 10m place labels are loaded as small static geographic tiles from R2.
+// Generate/upload these with tile_places_10m.py so the app never downloads the
+// full 10m dataset in one request.
+const PLACE_LABELS_DETAIL_TILE_BASE_URL = 'https://pub-b5d5f6cb30d643b492c7f785b34ce15f.r2.dev/places_10m_tiles/z5';
+const PLACE_LABELS_DETAIL_TILE_Z = 5;
+const PLACE_LABELS_DETAIL_LOAD_MAX_HEIGHT_M = 6200000;
 
 const MAP_CONTEXT_STARTER_PLACES = [
   // Countries / regions shown at globe scale
@@ -7287,14 +7295,15 @@ function getActivePlaceLabels(cameraHeight = 0) {
   const major = Array.isArray(mapContextState.remotePlaceLabelsMajor) && mapContextState.remotePlaceLabelsMajor.length
     ? mapContextState.remotePlaceLabelsMajor
     : (Array.isArray(mapContextState.remotePlaceLabels) ? mapContextState.remotePlaceLabels : []);
-  const detail = Array.isArray(mapContextState.remotePlaceLabelsDetail) ? mapContextState.remotePlaceLabelsDetail : [];
+  const detail = Array.isArray(mapContextState.activeDetailPlaceLabels) ? mapContextState.activeDetailPlaceLabels : [];
 
   if (major.length || detail.length) {
     // Natural Earth populated places does not include country labels, so keep
     // the compact built-in country layer and use R2 for real city/place labels.
-    // 10m detail is included only at closer ranges to avoid clutter and entity churn.
+    // Detailed 10m labels are viewport-tiled and only include currently relevant
+    // tiles, avoiding the lag from loading/rendering the full global 10m file.
     const h = Number(cameraHeight) || 0;
-    const useDetail = h > 0 && h < 5600000 && detail.length;
+    const useDetail = h > 0 && h < PLACE_LABELS_DETAIL_LOAD_MAX_HEIGHT_M && detail.length;
     return getStaticCountryPlaceLabels().concat(major, useDetail ? detail : []);
   }
   return MAP_CONTEXT_STARTER_PLACES;
@@ -7338,25 +7347,141 @@ async function loadPlaceLabelsFromR2() {
   }
 }
 
-async function loadDetailedPlaceLabelsFromR2() {
-  if (mapContextState.remoteDetailPlaceLabelsLoaded || mapContextState.remoteDetailPlaceLabelsLoading) return;
-  mapContextState.remoteDetailPlaceLabelsLoading = true;
-  mapContextState.remoteDetailPlaceLabelsError = null;
+function lonLatToPlaceTile(lng, lat, z = PLACE_LABELS_DETAIL_TILE_Z) {
+  const n = Math.pow(2, z);
+  const safeLat = Math.max(-85.05112878, Math.min(85.05112878, Number(lat) || 0));
+  const safeLng = Math.max(-180, Math.min(179.999999, Number(lng) || 0));
+  const x = Math.floor((safeLng + 180) / 360 * n);
+  const latRad = Cesium.Math.toRadians(safeLat);
+  const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+  return {
+    x: Math.max(0, Math.min(n - 1, x)),
+    y: Math.max(0, Math.min(n - 1, y)),
+    z,
+  };
+}
+
+function getCurrentPlaceLabelViewRectangle() {
+  if (!viewer || !viewer.camera || !viewer.scene || !viewer.scene.globe) return null;
   try {
-    const response = await fetch(PLACE_LABELS_DETAIL_URL, { cache: 'force-cache' });
+    const rect = viewer.camera.computeViewRectangle(viewer.scene.globe.ellipsoid);
+    if (rect) {
+      return {
+        west: Cesium.Math.toDegrees(rect.west),
+        south: Cesium.Math.toDegrees(rect.south),
+        east: Cesium.Math.toDegrees(rect.east),
+        north: Cesium.Math.toDegrees(rect.north),
+      };
+    }
+  } catch (_) {}
+
+  // Fallback for steep/3D views where computeViewRectangle can return null.
+  try {
+    const carto = viewer.camera.positionCartographic;
+    const lng = Cesium.Math.toDegrees(carto.longitude);
+    const lat = Cesium.Math.toDegrees(carto.latitude);
+    const h = Number(carto.height) || 1000000;
+    const span = h > 3500000 ? 18 : h > 1500000 ? 10 : h > 600000 ? 5 : h > 250000 ? 2.5 : 1.2;
+    return { west: lng - span, east: lng + span, south: lat - span, north: lat + span };
+  } catch (_) {
+    return null;
+  }
+}
+
+function placeLabelTileKeysForRectangle(rect, z = PLACE_LABELS_DETAIL_TILE_Z) {
+  if (!rect) return [];
+  const pad = 0.75;
+  let west = Number(rect.west) - pad;
+  let east = Number(rect.east) + pad;
+  const south = Math.max(-85, Number(rect.south) - pad);
+  const north = Math.min(85, Number(rect.north) + pad);
+  if (![west, east, south, north].every(Number.isFinite)) return [];
+
+  const ranges = [];
+  if (east < west) east += 360;
+  const addRange = (w, e) => {
+    const nw = lonLatToPlaceTile(w, north, z);
+    const se = lonLatToPlaceTile(e, south, z);
+    const minX = Math.min(nw.x, se.x);
+    const maxX = Math.max(nw.x, se.x);
+    const minY = Math.min(nw.y, se.y);
+    const maxY = Math.max(nw.y, se.y);
+    ranges.push({ minX, maxX, minY, maxY });
+  };
+
+  if (west < -180 || east > 180) {
+    const w1 = Math.max(-180, west);
+    const e1 = 180;
+    const w2 = -180;
+    const e2 = Math.min(180, east - 360);
+    addRange(w1, e1);
+    if (e2 > w2) addRange(w2, e2);
+  } else {
+    addRange(west, east);
+  }
+
+  const keys = [];
+  const hardTileLimit = 64;
+  ranges.forEach(r => {
+    for (let x = r.minX; x <= r.maxX; x++) {
+      for (let y = r.minY; y <= r.maxY; y++) {
+        keys.push(`${x}_${y}`);
+      }
+    }
+  });
+  return Array.from(new Set(keys)).slice(0, hardTileLimit);
+}
+
+async function loadDetailedPlaceTile(key) {
+  if (!key || mapContextState.detailPlaceTileCache.has(key) || mapContextState.detailPlaceTileLoading.has(key)) return;
+  mapContextState.detailPlaceTileLoading.add(key);
+  try {
+    const url = `${PLACE_LABELS_DETAIL_TILE_BASE_URL}/${key}.json`;
+    const response = await fetch(url, { cache: 'force-cache' });
+    if (response.status === 404) {
+      mapContextState.detailPlaceTileCache.set(key, []);
+      return;
+    }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const raw = await response.json();
-    const labels = normalisePlaceLabelRows(raw, 'natural-earth-10m-r2');
-    mapContextState.remotePlaceLabelsDetail = labels;
-    mapContextState.remoteDetailPlaceLabelsLoaded = true;
-    console.log(`Loaded ${labels.length} Natural Earth 10m detailed place labels from R2`);
-    schedulePlaceLabelUpdate(20);
+    const labels = normalisePlaceLabelRows(raw, 'natural-earth-10m-r2-tile');
+    mapContextState.detailPlaceTileCache.set(key, labels);
   } catch (err) {
     mapContextState.remoteDetailPlaceLabelsError = err;
-    console.warn('Could not load R2 10m detailed place labels.', err);
+    console.warn(`Could not load R2 10m place tile ${key}.`, err);
   } finally {
-    mapContextState.remoteDetailPlaceLabelsLoading = false;
+    mapContextState.detailPlaceTileLoading.delete(key);
   }
+}
+
+async function loadDetailedPlaceLabelsForCurrentView(cameraHeight) {
+  const h = Number(cameraHeight) || 0;
+  if (!(h > 0 && h < PLACE_LABELS_DETAIL_LOAD_MAX_HEIGHT_M)) {
+    mapContextState.activeDetailPlaceLabels = [];
+    return;
+  }
+
+  const rect = getCurrentPlaceLabelViewRectangle();
+  const keys = placeLabelTileKeysForRectangle(rect);
+  if (!keys.length) {
+    mapContextState.activeDetailPlaceLabels = [];
+    return;
+  }
+
+  await Promise.all(keys.map(loadDetailedPlaceTile));
+
+  const seen = new Set();
+  const active = [];
+  keys.forEach(key => {
+    const rows = mapContextState.detailPlaceTileCache.get(key) || [];
+    rows.forEach(place => {
+      const dedupeKey = `${String(place.name || '').toLowerCase()}|${Number(place.lat).toFixed(3)}|${Number(place.lng).toFixed(3)}`;
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+      active.push(place);
+    });
+  });
+  mapContextState.activeDetailPlaceLabels = active;
 }
 
 function clearPlaceLabels() {
@@ -7556,9 +7681,7 @@ async function updatePlaceLabels() {
     ? Number(viewer.camera.positionCartographic.height)
     : 0;
 
-  if (cameraHeightNow > 0 && cameraHeightNow < 5600000) {
-    loadDetailedPlaceLabelsFromR2();
-  }
+  await loadDetailedPlaceLabelsForCurrentView(cameraHeightNow);
 
   // Keep globe-scale labels sparse, then progressively add regional and
   // local labels as the camera comes closer. Candidate labels are sorted by
