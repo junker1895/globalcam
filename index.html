@@ -2967,7 +2967,7 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
     <div class="drop-title">Drop your camera dataset here</div>
     <div class="drop-sub">all_cameras.json · or click to browse</div>
   </div>
-  <input type="file" id="fileInput" accept=".json">
+  <input type="file" id="fileInput" accept=".json,.csv">
 
   <div id="progressWrap">
     <div id="progressBar"><div id="progressFill"></div></div>
@@ -3033,6 +3033,14 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
       </svg>
       Upload layer
     </button>
+
+    <button class="tbtn" id="btnTestHeightCsv" title="Temporary: upload enriched camera CSV and test altitude_m marker heights">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2v20"/><path d="M5 9l7-7 7 7"/><path d="M5 15l7 7 7-7"/>
+      </svg>
+      Test heights CSV
+    </button>
+    <input type="file" id="heightCsvInput" accept=".csv" style="display:none">
 
 
     <!-- Dark mode toggle -->
@@ -3451,12 +3459,60 @@ let frustumTilt  = 15;
 const CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M = 0;
 const CAMERA_3D_NORMAL_VISUAL_HEIGHT_M = 220;
 const CAMERA_3D_MARKER_LIFT_M = 0;
+const CAMERA_3D_NORMAL_ALTITUDE_OFFSET_M = 3.0;
 const CAMERA_3D_SELECTED_LIFT_M = 3.0;
 const CAMERA_3D_FRUSTUM_LIFT_M = 3.0;
 const CAMERA_3D_FOV_SURFACE_SAMPLE_ATTEMPTS = [0, 160, 360, 720, 1200, 1800];
 const CAMERA_3D_FOV_SAMPLE_WIDTH_PX = 0.35;
 const CAMERA_3D_POLE_BASE_HEIGHT_M = 0;
 const CAMERA_3D_POLE_WIDTH_PX = 1.35;
+
+function cameraAltitudeFirstNonEmpty(...values) {
+  for (const v of values) {
+    if (v !== null && v !== undefined && String(v).trim() !== '') return v;
+  }
+  return null;
+}
+
+function cameraAltitudeParseNullableNumber(value) {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function cameraApproxGroundHeight(cam) {
+  if (!cam) return null;
+  const meta = cam.metadata && typeof cam.metadata === 'object' ? cam.metadata : {};
+  const raw = cameraAltitudeFirstNonEmpty(
+    cam.altitudeM,
+    cam.altitude_m,
+    cam.groundAltitudeM,
+    cam.ground_altitude_m,
+    meta.altitudeM,
+    meta.altitude_m,
+    meta.groundAltitudeM,
+    meta.ground_altitude_m
+  );
+  const h = cameraAltitudeParseNullableNumber(raw);
+  return Number.isFinite(h) && h > -500 && h < 9000 ? h : null;
+}
+
+function normalCameraMarkerHeight(cam) {
+  const ground = cameraApproxGroundHeight(cam);
+  if (google3DEnabled && ground !== null) return ground + CAMERA_3D_NORMAL_ALTITUDE_OFFSET_M;
+  return visualCameraHeight(CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, CAMERA_3D_MARKER_LIFT_M);
+}
+
+function normalCameraBeamBaseHeight(cam) {
+  const ground = cameraApproxGroundHeight(cam);
+  return google3DEnabled && ground !== null ? ground : CAMERA_3D_POLE_BASE_HEIGHT_M;
+}
+
+function cameraAltitudeLabel(cam) {
+  const h = cameraApproxGroundHeight(cam);
+  return h === null ? 'no altitude_m' : `altitude_m ${h.toFixed(1)}m`;
+}
+
 
 function waitForCesiumPostRenderFrame() {
   return new Promise(resolve => {
@@ -3694,7 +3750,7 @@ function renderUnselectedCameraEntity(entity, cam) {
     entity._selectedHidden = false;
     entity._selectedStyled = getCameraEntityRenderState(entity, cam) === 'selected_pending' ? 'pending-resolution' : false;
 
-    const h = visualCameraHeight(CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, CAMERA_3D_MARKER_LIFT_M);
+    const h = normalCameraMarkerHeight(cam);
     entity.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), h));
     entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
     setCameraEntityHeightReference(entity, google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND);
@@ -3732,7 +3788,7 @@ function renderUnselectedCameraEntity(entity, cam) {
     // selected_resolved cameras.
     if (entity.polyline) {
       entity.polyline.show = !!google3DEnabled;
-      if (google3DEnabled) updateCameraPoleForEntity(entity, cam.lng, cam.lat, h, { forceBaseMarker: true });
+      if (google3DEnabled) updateCameraPoleForEntity(entity, cam.lng, cam.lat, h, { forceBaseMarker: true, bottomHeight: normalCameraBeamBaseHeight(cam), cam });
     }
   } catch (_) {}
 }
@@ -6565,7 +6621,7 @@ async function createCameraEntities(cams) {
       const color  = getDirColor(heading);
       const entityGraphics = {
         id: cam.id,
-        position: cameraEntityPosition(cam.lng, cam.lat, 0),
+        position: google3DEnabled ? Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), normalCameraMarkerHeight(cam)) : cameraEntityPosition(cam.lng, cam.lat, 0),
         point: {
           pixelSize: 7,
           color,
@@ -6582,8 +6638,8 @@ async function createCameraEntities(cams) {
           // 3D tile mast.
           show: !!google3DEnabled,
           positions: [
-            Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), CAMERA_3D_POLE_BASE_HEIGHT_M),
-            Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), CAMERA_3D_NORMAL_VISUAL_HEIGHT_M),
+            Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), normalCameraBeamBaseHeight(cam)),
+            Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), normalCameraMarkerHeight(cam)),
           ],
           width: CAMERA_3D_POLE_WIDTH_PX,
           material: Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.38),
@@ -7452,6 +7508,150 @@ function fitToData() {
   });
 }
 
+
+function parseCameraCsvText(text) {
+  const src = String(text || '').replace(/^\uFEFF/, '');
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') { field += '"'; i += 1; }
+        else inQuotes = false;
+      } else field += ch;
+      continue;
+    }
+    if (ch === '"') { inQuotes = true; continue; }
+    if (ch === ',') { row.push(field); field = ''; continue; }
+    if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; continue; }
+    if (ch === '\r') continue;
+    field += ch;
+  }
+  row.push(field);
+  if (row.length > 1 || String(row[0] || '').trim() !== '') rows.push(row);
+  if (!rows.length) return [];
+  const headers = rows.shift().map(h => String(h || '').trim());
+  return rows.map(values => {
+    const out = {};
+    headers.forEach((h, i) => { if (h) out[h] = values[i] ?? ''; });
+    return out;
+  });
+}
+
+function parseCameraCsvMetadata(row) {
+  try {
+    return typeof row.metadata === 'string' && row.metadata ? JSON.parse(row.metadata) : (row.metadata || {});
+  } catch (_) {
+    return {};
+  }
+}
+
+function normaliseCameraCsvRow(row) {
+  if (!row || typeof row !== 'object') return null;
+  const meta = parseCameraCsvMetadata(row);
+  const id = cameraAltitudeFirstNonEmpty(row.id, meta.id);
+  const lat = cameraAltitudeParseNullableNumber(cameraAltitudeFirstNonEmpty(row.latitude, row.lat, meta.latitude, meta.lat));
+  const lng = cameraAltitudeParseNullableNumber(cameraAltitudeFirstNonEmpty(row.longitude, row.lng, row.lon, meta.longitude, meta.lng, meta.lon));
+  if (id == null || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  const imageUrl = cameraAltitudeFirstNonEmpty(row.image_url, row.imageUrl, meta.image_url, meta.imageUrl);
+  const videoUrl = cameraAltitudeFirstNonEmpty(row.video_url, row.videoUrl, meta.video_url, meta.videoUrl);
+  let views = [];
+  try { views = typeof row.views === 'string' && row.views ? JSON.parse(row.views) : (Array.isArray(row.views) ? row.views : []); } catch (_) { views = []; }
+  const alt = cameraAltitudeParseNullableNumber(cameraAltitudeFirstNonEmpty(row.altitude_m, row.altitudeM, meta.altitude_m, meta.altitudeM));
+  return {
+    id: String(id),
+    location: cameraAltitudeFirstNonEmpty(row.name, row.location, row.display_name, meta.name, meta.location, String(id)),
+    name: cameraAltitudeFirstNonEmpty(row.name, row.location, row.display_name, meta.name, meta.location, String(id)),
+    lat,
+    lng,
+    provider: cameraAltitudeFirstNonEmpty(row.provider, meta.provider, row.source_file, meta.source_file),
+    roadway: cameraAltitudeFirstNonEmpty(row.roadway, row.road, meta.roadway, meta.road),
+    road: cameraAltitudeFirstNonEmpty(row.road, row.roadway, meta.road, meta.roadway),
+    country: cameraAltitudeFirstNonEmpty(row.country, meta.country),
+    country_code: cameraAltitudeFirstNonEmpty(row.country_code, meta.country_code),
+    state: cameraAltitudeFirstNonEmpty(row.state, meta.state),
+    county: cameraAltitudeFirstNonEmpty(row.county, meta.county),
+    city: cameraAltitudeFirstNonEmpty(row.city, meta.city),
+    direction: cameraAltitudeFirstNonEmpty(row.direction, meta.direction),
+    bearing: cameraAltitudeParseNullableNumber(cameraAltitudeFirstNonEmpty(row.bearing, row.azimuth, row.heading, meta.bearing, meta.azimuth, meta.heading)),
+    heading: cameraAltitudeParseNullableNumber(cameraAltitudeFirstNonEmpty(row.heading, meta.heading)),
+    azimuth: cameraAltitudeParseNullableNumber(cameraAltitudeFirstNonEmpty(row.azimuth, meta.azimuth)),
+    imageUrl: imageUrl || null,
+    videoUrl: videoUrl || null,
+    feedType: cameraAltitudeFirstNonEmpty(row.feed_type, row.feedType, meta.feed_type, meta.feedType, videoUrl ? 'video' : imageUrl ? 'image' : null),
+    sourceUrl: cameraAltitudeFirstNonEmpty(row.source_url, row.sourceUrl, meta.source_url, meta.sourceUrl),
+    pageUrl: cameraAltitudeFirstNonEmpty(row.page_url, row.pageUrl, meta.page_url, meta.pageUrl),
+    originalUrl: cameraAltitudeFirstNonEmpty(row.original_url, row.originalUrl, meta.original_url, meta.originalUrl),
+    views: Array.isArray(views) ? views : [],
+    altitudeM: alt,
+    altitudeSource: cameraAltitudeFirstNonEmpty(row.altitude_source, row.altitudeSource, meta.altitude_source, meta.altitudeSource),
+    altitudeUpdatedAt: cameraAltitudeFirstNonEmpty(row.altitude_updated_at, row.altitudeUpdatedAt, meta.altitude_updated_at, meta.altitudeUpdatedAt),
+    metadata: { ...meta, ...(Number.isFinite(alt) ? { altitude_m: alt } : {}) },
+  };
+}
+
+function refreshCameraAltitudeVisuals() {
+  if (!dataSource || !dataSource.entities) return;
+  dataSource.entities.values.forEach(entity => {
+    const cam = findCameraById(entity.id);
+    if (!cam || String(entity.id).startsWith('cluster:')) return;
+    if (isSelectedCameraId(cam.id) && hasResolvedSelectedCameraAnchor()) return;
+    renderUnselectedCameraEntity(entity, cam);
+  });
+  try { viewer?.scene?.requestRender?.(); } catch (_) {}
+}
+
+function applyAltitudeRowsToExistingCameras(rows) {
+  let matched = 0;
+  let withAltitude = 0;
+  rows.forEach(row => {
+    const id = row && row.id != null ? String(row.id) : '';
+    if (!id) return;
+    const alt = cameraAltitudeParseNullableNumber(cameraAltitudeFirstNonEmpty(row.altitude_m, row.altitudeM));
+    if (!Number.isFinite(alt)) return;
+    withAltitude += 1;
+    const existing = cameraMap.get(id) || cameraMap.get(String(id));
+    if (!existing) return;
+    existing.altitudeM = alt;
+    existing.altitudeSource = cameraAltitudeFirstNonEmpty(row.altitude_source, row.altitudeSource, existing.altitudeSource);
+    existing.altitudeUpdatedAt = cameraAltitudeFirstNonEmpty(row.altitude_updated_at, row.altitudeUpdatedAt, existing.altitudeUpdatedAt);
+    existing.metadata = existing.metadata && typeof existing.metadata === 'object' ? existing.metadata : {};
+    existing.metadata.altitude_m = alt;
+    if (existing.altitudeSource) existing.metadata.altitude_source = existing.altitudeSource;
+    if (existing.altitudeUpdatedAt) existing.metadata.altitude_updated_at = existing.altitudeUpdatedAt;
+    matched += 1;
+  });
+  refreshCameraAltitudeVisuals();
+  return { matched, withAltitude, total: rows.length };
+}
+
+function loadAltitudeTestCsv(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const rows = parseCameraCsvText(e.target.result);
+      const stats = applyAltitudeRowsToExistingCameras(rows);
+      const msg = `Rows in CSV: ${stats.total.toLocaleString()}\nRows with altitude_m: ${stats.withAltitude.toLocaleString()}\nMatched current cameras: ${stats.matched.toLocaleString()}\n\nNormal 3D dots now use altitude_m + ${CAMERA_3D_NORMAL_ALTITUDE_OFFSET_M}m where matched. Selected cameras still use the accurate Cesium sampling path.`;
+      if (typeof notifyApp === 'function') notifyApp('Height test CSV loaded', msg, stats.matched ? 'ok' : 'warn');
+      else alert(msg);
+    } catch (err) {
+      const msg = 'Could not load height test CSV: ' + (err.message || String(err));
+      if (typeof notifyApp === 'function') notifyApp('Height test failed', msg, 'error');
+      else alert(msg);
+    }
+  };
+  reader.onerror = () => {
+    const msg = 'Could not read height test CSV.';
+    if (typeof notifyApp === 'function') notifyApp('Height test failed', msg, 'error');
+    else alert(msg);
+  };
+  reader.readAsText(file);
+}
+
 // ==========================================================
 //  FILE LOADING
 // ==========================================================
@@ -7476,11 +7676,18 @@ function loadFile(file) {
     txt.textContent  = 'Parsing…';
     setTimeout(() => {
       try {
-        cameras = JSON.parse(e.target.result);
+        const fileName = String(file && file.name || '').toLowerCase();
+        if (fileName.endsWith('.csv')) {
+          const rows = parseCameraCsvText(e.target.result);
+          cameras = rows.map(normaliseCameraCsvRow).filter(Boolean);
+        } else {
+          cameras = JSON.parse(e.target.result);
+        }
         cameraMap.clear();
         cameras.forEach(c => { cameraMap.set(c.id, c); cameraMap.set(String(c.id), c); });
         fill.style.width = '80%';
-        txt.textContent  = `${cameras.length.toLocaleString()} cameras — building map…`;
+        const altitudeCount = cameras.filter(c => cameraApproxGroundHeight(c) !== null).length;
+        txt.textContent  = `${cameras.length.toLocaleString()} cameras — ${altitudeCount.toLocaleString()} with altitude — building map…`;
         setTimeout(initializeMap, 80);
       } catch (err) {
         txt.textContent = 'Error: ' + err.message;
@@ -10849,7 +11056,7 @@ function highlightAreaMatches() {
   const matched = areaSelection.matchedIds.map(id => cameraMap.get(id)).filter(Boolean);
   if (viewer) {
     areaSelection.cesiumHighlightEntities = matched.slice(0, 5000).map(cam => viewer.entities.add({
-      position: cameraEntityPosition(cam.lng, cam.lat, 0),
+      position: google3DEnabled ? Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), normalCameraMarkerHeight(cam)) : cameraEntityPosition(cam.lng, cam.lat, 0),
       point: {
         pixelSize: 10,
         color: Cesium.Color.fromCssColorString('#f59e0b'),
@@ -11696,6 +11903,16 @@ window.startBillingPortal = startBillingPortal;
 document.getElementById('btnDrawArea').onclick = () => startAreaSelection('globe');
   document.getElementById('btnUploadArea').onclick = () => document.getElementById('areaUploadInput').click();
   document.getElementById('btnUploadLayer').onclick = () => document.getElementById('layerUploadInput').click();
+  const btnTestHeightCsv = document.getElementById('btnTestHeightCsv');
+  const heightCsvInput = document.getElementById('heightCsvInput');
+  if (btnTestHeightCsv && heightCsvInput) {
+    btnTestHeightCsv.onclick = () => heightCsvInput.click();
+    heightCsvInput.onchange = e => {
+      const f = e.target.files && e.target.files[0];
+      if (f) loadAltitudeTestCsv(f);
+      e.target.value = '';
+    };
+  }
   document.getElementById('areaUploadInput').onchange = e => {
     const f = e.target.files && e.target.files[0];
     if (f) uploadAreaFromFile(f);
@@ -13141,6 +13358,9 @@ function hideClusterLoadingStatusNow() {
       riverName: firstNonEmpty(row.river_name, row.riverName, meta.river_name, meta.riverName),
       managementOffice: firstNonEmpty(row.management_office, row.managementOffice, meta.management_office, meta.managementOffice),
       town: firstNonEmpty(row.town, meta.town),
+      altitudeM: parseNullableNumber(firstNonEmpty(row.altitude_m, row.altitudeM, meta.altitude_m, meta.altitudeM)),
+      altitudeSource: firstNonEmpty(row.altitude_source, row.altitudeSource, meta.altitude_source, meta.altitudeSource),
+      altitudeUpdatedAt: firstNonEmpty(row.altitude_updated_at, row.altitudeUpdatedAt, meta.altitude_updated_at, meta.altitudeUpdatedAt),
       metadata: meta,
       _apiSummary: !(imageUrl || videoUrl || views.length),
       _apiDetailLoaded: !!(imageUrl || videoUrl || views.length),
@@ -13593,8 +13813,8 @@ function visibleViewportSpanDegrees() {
         // 3D tile mast.
         show: !!google3DEnabled,
         positions: [
-          Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), CAMERA_3D_POLE_BASE_HEIGHT_M),
-          Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), CAMERA_3D_NORMAL_VISUAL_HEIGHT_M),
+          Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), normalCameraBeamBaseHeight(cam)),
+          Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), normalCameraMarkerHeight(cam)),
         ],
         width: CAMERA_3D_POLE_WIDTH_PX,
         material: Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.46),
