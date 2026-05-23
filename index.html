@@ -2967,7 +2967,7 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
     <div class="drop-title">Drop your camera dataset here</div>
     <div class="drop-sub">all_cameras.json · or click to browse</div>
   </div>
-  <input type="file" id="fileInput" accept=".json,.csv">
+  <input type="file" id="fileInput" accept=".json">
 
   <div id="progressWrap">
     <div id="progressBar"><div id="progressFill"></div></div>
@@ -3033,14 +3033,6 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
       </svg>
       Upload layer
     </button>
-
-    <button class="tbtn" id="btnTestHeightCsv" title="Temporary: upload enriched camera CSV and test altitude_m marker heights">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 2v20"/><path d="M5 9l7-7 7 7"/><path d="M5 15l7 7 7-7"/>
-      </svg>
-      Test heights CSV
-    </button>
-    <input type="file" id="heightCsvInput" accept=".csv" style="display:none">
 
 
     <!-- Dark mode toggle -->
@@ -3459,7 +3451,7 @@ let frustumTilt  = 15;
 const CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M = 0;
 const CAMERA_3D_NORMAL_VISUAL_HEIGHT_M = 220;
 const CAMERA_3D_MARKER_LIFT_M = 0;
-const CAMERA_3D_NORMAL_ALTITUDE_OFFSET_M = 3.0;
+const CAMERA_3D_NORMAL_ALTITUDE_OFFSET_M = 35.0;
 const CAMERA_3D_SELECTED_LIFT_M = 3.0;
 const CAMERA_3D_FRUSTUM_LIFT_M = 3.0;
 const CAMERA_3D_FOV_SURFACE_SAMPLE_ATTEMPTS = [0, 160, 360, 720, 1200, 1800];
@@ -3467,10 +3459,8 @@ const CAMERA_3D_FOV_SAMPLE_WIDTH_PX = 0.35;
 const CAMERA_3D_POLE_BASE_HEIGHT_M = 0;
 const CAMERA_3D_POLE_WIDTH_PX = 1.35;
 
-// Temporary altitude CSV test cache. This is intentionally app-local only.
-// It lets a loaded height CSV apply to cameras that are fetched later as the
-// user zooms/pans, instead of only to cameras already present at upload time.
-const altitudeTestByCameraId = new Map();
+// Normal camera marker altitude comes from the camera row, usually Supabase altitude_m.
+// Selected cameras still use the separate accurate Cesium scene-sampling path.
 
 function cameraAltitudeFirstNonEmpty(...values) {
   for (const v of values) {
@@ -3488,14 +3478,6 @@ function cameraAltitudeParseNullableNumber(value) {
 function cameraApproxGroundHeight(cam) {
   if (!cam) return null;
 
-  // Prefer the temporary uploaded CSV lookup when present. This makes the
-  // testing CSV independent of when individual cameras were loaded from
-  // Supabase/clusters into the current viewport.
-  const lookupId = cam.id != null ? String(cam.id).trim() : '';
-  if (lookupId && altitudeTestByCameraId.has(lookupId)) {
-    const cached = cameraAltitudeParseNullableNumber(altitudeTestByCameraId.get(lookupId));
-    if (Number.isFinite(cached) && cached > -500 && cached < 9000) return cached;
-  }
 
   const meta = cam.metadata && typeof cam.metadata === 'object' ? cam.metadata : {};
   const raw = cameraAltitudeFirstNonEmpty(
@@ -3647,7 +3629,7 @@ function raiseCesiumCameraEntityToSurface(entity, lng, lat, lift = CAMERA_3D_MAR
   try {
     if (google3DEnabled) {
       // Background markers are visibility symbols. Preserve any precomputed
-      // altitude_m carried by the camera row or the temporary height CSV cache.
+      // altitude_m carried by the camera row from Supabase/loaded data.
       // Do not fall back to the old fixed/default height after a recluster or
       // viewport refresh, otherwise dots visibly jump back below high terrain.
       const cam = entity._cameraData || findCameraById(entity.id) || { id: entity.id, lng, lat };
@@ -7618,17 +7600,7 @@ function refreshCameraAltitudeVisuals() {
   dataSource.entities.values.forEach(entity => {
     if (!entity || String(entity.id).startsWith('cluster:')) return;
     const cam = entity._cameraData || findCameraById(entity.id);
-    if (!cam) return;
-    const id = cam.id != null ? String(cam.id).trim() : String(entity.id).trim();
-    if (id && altitudeTestByCameraId.has(id)) {
-      const alt = cameraAltitudeParseNullableNumber(altitudeTestByCameraId.get(id));
-      if (Number.isFinite(alt)) {
-        cam.altitudeM = alt;
-        cam.metadata = cam.metadata && typeof cam.metadata === 'object' ? cam.metadata : {};
-        cam.metadata.altitude_m = alt;
-      }
-    }
-    entity._cameraData = cam;
+    if (!cam) return;    entity._cameraData = cam;
     if (isSelectedCameraId(cam.id) && hasResolvedSelectedCameraAnchor()) return;
     renderUnselectedCameraEntity(entity, cam);
   });
@@ -7649,73 +7621,6 @@ function refreshCameraAltitudeVisuals() {
   } catch (_) {}
 
   try { viewer?.scene?.requestRender?.(); } catch (_) {}
-}
-
-function applyAltitudeRowsToExistingCameras(rows) {
-  let matched = 0;
-  let withAltitude = 0;
-  rows.forEach(row => {
-    const id = row && row.id != null ? String(row.id) : '';
-    if (!id) return;
-    const alt = cameraAltitudeParseNullableNumber(cameraAltitudeFirstNonEmpty(row.altitude_m, row.altitudeM));
-    if (!Number.isFinite(alt)) return;
-    withAltitude += 1;
-    altitudeTestByCameraId.set(id.trim(), alt);
-    const existing = cameraMap.get(id) || cameraMap.get(String(id)) || cameraMap.get(id.trim());
-    if (!existing) return;
-    existing.altitudeM = alt;
-    existing.altitudeSource = cameraAltitudeFirstNonEmpty(row.altitude_source, row.altitudeSource, existing.altitudeSource);
-    existing.altitudeUpdatedAt = cameraAltitudeFirstNonEmpty(row.altitude_updated_at, row.altitudeUpdatedAt, existing.altitudeUpdatedAt);
-    existing.metadata = existing.metadata && typeof existing.metadata === 'object' ? existing.metadata : {};
-    existing.metadata.altitude_m = alt;
-    if (existing.altitudeSource) existing.metadata.altitude_source = existing.altitudeSource;
-    if (existing.altitudeUpdatedAt) existing.metadata.altitude_updated_at = existing.altitudeUpdatedAt;
-    matched += 1;
-  });
-  // Also patch any rendered entity's attached camera payload. API viewport
-  // refreshes can render from entity-local camera objects before cameraMap is
-  // consulted, so this prevents an immediate snap-back to the previous height.
-  try {
-    if (dataSource && dataSource.entities) {
-      dataSource.entities.values.forEach(entity => {
-        if (!entity || String(entity.id).startsWith('cluster:')) return;
-        const id = String(entity.id || '').trim();
-        if (!id || !altitudeTestByCameraId.has(id)) return;
-        const alt = cameraAltitudeParseNullableNumber(altitudeTestByCameraId.get(id));
-        if (!Number.isFinite(alt)) return;
-        const cam = entity._cameraData || findCameraById(id) || { id };
-        cam.altitudeM = alt;
-        cam.metadata = cam.metadata && typeof cam.metadata === 'object' ? cam.metadata : {};
-        cam.metadata.altitude_m = alt;
-        entity._cameraData = cam;
-      });
-    }
-  } catch (_) {}
-  refreshCameraAltitudeVisuals();
-  return { matched, withAltitude, total: rows.length };
-}
-
-function loadAltitudeTestCsv(file) {
-  const reader = new FileReader();
-  reader.onload = e => {
-    try {
-      const rows = parseCameraCsvText(e.target.result);
-      const stats = applyAltitudeRowsToExistingCameras(rows);
-      const msg = `Rows in CSV: ${stats.total.toLocaleString()}\nRows with altitude_m: ${stats.withAltitude.toLocaleString()}\nMatched current cameras: ${stats.matched.toLocaleString()}\n\nNormal 3D dots now use altitude_m + ${CAMERA_3D_NORMAL_ALTITUDE_OFFSET_M}m for matched cameras and for cameras loaded later from the uploaded CSV lookup. Selected cameras still use the accurate Cesium sampling path.`;
-      if (typeof notifyApp === 'function') notifyApp('Height test CSV loaded', msg, stats.matched ? 'ok' : 'warn');
-      else alert(msg);
-    } catch (err) {
-      const msg = 'Could not load height test CSV: ' + (err.message || String(err));
-      if (typeof notifyApp === 'function') notifyApp('Height test failed', msg, 'error');
-      else alert(msg);
-    }
-  };
-  reader.onerror = () => {
-    const msg = 'Could not read height test CSV.';
-    if (typeof notifyApp === 'function') notifyApp('Height test failed', msg, 'error');
-    else alert(msg);
-  };
-  reader.readAsText(file);
 }
 
 // ==========================================================
@@ -11969,16 +11874,6 @@ window.startBillingPortal = startBillingPortal;
 document.getElementById('btnDrawArea').onclick = () => startAreaSelection('globe');
   document.getElementById('btnUploadArea').onclick = () => document.getElementById('areaUploadInput').click();
   document.getElementById('btnUploadLayer').onclick = () => document.getElementById('layerUploadInput').click();
-  const btnTestHeightCsv = document.getElementById('btnTestHeightCsv');
-  const heightCsvInput = document.getElementById('heightCsvInput');
-  if (btnTestHeightCsv && heightCsvInput) {
-    btnTestHeightCsv.onclick = () => heightCsvInput.click();
-    heightCsvInput.onchange = e => {
-      const f = e.target.files && e.target.files[0];
-      if (f) loadAltitudeTestCsv(f);
-      e.target.value = '';
-    };
-  }
   document.getElementById('areaUploadInput').onchange = e => {
     const f = e.target.files && e.target.files[0];
     if (f) uploadAreaFromFile(f);
