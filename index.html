@@ -7294,8 +7294,11 @@ async function updatePlaceLabels() {
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         pixelOffset: new Cesium.Cartesian2(0, -6),
-        // Keep depth testing on so labels on the far side of the globe are hidden.
-        disableDepthTestDistance: 0,
+        // Match the working cluster rendering pattern: keep a finite depth-test
+        // bypass so near-side labels do not clip into terrain/horizon, while
+        // placeLabelIsOnVisibleGlobeFace() prevents far-side bleed-through.
+        eyeOffset: new Cesium.Cartesian3(0, 0, -20),
+        disableDepthTestDistance: 1000000,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
           placeLabelMinDistance(place),
           maxDistance
