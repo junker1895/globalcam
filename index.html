@@ -3451,16 +3451,18 @@ let frustumTilt  = 15;
 const CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M = 0;
 const CAMERA_3D_NORMAL_VISUAL_HEIGHT_M = 220;
 const CAMERA_3D_MARKER_LIFT_M = 0;
-const CAMERA_3D_NORMAL_ALTITUDE_OFFSET_M = 35.0;
-const CAMERA_3D_SELECTED_LIFT_M = 3.0;
-const CAMERA_3D_FRUSTUM_LIFT_M = 3.0;
+const CAMERA_3D_SUPABASE_ALTITUDE_VISUAL_OFFSET_M = 35.0;
+const CAMERA_3D_SELECTED_CESIUM_SAMPLE_OFFSET_M = 3.0;
+const CAMERA_3D_SELECTED_LIFT_M = CAMERA_3D_SELECTED_CESIUM_SAMPLE_OFFSET_M;
+const CAMERA_3D_FRUSTUM_LIFT_M = CAMERA_3D_SELECTED_CESIUM_SAMPLE_OFFSET_M;
 const CAMERA_3D_FOV_SURFACE_SAMPLE_ATTEMPTS = [0, 160, 360, 720, 1200, 1800];
 const CAMERA_3D_FOV_SAMPLE_WIDTH_PX = 0.35;
 const CAMERA_3D_POLE_BASE_HEIGHT_M = 0;
 const CAMERA_3D_POLE_WIDTH_PX = 1.35;
 
-// Normal camera marker altitude comes from the camera row, usually Supabase altitude_m.
-// Selected cameras still use the separate accurate Cesium scene-sampling path.
+// Normal unselected camera marker altitude comes from the camera row, usually Supabase altitude_m,
+// and gets a larger visual clearance so background dots stay above the 3D mesh.
+// Selected cameras are separate: after click, they use accurate Cesium scene sampling with only +3m.
 
 function cameraAltitudeFirstNonEmpty(...values) {
   for (const v of values) {
@@ -3496,7 +3498,9 @@ function cameraApproxGroundHeight(cam) {
 
 function normalCameraMarkerHeight(cam) {
   const ground = cameraApproxGroundHeight(cam);
-  if (google3DEnabled && ground !== null) return ground + CAMERA_3D_NORMAL_ALTITUDE_OFFSET_M;
+  // Supabase/DEM height path for normal unselected background markers only.
+  // Do not use this for selected sampled cameras.
+  if (google3DEnabled && ground !== null) return ground + CAMERA_3D_SUPABASE_ALTITUDE_VISUAL_OFFSET_M;
   return visualCameraHeight(CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, CAMERA_3D_MARKER_LIFT_M);
 }
 
@@ -3596,7 +3600,7 @@ function visualCameraHeight(baseHeight = 0, extraLift = 0) {
   return Math.max(0, Number(baseHeight) || 0);
 }
 
-function selectedCameraHeight(baseHeight = 0, extraLift = CAMERA_3D_SELECTED_LIFT_M) {
+function selectedCameraHeight(baseHeight = 0, extraLift = CAMERA_3D_SELECTED_CESIUM_SAMPLE_OFFSET_M) {
   const base = Number(baseHeight);
   if (google3DEnabled) {
     const safeBase = Number.isFinite(base) ? base : CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M;
