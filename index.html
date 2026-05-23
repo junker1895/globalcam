@@ -3581,7 +3581,7 @@ function updateCameraPoleForEntity(entity, lng, lat, topHeight, options = {}) {
 
 function setCameraEntityVisualPosition(entity, lng, lat, surfaceHeight = 0, lift = CAMERA_3D_MARKER_LIFT_M) {
   if (!entity) return;
-  const cam = findCameraById(entity.id) || { id: entity.id, lng, lat };
+  const cam = entity._cameraData || findCameraById(entity.id) || { id: entity.id, lng, lat };
   const state = getCameraEntityRenderState(entity, cam);
   if (state === 'selected_resolved') {
     applyResolvedSelectedCameraEntityIfNeeded(entity);
@@ -3646,9 +3646,12 @@ function raiseCesiumCameraEntityToSurface(entity, lng, lat, lift = CAMERA_3D_MAR
   if (applyResolvedSelectedCameraEntityIfNeeded(entity)) return;
   try {
     if (google3DEnabled) {
-      // Background markers are visibility symbols, not physical camera anchors.
-      // Keep them at a fixed visual pole height and do not perform any 3D tile sampling.
-      setCameraEntityVisualPosition(entity, lng, lat, CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M, lift);
+      // Background markers are visibility symbols. Preserve any precomputed
+      // altitude_m carried by the camera row or the temporary height CSV cache.
+      // Do not fall back to the old fixed/default height after a recluster or
+      // viewport refresh, otherwise dots visibly jump back below high terrain.
+      const cam = entity._cameraData || findCameraById(entity.id) || { id: entity.id, lng, lat };
+      renderUnselectedCameraEntity(entity, { ...cam, lng: Number(lng), lat: Number(lat) });
     } else {
       entity.position = new Cesium.ConstantPositionProperty(Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), 0));
       entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
@@ -3758,6 +3761,7 @@ function getCameraEntityRenderState(entity, cam = null) {
 
 function renderUnselectedCameraEntity(entity, cam) {
   if (!entity || !cam) return;
+  if (entity._cameraData && String(entity._cameraData.id) === String(cam.id)) cam = entity._cameraData;
   const heading = inferHeading(cam);
   const color = getDirColor(heading);
   try {
@@ -7612,8 +7616,19 @@ function normaliseCameraCsvRow(row) {
 function refreshCameraAltitudeVisuals() {
   if (!dataSource || !dataSource.entities) return;
   dataSource.entities.values.forEach(entity => {
-    const cam = findCameraById(entity.id);
-    if (!cam || String(entity.id).startsWith('cluster:')) return;
+    if (!entity || String(entity.id).startsWith('cluster:')) return;
+    const cam = entity._cameraData || findCameraById(entity.id);
+    if (!cam) return;
+    const id = cam.id != null ? String(cam.id).trim() : String(entity.id).trim();
+    if (id && altitudeTestByCameraId.has(id)) {
+      const alt = cameraAltitudeParseNullableNumber(altitudeTestByCameraId.get(id));
+      if (Number.isFinite(alt)) {
+        cam.altitudeM = alt;
+        cam.metadata = cam.metadata && typeof cam.metadata === 'object' ? cam.metadata : {};
+        cam.metadata.altitude_m = alt;
+      }
+    }
+    entity._cameraData = cam;
     if (isSelectedCameraId(cam.id) && hasResolvedSelectedCameraAnchor()) return;
     renderUnselectedCameraEntity(entity, cam);
   });
@@ -7657,6 +7672,25 @@ function applyAltitudeRowsToExistingCameras(rows) {
     if (existing.altitudeUpdatedAt) existing.metadata.altitude_updated_at = existing.altitudeUpdatedAt;
     matched += 1;
   });
+  // Also patch any rendered entity's attached camera payload. API viewport
+  // refreshes can render from entity-local camera objects before cameraMap is
+  // consulted, so this prevents an immediate snap-back to the previous height.
+  try {
+    if (dataSource && dataSource.entities) {
+      dataSource.entities.values.forEach(entity => {
+        if (!entity || String(entity.id).startsWith('cluster:')) return;
+        const id = String(entity.id || '').trim();
+        if (!id || !altitudeTestByCameraId.has(id)) return;
+        const alt = cameraAltitudeParseNullableNumber(altitudeTestByCameraId.get(id));
+        if (!Number.isFinite(alt)) return;
+        const cam = entity._cameraData || findCameraById(id) || { id };
+        cam.altitudeM = alt;
+        cam.metadata = cam.metadata && typeof cam.metadata === 'object' ? cam.metadata : {};
+        cam.metadata.altitude_m = alt;
+        entity._cameraData = cam;
+      });
+    }
+  } catch (_) {}
   refreshCameraAltitudeVisuals();
   return { matched, withAltitude, total: rows.length };
 }
@@ -13828,7 +13862,7 @@ function visibleViewportSpanDegrees() {
     const color = getDirColor(heading);
     const graphics = {
       id: String(cam.id),
-      position: cameraEntityPosition(cam.lng, cam.lat, 0),
+      position: google3DEnabled ? Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), normalCameraMarkerHeight(cam)) : cameraEntityPosition(cam.lng, cam.lat, 0),
       point: {
         pixelSize: 7,
         color,
@@ -13884,6 +13918,7 @@ function visibleViewportSpanDegrees() {
       };
     }
     const entity = dataSource.entities.add(graphics);
+    entity._cameraData = cam;
     entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
     entity._searchOff = false;
     raiseCesiumCameraEntityToSurface(entity, cam.lng, cam.lat, CAMERA_3D_MARKER_LIFT_M);
