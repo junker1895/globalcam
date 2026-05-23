@@ -7102,91 +7102,262 @@ const mapContextState = {
   placeLabelsDataSource: null,
   placeLabelUpdateTimer: null,
   placeLabelCameraListenerInstalled: false,
+  remotePlaceLabels: [],
+  remotePlaceLabelsMajor: [],
+  remotePlaceLabelsDetail: [],
+  remotePlaceLabelsLoading: false,
+  remotePlaceLabelsLoaded: false,
+  remotePlaceLabelsError: null,
+  remoteDetailPlaceLabelsLoading: false,
+  remoteDetailPlaceLabelsLoaded: false,
+  remoteDetailPlaceLabelsError: null,
 };
 
+const PLACE_LABELS_URL = 'https://pub-b5d5f6cb30d643b492c7f785b34ce15f.r2.dev/places_50m.json';
+const PLACE_LABELS_DETAIL_URL = 'https://pub-b5d5f6cb30d643b492c7f785b34ce15f.r2.dev/places_10m.json';
+
 const MAP_CONTEXT_STARTER_PLACES = [
-  { name: 'Australia', lat: -25.2744, lng: 133.7751, level: 'country' },
-  { name: 'United States', lat: 39.8283, lng: -98.5795, level: 'country' },
-  { name: 'Canada', lat: 56.1304, lng: -106.3468, level: 'country' },
-  { name: 'Brazil', lat: -14.2350, lng: -51.9253, level: 'country' },
-  { name: 'United Kingdom', lat: 54.7, lng: -3.2, level: 'country' },
-  { name: 'France', lat: 46.2276, lng: 2.2137, level: 'country' },
-  { name: 'Germany', lat: 51.1657, lng: 10.4515, level: 'country' },
-  { name: 'India', lat: 20.5937, lng: 78.9629, level: 'country' },
-  { name: 'China', lat: 35.8617, lng: 104.1954, level: 'country' },
-  { name: 'Japan', lat: 36.2048, lng: 138.2529, level: 'country' },
-  { name: 'Indonesia', lat: -2.5, lng: 118.0, level: 'country' },
-  { name: 'South Africa', lat: -30.5595, lng: 22.9375, level: 'country' },
-  { name: 'New Zealand', lat: -40.9006, lng: 174.8860, level: 'country' },
-  { name: 'Mexico', lat: 23.6345, lng: -102.5528, level: 'country' },
-  { name: 'Argentina', lat: -38.4161, lng: -63.6167, level: 'country' },
-  { name: 'Russia', lat: 61.5240, lng: 105.3188, level: 'country' },
+  // Countries / regions shown at globe scale
+  { name: 'Australia', lat: -25.2744, lng: 133.7751, level: 'country', rank: 1 },
+  { name: 'United States', lat: 39.8283, lng: -98.5795, level: 'country', rank: 1 },
+  { name: 'Canada', lat: 56.1304, lng: -106.3468, level: 'country', rank: 1 },
+  { name: 'Brazil', lat: -14.2350, lng: -51.9253, level: 'country', rank: 1 },
+  { name: 'United Kingdom', lat: 54.7, lng: -3.2, level: 'country', rank: 1 },
+  { name: 'France', lat: 46.2276, lng: 2.2137, level: 'country', rank: 1 },
+  { name: 'Germany', lat: 51.1657, lng: 10.4515, level: 'country', rank: 1 },
+  { name: 'India', lat: 20.5937, lng: 78.9629, level: 'country', rank: 1 },
+  { name: 'China', lat: 35.8617, lng: 104.1954, level: 'country', rank: 1 },
+  { name: 'Japan', lat: 36.2048, lng: 138.2529, level: 'country', rank: 1 },
+  { name: 'Indonesia', lat: -2.5, lng: 118.0, level: 'country', rank: 1 },
+  { name: 'South Africa', lat: -30.5595, lng: 22.9375, level: 'country', rank: 1 },
+  { name: 'New Zealand', lat: -40.9006, lng: 174.8860, level: 'country', rank: 1 },
+  { name: 'Mexico', lat: 23.6345, lng: -102.5528, level: 'country', rank: 1 },
+  { name: 'Argentina', lat: -38.4161, lng: -63.6167, level: 'country', rank: 1 },
+  { name: 'Russia', lat: 61.5240, lng: 105.3188, level: 'country', rank: 1 },
+  { name: 'Spain', lat: 40.4637, lng: -3.7492, level: 'country', rank: 1 },
+  { name: 'Italy', lat: 41.8719, lng: 12.5674, level: 'country', rank: 1 },
+  { name: 'Turkey', lat: 38.9637, lng: 35.2433, level: 'country', rank: 1 },
+  { name: 'Saudi Arabia', lat: 23.8859, lng: 45.0792, level: 'country', rank: 1 },
+  { name: 'Egypt', lat: 26.8206, lng: 30.8025, level: 'country', rank: 1 },
+  { name: 'Kenya', lat: -0.0236, lng: 37.9062, level: 'country', rank: 1 },
+  { name: 'Nigeria', lat: 9.0820, lng: 8.6753, level: 'country', rank: 1 },
+  { name: 'Chile', lat: -35.6751, lng: -71.5430, level: 'country', rank: 1 },
+  { name: 'Peru', lat: -9.1900, lng: -75.0152, level: 'country', rank: 1 },
 
-  { name: 'Brisbane', lat: -27.4698, lng: 153.0251, level: 'major' },
-  { name: 'Sydney', lat: -33.8688, lng: 151.2093, level: 'major' },
-  { name: 'Melbourne', lat: -37.8136, lng: 144.9631, level: 'major' },
-  { name: 'Perth', lat: -31.9523, lng: 115.8613, level: 'major' },
-  { name: 'Adelaide', lat: -34.9285, lng: 138.6007, level: 'major' },
-  { name: 'Canberra', lat: -35.2809, lng: 149.1300, level: 'major' },
-  { name: 'Darwin', lat: -12.4634, lng: 130.8456, level: 'major' },
-  { name: 'Hobart', lat: -42.8821, lng: 147.3272, level: 'major' },
-  { name: 'Auckland', lat: -36.8509, lng: 174.7645, level: 'major' },
-  { name: 'Wellington', lat: -41.2865, lng: 174.7762, level: 'major' },
+  // Global metropolitan labels
+  { name: 'London', lat: 51.5074, lng: -0.1278, level: 'metro', rank: 1 },
+  { name: 'Paris', lat: 48.8566, lng: 2.3522, level: 'metro', rank: 1 },
+  { name: 'Berlin', lat: 52.5200, lng: 13.4050, level: 'metro', rank: 1 },
+  { name: 'Madrid', lat: 40.4168, lng: -3.7038, level: 'metro', rank: 1 },
+  { name: 'Rome', lat: 41.9028, lng: 12.4964, level: 'metro', rank: 1 },
+  { name: 'Amsterdam', lat: 52.3676, lng: 4.9041, level: 'metro', rank: 2 },
+  { name: 'Dublin', lat: 53.3498, lng: -6.2603, level: 'metro', rank: 2 },
+  { name: 'Stockholm', lat: 59.3293, lng: 18.0686, level: 'metro', rank: 2 },
+  { name: 'Oslo', lat: 59.9139, lng: 10.7522, level: 'metro', rank: 2 },
+  { name: 'Copenhagen', lat: 55.6761, lng: 12.5683, level: 'metro', rank: 2 },
+  { name: 'Athens', lat: 37.9838, lng: 23.7275, level: 'metro', rank: 2 },
+  { name: 'Vienna', lat: 48.2082, lng: 16.3738, level: 'metro', rank: 2 },
+  { name: 'Prague', lat: 50.0755, lng: 14.4378, level: 'metro', rank: 2 },
+  { name: 'Warsaw', lat: 52.2297, lng: 21.0122, level: 'metro', rank: 2 },
+  { name: 'Lisbon', lat: 38.7223, lng: -9.1393, level: 'metro', rank: 2 },
 
-  { name: 'London', lat: 51.5074, lng: -0.1278, level: 'major' },
-  { name: 'Paris', lat: 48.8566, lng: 2.3522, level: 'major' },
-  { name: 'Berlin', lat: 52.5200, lng: 13.4050, level: 'major' },
-  { name: 'Madrid', lat: 40.4168, lng: -3.7038, level: 'major' },
-  { name: 'Rome', lat: 41.9028, lng: 12.4964, level: 'major' },
-  { name: 'Amsterdam', lat: 52.3676, lng: 4.9041, level: 'major' },
-  { name: 'Dublin', lat: 53.3498, lng: -6.2603, level: 'major' },
-  { name: 'Stockholm', lat: 59.3293, lng: 18.0686, level: 'major' },
-  { name: 'Oslo', lat: 59.9139, lng: 10.7522, level: 'major' },
-  { name: 'Copenhagen', lat: 55.6761, lng: 12.5683, level: 'major' },
-  { name: 'Athens', lat: 37.9838, lng: 23.7275, level: 'major' },
+  { name: 'New York', lat: 40.7128, lng: -74.0060, level: 'metro', rank: 1 },
+  { name: 'Los Angeles', lat: 34.0522, lng: -118.2437, level: 'metro', rank: 1 },
+  { name: 'Chicago', lat: 41.8781, lng: -87.6298, level: 'metro', rank: 1 },
+  { name: 'Houston', lat: 29.7604, lng: -95.3698, level: 'metro', rank: 1 },
+  { name: 'Miami', lat: 25.7617, lng: -80.1918, level: 'metro', rank: 1 },
+  { name: 'Seattle', lat: 47.6062, lng: -122.3321, level: 'metro', rank: 2 },
+  { name: 'San Francisco', lat: 37.7749, lng: -122.4194, level: 'metro', rank: 2 },
+  { name: 'Denver', lat: 39.7392, lng: -104.9903, level: 'metro', rank: 2 },
+  { name: 'Atlanta', lat: 33.7490, lng: -84.3880, level: 'metro', rank: 2 },
+  { name: 'Dallas', lat: 32.7767, lng: -96.7970, level: 'metro', rank: 2 },
+  { name: 'Phoenix', lat: 33.4484, lng: -112.0740, level: 'metro', rank: 2 },
+  { name: 'New Orleans', lat: 29.9511, lng: -90.0715, level: 'metro', rank: 3 },
+  { name: 'Toronto', lat: 43.6532, lng: -79.3832, level: 'metro', rank: 1 },
+  { name: 'Vancouver', lat: 49.2827, lng: -123.1207, level: 'metro', rank: 2 },
+  { name: 'Montreal', lat: 45.5017, lng: -73.5673, level: 'metro', rank: 2 },
+  { name: 'Mexico City', lat: 19.4326, lng: -99.1332, level: 'metro', rank: 1 },
 
-  { name: 'New York', lat: 40.7128, lng: -74.0060, level: 'major' },
-  { name: 'Los Angeles', lat: 34.0522, lng: -118.2437, level: 'major' },
-  { name: 'Chicago', lat: 41.8781, lng: -87.6298, level: 'major' },
-  { name: 'Houston', lat: 29.7604, lng: -95.3698, level: 'major' },
-  { name: 'Miami', lat: 25.7617, lng: -80.1918, level: 'major' },
-  { name: 'Seattle', lat: 47.6062, lng: -122.3321, level: 'major' },
-  { name: 'San Francisco', lat: 37.7749, lng: -122.4194, level: 'major' },
-  { name: 'Denver', lat: 39.7392, lng: -104.9903, level: 'major' },
-  { name: 'Toronto', lat: 43.6532, lng: -79.3832, level: 'major' },
-  { name: 'Vancouver', lat: 49.2827, lng: -123.1207, level: 'major' },
-  { name: 'Montreal', lat: 45.5017, lng: -73.5673, level: 'major' },
-  { name: 'Mexico City', lat: 19.4326, lng: -99.1332, level: 'major' },
+  { name: 'São Paulo', lat: -23.5558, lng: -46.6396, level: 'metro', rank: 1 },
+  { name: 'Rio de Janeiro', lat: -22.9068, lng: -43.1729, level: 'metro', rank: 1 },
+  { name: 'Buenos Aires', lat: -34.6037, lng: -58.3816, level: 'metro', rank: 1 },
+  { name: 'Santiago', lat: -33.4489, lng: -70.6693, level: 'metro', rank: 2 },
+  { name: 'Lima', lat: -12.0464, lng: -77.0428, level: 'metro', rank: 2 },
+  { name: 'Bogotá', lat: 4.7110, lng: -74.0721, level: 'metro', rank: 2 },
+  { name: 'Quito', lat: -0.1807, lng: -78.4678, level: 'metro', rank: 3 },
 
-  { name: 'São Paulo', lat: -23.5558, lng: -46.6396, level: 'major' },
-  { name: 'Rio de Janeiro', lat: -22.9068, lng: -43.1729, level: 'major' },
-  { name: 'Buenos Aires', lat: -34.6037, lng: -58.3816, level: 'major' },
-  { name: 'Santiago', lat: -33.4489, lng: -70.6693, level: 'major' },
-  { name: 'Lima', lat: -12.0464, lng: -77.0428, level: 'major' },
-  { name: 'Bogotá', lat: 4.7110, lng: -74.0721, level: 'major' },
+  { name: 'Tokyo', lat: 35.6762, lng: 139.6503, level: 'metro', rank: 1 },
+  { name: 'Seoul', lat: 37.5665, lng: 126.9780, level: 'metro', rank: 1 },
+  { name: 'Beijing', lat: 39.9042, lng: 116.4074, level: 'metro', rank: 1 },
+  { name: 'Shanghai', lat: 31.2304, lng: 121.4737, level: 'metro', rank: 1 },
+  { name: 'Hong Kong', lat: 22.3193, lng: 114.1694, level: 'metro', rank: 1 },
+  { name: 'Singapore', lat: 1.3521, lng: 103.8198, level: 'metro', rank: 1 },
+  { name: 'Bangkok', lat: 13.7563, lng: 100.5018, level: 'metro', rank: 1 },
+  { name: 'Jakarta', lat: -6.2088, lng: 106.8456, level: 'metro', rank: 1 },
+  { name: 'Manila', lat: 14.5995, lng: 120.9842, level: 'metro', rank: 2 },
+  { name: 'Kuala Lumpur', lat: 3.1390, lng: 101.6869, level: 'metro', rank: 2 },
+  { name: 'Mumbai', lat: 19.0760, lng: 72.8777, level: 'metro', rank: 1 },
+  { name: 'Delhi', lat: 28.7041, lng: 77.1025, level: 'metro', rank: 1 },
+  { name: 'Bengaluru', lat: 12.9716, lng: 77.5946, level: 'metro', rank: 2 },
+  { name: 'Dubai', lat: 25.2048, lng: 55.2708, level: 'metro', rank: 1 },
+  { name: 'Riyadh', lat: 24.7136, lng: 46.6753, level: 'metro', rank: 2 },
 
-  { name: 'Tokyo', lat: 35.6762, lng: 139.6503, level: 'major' },
-  { name: 'Seoul', lat: 37.5665, lng: 126.9780, level: 'major' },
-  { name: 'Beijing', lat: 39.9042, lng: 116.4074, level: 'major' },
-  { name: 'Shanghai', lat: 31.2304, lng: 121.4737, level: 'major' },
-  { name: 'Hong Kong', lat: 22.3193, lng: 114.1694, level: 'major' },
-  { name: 'Singapore', lat: 1.3521, lng: 103.8198, level: 'major' },
-  { name: 'Bangkok', lat: 13.7563, lng: 100.5018, level: 'major' },
-  { name: 'Jakarta', lat: -6.2088, lng: 106.8456, level: 'major' },
-  { name: 'Manila', lat: 14.5995, lng: 120.9842, level: 'major' },
-  { name: 'Kuala Lumpur', lat: 3.1390, lng: 101.6869, level: 'major' },
-  { name: 'Mumbai', lat: 19.0760, lng: 72.8777, level: 'major' },
-  { name: 'Delhi', lat: 28.7041, lng: 77.1025, level: 'major' },
-  { name: 'Dubai', lat: 25.2048, lng: 55.2708, level: 'major' },
+  { name: 'Cairo', lat: 30.0444, lng: 31.2357, level: 'metro', rank: 1 },
+  { name: 'Nairobi', lat: -1.2921, lng: 36.8219, level: 'metro', rank: 2 },
+  { name: 'Cape Town', lat: -33.9249, lng: 18.4241, level: 'metro', rank: 2 },
+  { name: 'Johannesburg', lat: -26.2041, lng: 28.0473, level: 'metro', rank: 2 },
+  { name: 'Lagos', lat: 6.5244, lng: 3.3792, level: 'metro', rank: 1 },
+  { name: 'Casablanca', lat: 33.5731, lng: -7.5898, level: 'metro', rank: 2 },
+  { name: 'Istanbul', lat: 41.0082, lng: 28.9784, level: 'metro', rank: 1 },
 
-  { name: 'Cairo', lat: 30.0444, lng: 31.2357, level: 'major' },
-  { name: 'Nairobi', lat: -1.2921, lng: 36.8219, level: 'major' },
-  { name: 'Cape Town', lat: -33.9249, lng: 18.4241, level: 'major' },
-  { name: 'Johannesburg', lat: -26.2041, lng: 28.0473, level: 'major' },
-  { name: 'Lagos', lat: 6.5244, lng: 3.3792, level: 'major' },
-  { name: 'Casablanca', lat: 33.5731, lng: -7.5898, level: 'major' },
-  { name: 'Istanbul', lat: 41.0082, lng: 28.9784, level: 'major' },
+  // Australia / NZ regional labels for the main user testing area
+  { name: 'Brisbane', lat: -27.4698, lng: 153.0251, level: 'metro', rank: 1 },
+  { name: 'Sydney', lat: -33.8688, lng: 151.2093, level: 'metro', rank: 1 },
+  { name: 'Melbourne', lat: -37.8136, lng: 144.9631, level: 'metro', rank: 1 },
+  { name: 'Perth', lat: -31.9523, lng: 115.8613, level: 'metro', rank: 1 },
+  { name: 'Adelaide', lat: -34.9285, lng: 138.6007, level: 'metro', rank: 1 },
+  { name: 'Canberra', lat: -35.2809, lng: 149.1300, level: 'metro', rank: 1 },
+  { name: 'Darwin', lat: -12.4634, lng: 130.8456, level: 'metro', rank: 2 },
+  { name: 'Hobart', lat: -42.8821, lng: 147.3272, level: 'metro', rank: 2 },
+  { name: 'Gold Coast', lat: -28.0167, lng: 153.4000, level: 'city', rank: 2 },
+  { name: 'Sunshine Coast', lat: -26.6500, lng: 153.0667, level: 'city', rank: 2 },
+  { name: 'Toowoomba', lat: -27.5610, lng: 151.9539, level: 'city', rank: 3 },
+  { name: 'Ipswich', lat: -27.6167, lng: 152.7667, level: 'city', rank: 3 },
+  { name: 'Gladstone', lat: -23.8487, lng: 151.2629, level: 'city', rank: 3 },
+  { name: 'Rockhampton', lat: -23.3791, lng: 150.5100, level: 'city', rank: 3 },
+  { name: 'Townsville', lat: -19.2590, lng: 146.8169, level: 'city', rank: 3 },
+  { name: 'Cairns', lat: -16.9186, lng: 145.7781, level: 'city', rank: 3 },
+  { name: 'Mackay', lat: -21.1411, lng: 149.1860, level: 'city', rank: 3 },
+  { name: 'Bundaberg', lat: -24.8662, lng: 152.3479, level: 'city', rank: 3 },
+  { name: 'Ballarat', lat: -37.5622, lng: 143.8503, level: 'city', rank: 3 },
+  { name: 'Bendigo', lat: -36.7570, lng: 144.2794, level: 'city', rank: 3 },
+  { name: 'Geelong', lat: -38.1499, lng: 144.3617, level: 'city', rank: 3 },
+  { name: 'Newcastle', lat: -32.9283, lng: 151.7817, level: 'city', rank: 2 },
+  { name: 'Wollongong', lat: -34.4278, lng: 150.8931, level: 'city', rank: 3 },
+  { name: 'Auckland', lat: -36.8509, lng: 174.7645, level: 'metro', rank: 1 },
+  { name: 'Wellington', lat: -41.2865, lng: 174.7762, level: 'metro', rank: 2 },
+  { name: 'Christchurch', lat: -43.5321, lng: 172.6362, level: 'city', rank: 3 },
+  { name: 'Hamilton', lat: -37.7870, lng: 175.2793, level: 'city', rank: 3 },
+  { name: 'Dunedin', lat: -45.8788, lng: 170.5028, level: 'city', rank: 3 },
 ];
+
+
+function normaliseRemotePlaceLabel(raw, source = 'natural-earth-r2') {
+  if (!raw || typeof raw !== 'object') return null;
+  const name = String(raw.name || raw.NAME || '').trim();
+  const lat = Number(raw.lat ?? raw.latitude ?? raw.LATITUDE);
+  const lng = Number(raw.lng ?? raw.lon ?? raw.longitude ?? raw.LONGITUDE);
+  if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  const population = Math.max(0, Number(raw.population ?? raw.POP_MAX ?? raw.pop_max ?? 0) || 0);
+  const cls = String(raw.class || raw.FEATURECLA || raw.featureClass || '').toLowerCase();
+  const isCapital = cls.includes('capital');
+
+  let level = 'city';
+  let rank = 5;
+  if (population >= 7000000 || (isCapital && population >= 2500000)) {
+    level = 'metro'; rank = 1;
+  } else if (population >= 1800000 || (isCapital && population >= 700000)) {
+    level = 'metro'; rank = 2;
+  } else if (population >= 500000 || isCapital) {
+    level = 'city'; rank = 2;
+  } else if (population >= 120000) {
+    level = 'city'; rank = 3;
+  } else {
+    level = 'local'; rank = 4;
+  }
+
+  return {
+    name,
+    lat,
+    lng,
+    population,
+    class: raw.class || raw.FEATURECLA || '',
+    level,
+    rank,
+    source,
+  };
+}
+
+function getStaticCountryPlaceLabels() {
+  return MAP_CONTEXT_STARTER_PLACES.filter(place => place && place.level === 'country');
+}
+
+function getActivePlaceLabels(cameraHeight = 0) {
+  const major = Array.isArray(mapContextState.remotePlaceLabelsMajor) && mapContextState.remotePlaceLabelsMajor.length
+    ? mapContextState.remotePlaceLabelsMajor
+    : (Array.isArray(mapContextState.remotePlaceLabels) ? mapContextState.remotePlaceLabels : []);
+  const detail = Array.isArray(mapContextState.remotePlaceLabelsDetail) ? mapContextState.remotePlaceLabelsDetail : [];
+
+  if (major.length || detail.length) {
+    // Natural Earth populated places does not include country labels, so keep
+    // the compact built-in country layer and use R2 for real city/place labels.
+    // 10m detail is included only at closer ranges to avoid clutter and entity churn.
+    const h = Number(cameraHeight) || 0;
+    const useDetail = h > 0 && h < 5600000 && detail.length;
+    return getStaticCountryPlaceLabels().concat(major, useDetail ? detail : []);
+  }
+  return MAP_CONTEXT_STARTER_PLACES;
+}
+
+function normalisePlaceLabelRows(raw, source) {
+  const rows = Array.isArray(raw) ? raw : (Array.isArray(raw && raw.places) ? raw.places : []);
+  const seen = new Set();
+  const labels = [];
+  rows.forEach(item => {
+    const place = normaliseRemotePlaceLabel(item, source);
+    if (!place) return;
+    const key = `${place.name.toLowerCase()}|${place.lat.toFixed(3)}|${place.lng.toFixed(3)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    labels.push(place);
+  });
+  labels.sort((a, b) => (Number(b.population) || 0) - (Number(a.population) || 0));
+  return labels;
+}
+
+async function loadPlaceLabelsFromR2() {
+  if (mapContextState.remotePlaceLabelsLoaded || mapContextState.remotePlaceLabelsLoading) return;
+  mapContextState.remotePlaceLabelsLoading = true;
+  mapContextState.remotePlaceLabelsError = null;
+  try {
+    const response = await fetch(PLACE_LABELS_URL, { cache: 'force-cache' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const raw = await response.json();
+    const labels = normalisePlaceLabelRows(raw, 'natural-earth-50m-r2');
+    mapContextState.remotePlaceLabelsMajor = labels;
+    mapContextState.remotePlaceLabels = labels; // compatibility for older checks
+    mapContextState.remotePlaceLabelsLoaded = true;
+    console.log(`Loaded ${labels.length} Natural Earth 50m place labels from R2`);
+    schedulePlaceLabelUpdate(20);
+  } catch (err) {
+    mapContextState.remotePlaceLabelsError = err;
+    console.warn('Could not load R2 50m place labels; using built-in fallback labels.', err);
+  } finally {
+    mapContextState.remotePlaceLabelsLoading = false;
+  }
+}
+
+async function loadDetailedPlaceLabelsFromR2() {
+  if (mapContextState.remoteDetailPlaceLabelsLoaded || mapContextState.remoteDetailPlaceLabelsLoading) return;
+  mapContextState.remoteDetailPlaceLabelsLoading = true;
+  mapContextState.remoteDetailPlaceLabelsError = null;
+  try {
+    const response = await fetch(PLACE_LABELS_DETAIL_URL, { cache: 'force-cache' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const raw = await response.json();
+    const labels = normalisePlaceLabelRows(raw, 'natural-earth-10m-r2');
+    mapContextState.remotePlaceLabelsDetail = labels;
+    mapContextState.remoteDetailPlaceLabelsLoaded = true;
+    console.log(`Loaded ${labels.length} Natural Earth 10m detailed place labels from R2`);
+    schedulePlaceLabelUpdate(20);
+  } catch (err) {
+    mapContextState.remoteDetailPlaceLabelsError = err;
+    console.warn('Could not load R2 10m detailed place labels.', err);
+  } finally {
+    mapContextState.remoteDetailPlaceLabelsLoading = false;
+  }
+}
 
 function clearPlaceLabels() {
   try {
@@ -7206,11 +7377,36 @@ async function ensurePlaceLabelDataSource() {
 }
 
 
+function placeLabelReferenceCartographic() {
+  // Use the point in the middle of the viewport, not the camera's position in
+  // space. When the globe is tilted/oblique, the Cesium camera may physically
+  // sit a long way away from the town being viewed. Ranking labels by camera
+  // position made larger/coastal cities win over nearby inland towns like
+  // Winton. View-centre ranking makes local labels appear where the user is
+  // actually looking.
+  try {
+    if (viewer && viewer.canvas) {
+      const w = viewer.canvas.clientWidth || 0;
+      const h = viewer.canvas.clientHeight || 0;
+      const ll = (typeof pickEllipsoidLatLng === 'function' ? pickEllipsoidLatLng(w / 2, h / 2) : null)
+        || (typeof pickGlobeLatLng === 'function' ? pickGlobeLatLng(w / 2, h / 2) : null);
+      if (ll && Number.isFinite(Number(ll[0])) && Number.isFinite(Number(ll[1]))) {
+        return {
+          latitude: Cesium.Math.toRadians(Number(ll[0])),
+          longitude: Cesium.Math.toRadians(Number(ll[1])),
+        };
+      }
+    }
+  } catch (_) {}
+  return viewer && viewer.camera ? viewer.camera.positionCartographic : null;
+}
+
 function placeLabelAngularDistanceFromCamera(place) {
-  if (!viewer || !viewer.camera || !viewer.camera.positionCartographic || !Cesium) return 0;
-  const camCarto = viewer.camera.positionCartographic;
-  const lat1 = Number(camCarto.latitude);
-  const lon1 = Number(camCarto.longitude);
+  if (!viewer || !viewer.camera || !Cesium) return 0;
+  const refCarto = placeLabelReferenceCartographic();
+  if (!refCarto) return 0;
+  const lat1 = Number(refCarto.latitude);
+  const lon1 = Number(refCarto.longitude);
   const lat2 = Cesium.Math.toRadians(Number(place.lat));
   const lon2 = Cesium.Math.toRadians(Number(place.lng));
   if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return 0;
@@ -7240,18 +7436,106 @@ function placeLabelIsOnVisibleGlobeFace(place, cameraHeight) {
 
 function placeLabelVisibleForHeight(place, cameraHeight) {
   const h = Number(cameraHeight) || 0;
-  if (place.level === 'country') return h > 1600000;
-  if (h > 9000000) return ['London','New York','Tokyo','Sydney','Paris','Beijing','Singapore','Dubai','São Paulo'].includes(place.name);
-  if (h > 2800000) return true;
-  return true;
+  const level = place.level || 'city';
+  const rank = Number(place.rank || 5);
+  const population = Number(place.population || 0);
+  const isDetail = String(place.source || '').includes('10m');
+
+  // Far away, keep labels sparse and population-led. Close in, locality relevance
+  // matters more than population: small towns such as Winton should appear when
+  // they are near the current view centre, even if their population is low.
+  if (level === 'country') return h > 1800000;
+  if (h > 11000000) return level === 'metro' && rank <= 1 && population >= 7000000;
+  if (h > 5200000) return level === 'metro' && rank <= 2 && population >= 1500000;
+  if (h > 2600000) return (level === 'metro' && rank <= 3) || (level === 'city' && (rank <= 2 || population >= 500000));
+  if (h > 1600000) return level !== 'country' && (population >= 120000 || rank <= 4);
+  if (h > 900000) return level !== 'country' && (population >= 25000 || rank <= 4);
+
+  // Close/regional view: allow the 10m/local dataset through and let the
+  // distance-priority sorter choose the most relevant nearby towns.
+  if (h > 250000) return level !== 'country' && (isDetail || level === 'local' || population >= 1000 || rank <= 5);
+  return level !== 'country';
 }
 
 function placeLabelMaxDistance(place) {
-  return place.level === 'country' ? 22000000 : 7200000;
+  if (place.level === 'country') return 22000000;
+  if (place.level === 'metro') return 14000000;
+  if (place.level === 'city') return 6500000;
+  return 3200000;
 }
 
 function placeLabelMinDistance(place) {
-  return place.level === 'country' ? 1200000 : 5000;
+  if (place.level === 'country') return 1400000;
+  if (place.level === 'metro') return 20000;
+  if (place.level === 'city') return 4000;
+  return 1000;
+}
+
+function placeLabelPriority(place, cameraHeight) {
+  const h = Number(cameraHeight) || 0;
+  const level = place.level || 'city';
+  const rank = Number(place.rank || 5);
+  const population = Number(place.population || 0);
+  const angularDistanceDeg = placeLabelAngularDistanceFromCamera(place) * 180 / Math.PI;
+  const logPopulation = Math.log10(Math.max(1, population));
+  const isDetail = String(place.source || '').includes('10m');
+  const isCameraLocal = String(place.source || '') === 'camera-metadata';
+
+  if (h < 900000) {
+    // Close zoom: the nearest town/locality wins. Population still breaks ties,
+    // but it no longer lets a distant capital beat the town the user is viewing.
+    const levelWeight = level === 'local' ? -25 : level === 'city' ? 0 : level === 'metro' ? 20 : 80;
+    const sourceWeight = isCameraLocal ? -35 : isDetail ? -18 : 12;
+    return (
+      angularDistanceDeg * 1000 +
+      levelWeight +
+      sourceWeight +
+      rank * 3 -
+      logPopulation * 8
+    );
+  }
+
+  // Far/medium zoom: keep the map legible by preferring major places, then use
+  // proximity as a secondary factor.
+  const levelWeight = level === 'country' ? 0 : level === 'metro' ? 100 : level === 'city' ? 220 : 340;
+  const rankWeight = rank * 12;
+  const detailBonus = isDetail && h < 1600000 ? -28 : 0;
+  return levelWeight + rankWeight + angularDistanceDeg - logPopulation * 6 + detailBonus;
+}
+
+function buildCameraDerivedPlaceLabels(cameraHeight) {
+  // At close range, supplement the static global list with locality names from
+  // loaded cameras. This keeps the free layer useful in smaller towns without
+  // needing a paid geocoder or tile provider.
+  if ((Number(cameraHeight) || 0) > 900000) return [];
+  if (!Array.isArray(cameras) || !cameras.length) return [];
+
+  const byName = new Map();
+  cameras.forEach(cam => {
+    const name = firstNonEmpty(cam.city, cam.town, cam.suburb, cam.county, cam.state);
+    const lat = Number(cam.lat ?? cam.latitude);
+    const lng = Number(cam.lng ?? cam.longitude);
+    if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const key = String(name).trim().toLowerCase();
+    if (!key || key.length < 3) return;
+    const existing = byName.get(key) || { name: String(name).trim(), latSum: 0, lngSum: 0, count: 0 };
+    existing.latSum += lat;
+    existing.lngSum += lng;
+    existing.count += 1;
+    byName.set(key, existing);
+  });
+
+  return Array.from(byName.values())
+    .filter(p => p.count >= 2)
+    .map(p => ({
+      name: p.name,
+      lat: p.latSum / p.count,
+      lng: p.lngSum / p.count,
+      level: 'local',
+      rank: Math.max(1, 6 - Math.min(5, p.count)),
+      source: 'camera-metadata',
+      count: p.count,
+    }));
 }
 
 async function updatePlaceLabels() {
@@ -7272,30 +7556,64 @@ async function updatePlaceLabels() {
     ? Number(viewer.camera.positionCartographic.height)
     : 0;
 
-  // Keep global label count deliberately low, but make the labels large enough
-  // to read over satellite/3D imagery. More labels appear as the camera comes in.
-  const maxLabels = cameraHeightNow > 9000000 ? 10 : cameraHeightNow > 2800000 ? 36 : 76;
-  const places = MAP_CONTEXT_STARTER_PLACES
+  if (cameraHeightNow > 0 && cameraHeightNow < 5600000) {
+    loadDetailedPlaceLabelsFromR2();
+  }
+
+  // Keep globe-scale labels sparse, then progressively add regional and
+  // local labels as the camera comes closer. Candidate labels are sorted by
+  // hierarchy, rank and proximity so useful nearby labels win.
+  const maxLabels = cameraHeightNow > 11000000 ? 14 : cameraHeightNow > 5200000 ? 40 : cameraHeightNow > 2600000 ? 90 : cameraHeightNow > 900000 ? 180 : cameraHeightNow > 300000 ? 360 : 480;
+  const cameraDerivedPlaces = buildCameraDerivedPlaceLabels(cameraHeightNow);
+  const seenPlaceKeys = new Set();
+  const closeZoom = cameraHeightNow > 0 && cameraHeightNow < 1200000;
+  const localFocusRadiusDeg = cameraHeightNow > 900000 ? 8
+    : cameraHeightNow > 500000 ? 5.5
+      : cameraHeightNow > 250000 ? 3.5
+        : 2.2;
+  const allCandidatePlaces = getActivePlaceLabels(cameraHeightNow)
+    .concat(cameraDerivedPlaces)
+    .filter(place => {
+      const key = String(place.name || '').trim().toLowerCase();
+      if (!key || seenPlaceKeys.has(key)) return false;
+      seenPlaceKeys.add(key);
+      return true;
+    })
     .filter(place => placeLabelVisibleForHeight(place, cameraHeightNow))
-    .filter(place => placeLabelIsOnVisibleGlobeFace(place, cameraHeightNow))
+    .filter(place => placeLabelIsOnVisibleGlobeFace(place, cameraHeightNow));
+
+  // At local/regional zoom, favour labels near the centre of the current view.
+  // If the local window is too sparse, fall back to the wider visible set.
+  let candidatePlaces = allCandidatePlaces;
+  if (closeZoom) {
+    const localCandidates = allCandidatePlaces.filter(place =>
+      (placeLabelAngularDistanceFromCamera(place) * 180 / Math.PI) <= localFocusRadiusDeg
+    );
+    if (localCandidates.length >= 4) candidatePlaces = localCandidates;
+  }
+
+  const places = candidatePlaces
+    .sort((a, b) => placeLabelPriority(a, cameraHeightNow) - placeLabelPriority(b, cameraHeightNow))
     .slice(0, maxLabels);
 
   places.forEach(place => {
     const isCountry = place.level === 'country';
-    const labelHeight = isCountry ? 320000 : (google3DEnabled ? 1200 : 12000);
-    const fontSize = isCountry ? 14 : 16;
+    const isMetro = place.level === 'metro';
+    const isLocal = place.level === 'local';
+    const labelHeight = isCountry ? 320000 : (google3DEnabled ? (isLocal ? 1400 : 1800) : (isLocal ? 9000 : 14000));
+    const fontSize = isCountry ? 14 : isMetro ? 16 : 14;
     const maxDistance = placeLabelMaxDistance(place);
     ds.entities.add({
       position: Cesium.Cartesian3.fromDegrees(place.lng, place.lat, labelHeight),
       label: {
         text: place.name,
-        font: `${isCountry ? 800 : 750} ${fontSize}px Inter, system-ui, sans-serif`,
+        font: `${isCountry ? 800 : isMetro ? 750 : 700} ${fontSize}px Inter, system-ui, sans-serif`,
         fillColor: Cesium.Color.WHITE.withAlpha(isCountry ? 0.88 : 0.98),
         outlineColor: Cesium.Color.BLACK.withAlpha(0.82),
-        outlineWidth: isCountry ? 4 : 5,
+        outlineWidth: isCountry ? 4 : (isLocal ? 4 : 5),
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
         showBackground: !isCountry,
-        backgroundColor: Cesium.Color.fromCssColorString('#0f172a').withAlpha(0.34),
+        backgroundColor: Cesium.Color.fromCssColorString('#0f172a').withAlpha(isLocal ? 0.26 : 0.34),
         backgroundPadding: new Cesium.Cartesian2(8, 4),
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
@@ -7312,9 +7630,9 @@ async function updatePlaceLabels() {
         ),
         scaleByDistance: new Cesium.NearFarScalar(
           500000,
-          isCountry ? 1.0 : 1.15,
+          isCountry ? 1.0 : isMetro ? 1.15 : 1.05,
           maxDistance,
-          isCountry ? 0.78 : 0.75
+          isCountry ? 0.78 : isMetro ? 0.75 : 0.68
         ),
         translucencyByDistance: new Cesium.NearFarScalar(maxDistance * 0.72, 1.0, maxDistance, 0.22),
       }
@@ -7383,6 +7701,7 @@ function setupMapContextMenu() {
   document.addEventListener('click', ev => { if (!wrap.contains(ev.target)) close(); });
   document.addEventListener('keydown', ev => { if (ev.key === 'Escape') close(); });
   updateMapContextButtonState();
+  loadPlaceLabelsFromR2();
 }
 
 function updateGlobeModeButtons() {
@@ -8775,6 +9094,7 @@ async function initializeMap() {
   document.body.classList.add('app-ready');
   document.getElementById('topBar').style.display = 'flex';
   setupMapContextMenu();
+  try { loadPlaceLabelsFromR2(); } catch (_) {}
   try { updateMapContextLayers(); } catch (_) {}
   document.body.classList.add('app-ready');
   document.getElementById('statusBar').style.display = 'flex';
