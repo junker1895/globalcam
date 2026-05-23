@@ -1021,7 +1021,7 @@ body.dashboard-active #clusterLoadingStatus {
   #pip {
     position: fixed;
     top: calc(var(--top-h) + 12px);
-    right: 12px;
+    right: 86px;
     width: 380px;
     z-index: 300;
     background: #000;
@@ -2635,6 +2635,294 @@ body.tiles-view-loading #cesiumContainer .cesium-widget canvas {
 @keyframes tilesShimmer { to { transform: translateX(160%); } }
 
 
+
+/* ─── VIEWER NAVIGATION CONTROLS ─── */
+#btnNorthUp { display: none !important; }
+#viewerNavControls {
+  position: fixed;
+  top: calc(var(--top-h) + 14px);
+  right: 14px;
+  z-index: 360;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  width: 52px;
+  padding: 8px 6px;
+  background: rgba(255,255,255,0.88);
+  color: var(--c-text);
+  border: 1px solid rgba(226,232,240,0.92);
+  border-radius: 14px;
+  box-shadow: var(--c-shadow-md);
+  backdrop-filter: blur(14px) saturate(1.12);
+  -webkit-backdrop-filter: blur(14px) saturate(1.12);
+  user-select: none;
+  transition:
+    width 170ms ease,
+    padding 170ms ease,
+    background 170ms ease,
+    border-color 170ms ease,
+    box-shadow 170ms ease;
+}
+[data-theme="dark"] #viewerNavControls {
+  background: rgba(26,33,51,0.88);
+  border-color: rgba(45,60,84,0.92);
+  box-shadow: var(--c-shadow-md);
+}
+#viewerNavControls:hover,
+#viewerNavControls:focus-within {
+  width: 58px;
+  padding: 9px 7px;
+  background: rgba(255,255,255,0.94);
+  border-color: var(--c-border2);
+}
+[data-theme="dark"] #viewerNavControls:hover,
+[data-theme="dark"] #viewerNavControls:focus-within {
+  background: rgba(26,33,51,0.96);
+  border-color: var(--c-border2);
+}
+body.app-ready.globe-zoom-ready:not(.dashboard-active) #viewerNavControls { display: flex; }
+body.area-drawing #viewerNavControls,
+body.tiles-view-loading #viewerNavControls { opacity: 0.58; }
+#viewerNavControls .nav-expandable {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition:
+    max-height 190ms ease,
+    opacity 160ms ease,
+    transform 160ms ease,
+    margin 160ms ease;
+}
+#viewerNavControls:hover .nav-expandable,
+#viewerNavControls:focus-within .nav-expandable {
+  max-height: 270px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+#viewerNavControls .nav-control-divider.nav-expandable { margin: 0; }
+#viewerNavControls:hover .nav-control-divider.nav-expandable,
+#viewerNavControls:focus-within .nav-control-divider.nav-expandable { margin: 1px 0; }
+.nav-control-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+.nav-control-divider {
+  width: 28px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--c-border2), transparent);
+  opacity: 0.9;
+  margin: 1px 0;
+}
+.viewer-nav-btn {
+  width: 38px;
+  min-height: 38px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text2);
+  border-radius: 10px;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 850;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-shadow: 0 1px 2px rgba(15,23,42,0.08);
+  transition:
+    background 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease,
+    opacity 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+[data-theme="dark"] .viewer-nav-btn {
+  background: var(--c-surface2);
+  border-color: var(--c-border);
+  color: var(--c-text2);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.26);
+}
+.viewer-nav-btn:hover:not(:disabled) {
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
+  border-color: rgba(37,99,235,0.28);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(37,99,235,0.15);
+}
+.viewer-nav-btn:active:not(:disabled) { transform: translateY(0); }
+.viewer-nav-btn:disabled { opacity: 0.32; cursor: default; }
+.viewer-nav-btn::after {
+  content: attr(aria-label);
+  position: absolute;
+  right: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%) translateX(4px);
+  min-width: max-content;
+  max-width: 220px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  color: var(--c-text);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: var(--c-shadow-md);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+[data-theme="dark"] .viewer-nav-btn::after {
+  background: rgba(26,33,51,0.98);
+  border-color: var(--c-border2);
+}
+.viewer-nav-btn:hover::after {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+.viewer-nav-compass {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: var(--c-accent-bg);
+  overflow: hidden;
+  border-color: rgba(37,99,235,0.24);
+}
+.viewer-nav-compass::before {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border-radius: 999px;
+  border: 1px solid rgba(37,99,235,0.18);
+  pointer-events: none;
+}
+.viewer-nav-compass-needle {
+  width: 23px;
+  height: 23px;
+  display: block;
+  transition: transform 120ms linear;
+  color: var(--c-accent);
+  filter: drop-shadow(0 1px 2px rgba(37,99,235,0.22));
+}
+.viewer-nav-compass-needle svg { display:block; width:100%; height:100%; }
+.viewer-nav-compass-label {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 950;
+  color: var(--c-accent);
+  pointer-events: none;
+}
+#viewerNavModeLabel {
+  min-height: 21px;
+  width: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
+  border: 1px solid rgba(37,99,235,0.24);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+}
+.viewer-nav-more-hint {
+  width: 38px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-radius: 999px;
+  color: var(--c-text3);
+  opacity: 0.92;
+  transition: opacity 140ms ease, transform 140ms ease, height 160ms ease, margin 160ms ease;
+  position: relative;
+}
+.viewer-nav-more-hint::after {
+  content: 'More controls';
+  position: absolute;
+  right: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%) translateX(4px);
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  color: var(--c-text);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  box-shadow: var(--c-shadow-md);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+[data-theme="dark"] .viewer-nav-more-hint::after {
+  background: rgba(26,33,51,0.98);
+  border-color: var(--c-border2);
+}
+#viewerNavControls:hover .viewer-nav-more-hint::after { opacity: 1; transform: translateY(-50%) translateX(0); }
+.viewer-nav-more-hint span {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  display: block;
+}
+#viewerNavControls:hover .viewer-nav-more-hint,
+#viewerNavControls:focus-within .viewer-nav-more-hint {
+  opacity: 0;
+  height: 0;
+  margin: -4px 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+}
+.viewer-nav-btn.active {
+  background: var(--c-accent-bg);
+  border-color: rgba(37,99,235,0.34);
+  color: var(--c-accent);
+}
+#viewerNavZoomSlider {
+  width: 112px;
+  height: 18px;
+  writing-mode: bt-lr;
+  transform: rotate(-90deg);
+  margin: 48px -38px;
+  accent-color: var(--c-accent);
+  cursor: pointer;
+}
+#viewerNavZoomSlider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--c-border2);
+}
+#viewerNavZoomSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  margin-top: -5.5px;
+  border-radius: 999px;
+  background: var(--c-accent);
+  border: 2px solid var(--c-surface);
+  box-shadow: 0 3px 10px rgba(37,99,235,0.30);
+}
+
 /* ─── CUSTOM MAP ZOOM CONTROLS ─── */
 #globeZoomControl {
   position: fixed;
@@ -2652,7 +2940,7 @@ body.tiles-view-loading #cesiumContainer .cesium-widget canvas {
   box-shadow: var(--c-shadow-md);
   user-select: none;
 }
-body.app-ready.globe-zoom-ready:not(.dashboard-active) #globeZoomControl { display: flex; }
+body.app-ready.globe-zoom-ready:not(.dashboard-active) #globeZoomControl { display: none; }
 body.area-drawing #globeZoomControl,
 body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
 #globeZoomControl button,
@@ -3119,6 +3407,34 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
 <!-- ─── CESIUM MAP ─── -->
 <div id="cesiumContainer"></div>
 
+<div id="viewerNavControls" aria-label="Viewer navigation controls">
+  <div class="nav-control-group">
+    <button class="viewer-nav-btn viewer-nav-compass" id="viewerNavCompass" type="button" title="Reset north up" aria-label="Reset north up">
+      <span class="viewer-nav-compass-needle" id="viewerNavCompassNeedle" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linejoin="round">
+          <path d="M12 2.6l5.2 18.8L12 17.2l-5.2 4.2L12 2.6z"/>
+        </svg>
+      </span>
+      <span class="viewer-nav-compass-label">N</span>
+    </button>
+    <div id="viewerNavModeLabel">2D</div>
+  </div>
+  <div class="nav-control-divider nav-expandable"></div>
+  <div class="nav-control-group nav-expandable">
+    <button class="viewer-nav-btn" id="viewerNavHome" type="button" title="Global overview over current location" aria-label="Global overview over current location">⌂</button>
+    <button class="viewer-nav-btn" id="viewerNavBirdseye" type="button" title="Birdseye view at current location" aria-label="Birdseye view">⇡</button>
+    <button class="viewer-nav-btn" id="viewerNavTilt" type="button" title="Toggle oblique/birdseye view" aria-label="Toggle tilt">◰</button>
+    <button class="viewer-nav-btn" id="viewerNavSelected" type="button" title="Return to selected camera" aria-label="Return to selected camera">◎</button>
+  </div>
+  <div class="nav-control-divider nav-expandable"></div>
+  <div class="nav-control-group nav-expandable">
+    <button class="viewer-nav-btn" id="viewerNavZoomIn" type="button" title="Zoom in" aria-label="Zoom in">+</button>
+    <input id="viewerNavZoomSlider" type="range" min="0" max="100" value="50" aria-label="Globe zoom level">
+    <button class="viewer-nav-btn" id="viewerNavZoomOut" type="button" title="Zoom out" aria-label="Zoom out">−</button>
+  </div>
+</div>
+
+
 <!-- ─── GLOBE ZOOM CONTROL ─── -->
 <div id="globeZoomControl" aria-label="Globe zoom control">
   <button id="globeZoomIn" type="button" title="Zoom in">+</button>
@@ -3451,7 +3767,7 @@ let frustumTilt  = 15;
 const CAMERA_3D_DEFAULT_SURFACE_HEIGHT_M = 0;
 const CAMERA_3D_NORMAL_VISUAL_HEIGHT_M = 220;
 const CAMERA_3D_MARKER_LIFT_M = 0;
-const CAMERA_3D_SUPABASE_ALTITUDE_VISUAL_OFFSET_M = 50.0;
+const CAMERA_3D_SUPABASE_ALTITUDE_VISUAL_OFFSET_M = 35.0;
 const CAMERA_3D_SELECTED_CESIUM_SAMPLE_OFFSET_M = 3.0;
 const CAMERA_3D_SELECTED_LIFT_M = CAMERA_3D_SELECTED_CESIUM_SAMPLE_OFFSET_M;
 const CAMERA_3D_FRUSTUM_LIFT_M = CAMERA_3D_SELECTED_CESIUM_SAMPLE_OFFSET_M;
@@ -5702,9 +6018,12 @@ function setGlobeCameraHeight(height) {
 
 function syncGlobeZoomSlider() {
   if (!viewer || suppressGlobeZoomSliderSync) return;
+  const value = String(Math.round(globeZoomHeightToSlider(getGlobeCameraHeight())));
   const slider = document.getElementById('globeZoomSlider');
-  if (!slider) return;
-  slider.value = String(Math.round(globeZoomHeightToSlider(getGlobeCameraHeight())));
+  const navSlider = document.getElementById('viewerNavZoomSlider');
+  if (slider) slider.value = value;
+  if (navSlider) navSlider.value = value;
+  updateViewerNavState();
 }
 
 function setupGlobeZoomControls() {
@@ -5728,6 +6047,7 @@ function setupGlobeZoomControls() {
 
   viewer.camera.changed.addEventListener(syncGlobeZoomSlider);
   syncGlobeZoomSlider();
+  setupViewerNavControls();
 }
 
 // ==========================================================
@@ -11652,6 +11972,143 @@ function rotateGlobeNorthUp() {
     duration: 0.35,
     easingFunction: Cesium.EasingFunction.QUADRATIC_OUT
   });
+}
+
+
+function getViewerCenterCartographic() {
+  if (!viewer || !viewer.camera) return null;
+  const canvas = viewer.canvas;
+  const w = canvas && canvas.clientWidth ? canvas.clientWidth : window.innerWidth;
+  const h = canvas && canvas.clientHeight ? canvas.clientHeight : window.innerHeight;
+  const ll = (typeof pickEllipsoidLatLng === 'function' ? pickEllipsoidLatLng(w / 2, h / 2) : null)
+    || (typeof pickGlobeLatLng === 'function' ? pickGlobeLatLng(w / 2, h / 2) : null);
+  if (ll && Number.isFinite(ll[0]) && Number.isFinite(ll[1])) {
+    return Cesium.Cartographic.fromDegrees(ll[1], ll[0], Math.max(0, getGlobeCameraHeight()));
+  }
+  const c = viewer.camera.positionCartographic;
+  return c ? Cesium.Cartographic.clone(c) : null;
+}
+
+function flyViewerToCartographic(carto, height, orientation, duration = 0.7) {
+  if (!viewer || !viewer.camera || !carto) return;
+  const destination = Cesium.Cartesian3.fromRadians(
+    carto.longitude,
+    carto.latitude,
+    Math.max(20, Number(height) || getGlobeCameraHeight() || 1000)
+  );
+  const fly = () => viewer.camera.flyTo({
+    destination,
+    orientation: {
+      heading: Number.isFinite(orientation?.heading) ? orientation.heading : viewer.camera.heading,
+      pitch: Number.isFinite(orientation?.pitch) ? orientation.pitch : viewer.camera.pitch,
+      roll: Number.isFinite(orientation?.roll) ? orientation.roll : 0
+    },
+    duration,
+    easingFunction: Cesium.EasingFunction.QUADRATIC_OUT
+  });
+  if (typeof suspendCameraFloorGuardForProgrammaticMove === 'function') {
+    suspendCameraFloorGuardForProgrammaticMove('viewer-nav-flight');
+    viewer.camera.flyTo({
+      destination,
+      orientation: {
+        heading: Number.isFinite(orientation?.heading) ? orientation.heading : viewer.camera.heading,
+        pitch: Number.isFinite(orientation?.pitch) ? orientation.pitch : viewer.camera.pitch,
+        roll: Number.isFinite(orientation?.roll) ? orientation.roll : 0
+      },
+      duration,
+      easingFunction: Cesium.EasingFunction.QUADRATIC_OUT,
+      complete: () => typeof resumeCameraFloorGuardAfterProgrammaticMove === 'function' && resumeCameraFloorGuardAfterProgrammaticMove('viewer-nav-flight-complete'),
+      cancel: () => typeof resumeCameraFloorGuardAfterProgrammaticMove === 'function' && resumeCameraFloorGuardAfterProgrammaticMove('viewer-nav-flight-cancel')
+    });
+  } else {
+    fly();
+  }
+}
+
+function viewerNavBirdseye() {
+  const c = getViewerCenterCartographic();
+  if (!c) return;
+  flyViewerToCartographic(c, getGlobeCameraHeight(), {
+    heading: viewer.camera.heading,
+    pitch: Cesium.Math.toRadians(-90),
+    roll: 0
+  }, 0.55);
+}
+
+function viewerNavHome() {
+  if (!viewer || !viewer.camera) return;
+  if (typeof removeFrustum === 'function') removeFrustum();
+
+  // Global overview should zoom out above the point the user is already viewing,
+  // not jump back to a hard-coded home location.
+  const c = getViewerCenterCartographic();
+  if (!c) return;
+
+  const GLOBAL_OVERVIEW_HEIGHT_M = 12500000;
+  flyViewerToCartographic(c, GLOBAL_OVERVIEW_HEIGHT_M, {
+    heading: 0,
+    pitch: Cesium.Math.toRadians(-90),
+    roll: 0
+  }, 1.05);
+}
+
+function viewerNavToggleTilt() {
+  if (!viewer || !viewer.camera) return;
+  const c = getViewerCenterCartographic();
+  if (!c) return;
+  const currentPitchDeg = Cesium.Math.toDegrees(viewer.camera.pitch || 0);
+  const targetPitch = currentPitchDeg < -75 ? Cesium.Math.toRadians(-38) : Cesium.Math.toRadians(-90);
+  const targetHeight = currentPitchDeg < -75 ? Math.max(900, Math.min(getGlobeCameraHeight(), 22000)) : getGlobeCameraHeight();
+  flyViewerToCartographic(c, targetHeight, { heading: viewer.camera.heading, pitch: targetPitch, roll: 0 }, 0.65);
+}
+
+function viewerNavReturnToSelected() {
+  if (!selectedCamera) return;
+  selectCamera(selectedCamera);
+}
+
+function updateViewerNavState() {
+  if (!viewer || !viewer.camera) return;
+  const needle = document.getElementById('viewerNavCompassNeedle');
+  if (needle) needle.style.transform = `rotate(${-Cesium.Math.toDegrees(viewer.camera.heading || 0)}deg)`;
+  const selectedBtn = document.getElementById('viewerNavSelected');
+  if (selectedBtn) selectedBtn.disabled = !selectedCamera;
+  const mode = document.getElementById('viewerNavModeLabel');
+  if (mode) mode.textContent = google3DEnabled ? '3D' : '2D';
+  const tiltBtn = document.getElementById('viewerNavTilt');
+  if (tiltBtn) {
+    const pitchDeg = Cesium.Math.toDegrees(viewer.camera.pitch || 0);
+    tiltBtn.classList.toggle('active', pitchDeg > -75);
+    tiltBtn.title = pitchDeg > -75 ? 'Return to birdseye view' : 'Tilt to oblique view';
+  }
+}
+
+function setupViewerNavControls() {
+  if (!viewer || window.__viewerNavControlsReady) return;
+  const slider = document.getElementById('viewerNavZoomSlider');
+  const zoomIn = document.getElementById('viewerNavZoomIn');
+  const zoomOut = document.getElementById('viewerNavZoomOut');
+  if (!slider || !zoomIn || !zoomOut) return;
+
+  window.__viewerNavControlsReady = true;
+  document.body.classList.add('globe-zoom-ready');
+
+  document.getElementById('viewerNavCompass')?.addEventListener('click', rotateGlobeNorthUp);
+  document.getElementById('viewerNavHome')?.addEventListener('click', viewerNavHome);
+  document.getElementById('viewerNavBirdseye')?.addEventListener('click', viewerNavBirdseye);
+  document.getElementById('viewerNavTilt')?.addEventListener('click', viewerNavToggleTilt);
+  document.getElementById('viewerNavSelected')?.addEventListener('click', viewerNavReturnToSelected);
+
+  slider.addEventListener('input', () => {
+    suppressGlobeZoomSliderSync = true;
+    setGlobeCameraHeight(globeZoomSliderToHeight(slider.value));
+    requestAnimationFrame(() => { suppressGlobeZoomSliderSync = false; syncGlobeZoomSlider(); updateViewerNavState(); });
+  });
+  zoomIn.addEventListener('click', () => viewer && viewer.camera.zoomIn(Math.max(25, getGlobeCameraHeight() * 0.45)));
+  zoomOut.addEventListener('click', () => viewer && viewer.camera.zoomOut(Math.max(25, getGlobeCameraHeight() * 0.65)));
+
+  viewer.camera.changed.addEventListener(updateViewerNavState);
+  updateViewerNavState();
 }
 
 // ==========================================================
