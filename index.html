@@ -558,6 +558,146 @@ body {
 /* push fit + settings to right */
 #barRight { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 
+
+/* ─── CREATE DASHBOARD MENU ─── */
+.dashboard-create-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.dashboard-create-trigger {
+  background: var(--c-surface);
+  border-color: var(--c-border);
+  color: var(--c-text2);
+}
+.dashboard-create-trigger:hover,
+.dashboard-create-wrap.open .dashboard-create-trigger {
+  background: var(--c-accent-bg);
+  border-color: rgba(37,99,235,0.25);
+  color: var(--c-accent);
+}
+.dashboard-create-chevron {
+  margin-left: 1px;
+  color: currentColor;
+  transition: transform 140ms ease;
+}
+.dashboard-create-wrap.open .dashboard-create-chevron { transform: rotate(180deg); }
+.dashboard-create-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 760;
+  width: 318px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  box-shadow: var(--c-shadow-md);
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-4px) scale(0.985);
+  transform-origin: top right;
+  pointer-events: none;
+  transition: opacity 130ms ease, transform 130ms ease;
+}
+.dashboard-create-wrap.open .dashboard-create-menu {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.dashboard-create-menu-head {
+  padding: 12px 13px 10px;
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface2);
+}
+.dashboard-create-menu-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--c-text);
+  letter-spacing: -0.01em;
+}
+.dashboard-create-menu-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--c-text3);
+}
+.dashboard-create-item {
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text2);
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  font-family: var(--font);
+  cursor: pointer;
+}
+.dashboard-create-item:last-child { border-bottom: 0; }
+.dashboard-create-item:hover {
+  background: var(--c-accent-bg);
+  color: var(--c-text);
+}
+.dashboard-create-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--c-surface2);
+  border: 1px solid var(--c-border);
+  color: var(--c-accent);
+}
+.dashboard-create-item:hover .dashboard-create-icon {
+  border-color: rgba(37,99,235,0.28);
+  background: rgba(37,99,235,0.10);
+}
+.dashboard-create-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.dashboard-create-text strong {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--c-text);
+  line-height: 1.2;
+}
+.dashboard-create-text small {
+  font-size: 11px;
+  color: var(--c-text3);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dashboard-create-separator {
+  height: 8px;
+  background: var(--c-surface2);
+  border-bottom: 1px solid var(--c-border);
+}
+.dashboard-create-item.secondary .dashboard-create-icon { color: var(--c-text2); }
+.dashboard-create-badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--c-accent);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+}
+body.dashboard-active #dashboardCreateWrap { display: none !important; }
+
 /* ─── SETTINGS PANEL ─── */
 #settingsPanel {
   position: fixed;
@@ -3301,26 +3441,63 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
   <button class="tbtn" id="btnLegend">Legend</button>
 
   <div id="barRight">
-    <button class="tbtn" id="btnDrawArea" title="Draw a polygon and build dashboard from cameras inside it">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M5 3l14 4-3 13-12-5z"/><circle cx="5" cy="3" r="1.5"/><circle cx="19" cy="7" r="1.5"/><circle cx="16" cy="20" r="1.5"/><circle cx="4" cy="15" r="1.5"/>
-      </svg>
-      Draw area
-    </button>
+    <div class="dashboard-create-wrap" id="dashboardCreateWrap">
+      <button class="tbtn dashboard-create-trigger" id="btnCreateDashboardMenu" type="button" aria-haspopup="true" aria-expanded="false" title="Create a dashboard from cameras on the map">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+        Create dashboard
+        <svg class="dashboard-create-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M6 9l6 6 6-6"/>
+        </svg>
+      </button>
 
-    <button class="tbtn" id="btnUploadArea" title="Upload GeoJSON/KML/KMZ polygon and build dashboard from contained cameras">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/>
-      </svg>
-      Upload area
-    </button>
+      <div class="dashboard-create-menu" id="dashboardCreateMenu" role="menu" aria-label="Create dashboard options">
+        <div class="dashboard-create-menu-head">
+          <div class="dashboard-create-menu-title">Create dashboard</div>
+          <div class="dashboard-create-menu-sub">Choose how to select cameras</div>
+        </div>
 
-    <button class="tbtn" id="btnUploadLayer" title="Upload polygon layer and click a feature to create a dashboard">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 2l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5"/><path d="M3 17l9 5 9-5"/>
-      </svg>
-      Upload layer
-    </button>
+        <button class="dashboard-create-item" id="btnDrawArea" type="button" role="menuitem" title="Draw a polygon and build dashboard from cameras inside it">
+          <span class="dashboard-create-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 3l14 4-3 13-12-5z"/><circle cx="5" cy="3" r="1.5"/><circle cx="19" cy="7" r="1.5"/><circle cx="16" cy="20" r="1.5"/><circle cx="4" cy="15" r="1.5"/>
+            </svg>
+          </span>
+          <span class="dashboard-create-text"><strong>Draw area on map</strong><small>Select cameras inside a custom boundary</small></span>
+        </button>
+
+        <button class="dashboard-create-item" id="btnUploadArea" type="button" role="menuitem" title="Upload GeoJSON/KML/KMZ polygon and build dashboard from contained cameras">
+          <span class="dashboard-create-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/>
+            </svg>
+          </span>
+          <span class="dashboard-create-text"><strong>Upload boundary</strong><small>Create from GeoJSON, KML, or KMZ</small></span>
+        </button>
+
+        <button class="dashboard-create-item" id="btnUploadLayer" type="button" role="menuitem" title="Upload polygon layer and click a feature to create a dashboard">
+          <span class="dashboard-create-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5"/><path d="M3 17l9 5 9-5"/>
+            </svg>
+          </span>
+          <span class="dashboard-create-text"><strong>Use uploaded layer</strong><small>Pick a polygon feature from a layer</small></span>
+        </button>
+
+        <div class="dashboard-create-separator"></div>
+
+        <button class="dashboard-create-item secondary" id="btnCreateMenuGoDashboard" type="button" role="menuitem" title="Open the current dashboard">
+          <span class="dashboard-create-icon">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="4" width="7" height="7" rx="1.5"/><rect x="14" y="4" width="7" height="7" rx="1.5"/><rect x="3" y="15" width="7" height="5" rx="1.5"/><rect x="14" y="15" width="7" height="5" rx="1.5"/>
+            </svg>
+          </span>
+          <span class="dashboard-create-text"><strong>Go to dashboard</strong><small>Open the current camera wall</small></span>
+          <span class="dashboard-create-badge" id="dashboardCreateMenuBadge">0</span>
+        </button>
+      </div>
+    </div>
 
 
     <!-- Dark mode toggle -->
@@ -12331,10 +12508,42 @@ window.startBillingPortal = startBillingPortal;
 
   updateGlobeModeButtons();
 
-  // Fit
-document.getElementById('btnDrawArea').onclick = () => startAreaSelection('globe');
-  document.getElementById('btnUploadArea').onclick = () => document.getElementById('areaUploadInput').click();
-  document.getElementById('btnUploadLayer').onclick = () => document.getElementById('layerUploadInput').click();
+  // Dashboard creation menu
+  const dashboardCreateWrap = document.getElementById('dashboardCreateWrap');
+  const dashboardCreateTrigger = document.getElementById('btnCreateDashboardMenu');
+  const dashboardCreateMenu = document.getElementById('dashboardCreateMenu');
+  function closeDashboardCreateMenu() {
+    if (!dashboardCreateWrap || !dashboardCreateTrigger) return;
+    dashboardCreateWrap.classList.remove('open');
+    dashboardCreateTrigger.setAttribute('aria-expanded', 'false');
+  }
+  function toggleDashboardCreateMenu() {
+    if (!dashboardCreateWrap || !dashboardCreateTrigger) return;
+    const open = !dashboardCreateWrap.classList.contains('open');
+    dashboardCreateWrap.classList.toggle('open', open);
+    dashboardCreateTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  if (dashboardCreateTrigger) {
+    dashboardCreateTrigger.onclick = (e) => {
+      e.stopPropagation();
+      toggleDashboardCreateMenu();
+    };
+  }
+  if (dashboardCreateMenu) {
+    dashboardCreateMenu.addEventListener('click', e => e.stopPropagation());
+  }
+  document.addEventListener('click', closeDashboardCreateMenu);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeDashboardCreateMenu();
+  });
+
+  document.getElementById('btnDrawArea').onclick = () => { closeDashboardCreateMenu(); startAreaSelection('globe'); };
+  document.getElementById('btnUploadArea').onclick = () => { closeDashboardCreateMenu(); document.getElementById('areaUploadInput').click(); };
+  document.getElementById('btnUploadLayer').onclick = () => { closeDashboardCreateMenu(); document.getElementById('layerUploadInput').click(); };
+  const btnCreateMenuGoDashboard = document.getElementById('btnCreateMenuGoDashboard');
+  if (btnCreateMenuGoDashboard) {
+    btnCreateMenuGoDashboard.onclick = () => { closeDashboardCreateMenu(); switchView('dashboard'); };
+  }
   document.getElementById('areaUploadInput').onchange = e => {
     const f = e.target.files && e.target.files[0];
     if (f) uploadAreaFromFile(f);
