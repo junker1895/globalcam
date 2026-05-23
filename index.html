@@ -15178,14 +15178,45 @@ function visibleViewportSpanDegrees() {
       if (typeof isCameraFloorGuardSuppressingViewportRefresh === 'function' && isCameraFloorGuardSuppressingViewportRefresh()) return;
       const now = Date.now();
       const desiredMode = chooseApiLayerMode();
+
+      // Hard guard for the recurring zoom-out failure: after a close city view,
+      // Cesium can miss/settle camera events and leave the individual-camera
+      // layer visible at globe scale until browser focus triggers recovery. If
+      // the LOD decision says clusters, remove the stale individual layer from
+      // the decision path and force a cluster request immediately.
+      const staleIndividualLayerAtClusterScale =
+        desiredMode === 'clusters' &&
+        apiState.lastRenderedMode === 'cameras' &&
+        cameraHeight() > 900000;
+
+      if (staleIndividualLayerAtClusterScale && now - apiState.lastHealthCheckAt > 180) {
+        apiState.lastHealthCheckAt = now;
+        apiState.lastKey = '';
+        apiState.lastRefreshAt = 0;
+        apiState.lastDesiredMode = 'idle';
+        apiState.pendingMode = 'clusters';
+        hideClusterLoadingStatusNow();
+        const status = document.getElementById('statusCameras');
+        if (status) status.textContent = 'Loading camera clusters…';
+        scheduleApiViewportRefresh(true, 1);
+        return;
+      }
+
       const modeMismatch = desiredMode !== apiState.lastDesiredMode || desiredMode !== apiState.lastRenderedMode;
       if (modeMismatch && now - apiState.lastHealthCheckAt > 250) {
         apiState.lastHealthCheckAt = now;
-        runViewportRecoverySequence('postRender-mode-mismatch');
+        if (desiredMode === 'clusters') {
+          apiState.lastKey = '';
+          apiState.lastRefreshAt = 0;
+          apiState.lastDesiredMode = 'idle';
+          scheduleApiViewportRefresh(true, 1);
+        } else {
+          runViewportRecoverySequence('postRender-mode-mismatch');
+        }
         return;
       }
       // Safety net for missed Cesium events / tab restoration.
-      if (now - apiState.lastRefreshAt > 2200) scheduleApiViewportRefresh(false, 60);
+      if (now - apiState.lastRefreshAt > 1800) scheduleApiViewportRefresh(false, 60);
     });
 
     document.addEventListener('visibilitychange', () => {
@@ -15194,6 +15225,22 @@ function visibleViewportSpanDegrees() {
     window.addEventListener('focus', () => runViewportRecoverySequence('focus'));
     window.addEventListener('pageshow', () => runViewportRecoverySequence('pageshow'));
     window.addEventListener('resize', () => runViewportRecoverySequence('resize'));
+
+    // Independent watchdog for the exact issue where individual cameras remain
+    // stuck at globe scale until tab focus changes. This mirrors the focus
+    // recovery but runs while the tab stays active.
+    window.setInterval(() => {
+      if (!apiState.booted || !viewer || activeView === 'dashboard') return;
+      if (document.visibilityState !== 'visible') return;
+      if (typeof isCameraFloorGuardSuppressingViewportRefresh === 'function' && isCameraFloorGuardSuppressingViewportRefresh()) return;
+      const desired = chooseApiLayerMode();
+      if (desired === 'clusters' && apiState.lastRenderedMode === 'cameras' && cameraHeight() > 900000) {
+        apiState.lastKey = '';
+        apiState.lastRefreshAt = 0;
+        apiState.lastDesiredMode = 'idle';
+        scheduleApiViewportRefresh(true, 1);
+      }
+    }, 650);
   }
 
   async function startApiMode() {
