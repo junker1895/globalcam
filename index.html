@@ -2570,6 +2570,48 @@ body.dashboard-map-full #dashboardMap {
   font-family: var(--mono);
   font-size: 10px;
 }
+
+.dashboard-single-autoscroll {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+  color: var(--c-text2);
+  font-size: 11px;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+.dashboard-single-autoscroll select,
+.dashboard-single-autoscroll input {
+  height: 22px;
+  border: 1px solid var(--c-border);
+  border-radius: 5px;
+  background: var(--c-surface2);
+  color: var(--c-text);
+  font-family: var(--mono);
+  font-size: 11px;
+  outline: none;
+}
+.dashboard-single-autoscroll input {
+  width: 58px;
+  padding: 0 6px;
+}
+.dashboard-single-autoscroll .single-auto-custom-wrap {
+  display: none;
+  align-items: center;
+  gap: 4px;
+}
+.dashboard-single-autoscroll.custom .single-auto-custom-wrap {
+  display: inline-flex;
+}
+.dashboard-single-autoscroll.active {
+  border-color: rgba(37,99,235,0.25);
+  background: var(--c-accent-bg);
+}
 .dash-feed-age {
   grid-column: 1 / -1;
   display: inline-flex;
@@ -3460,6 +3502,7 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
 #dashboardBar .dash-seg,
 #dashboardBar .dash-small-btn,
 #dashboardBar .dashboard-refresh-control,
+#dashboardBar .dashboard-single-autoscroll,
 #dashboardBar #dashboardStatus,
 #dashboardBar #dashboardAutosaveStatus,
 #dashboardBar #dashPageButtons { display: flex; }
@@ -3532,6 +3575,14 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
   box-shadow: 0 0 0 1px var(--c-surface), 0 0 0 3px rgba(37,99,235,0.16) !important;
 }
 
+
+.dashboard-single-autoscroll.disabled {
+  opacity: 0.52;
+}
+.dashboard-single-autoscroll.disabled select,
+.dashboard-single-autoscroll.disabled input {
+  cursor: not-allowed;
+}
 </style>
 
 
@@ -3927,7 +3978,7 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
 
       <div class="dashboard-shortcut-section">Refresh and layout</div>
       <div class="shortcut-row"><span>Refresh selected</span><kbd>R</kbd></div>
-      <div class="shortcut-row"><span>Refresh all</span><kbd>Shift+R</kbd></div>
+      <div class="shortcut-row"><span>Refresh feeds now</span><kbd>Shift+R</kbd></div>
       <div class="shortcut-row"><span>Pause auto-refresh while held</span><kbd>Space</kbd></div>
       <div class="shortcut-row"><span>Toggle map</span><kbd>M</kbd></div>
       <div class="shortcut-row"><span>Lock Mosaic layout</span><kbd>L</kbd></div>
@@ -3967,16 +4018,30 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
             <span class="density-icon density-small" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
           </button>
         </div>
-        <button class="dash-small-btn" id="dashRefreshAll" title="Refresh visible dashboard feeds in a staggered wave (Shift+R)">↻ Refresh all</button>
+        <label class="dashboard-single-autoscroll dash-control-single" id="dashSingleAutoScrollWrap" title="Cycle through cameras automatically in Single view">
+          Cycle cameras
+          <select id="dashSingleAutoScrollInterval" aria-label="Single view camera cycle interval">
+            <option value="0">Off</option>
+            <option value="10">10s</option>
+            <option value="30">30s</option>
+            <option value="60">60s</option>
+            <option value="custom">Custom</option>
+          </select>
+          <span class="single-auto-custom-wrap">
+            <input id="dashSingleAutoScrollCustom" type="number" min="5" max="600" step="5" value="45" aria-label="Custom single view auto-scroll seconds">
+            <span>s</span>
+          </span>
+        </label>
+        <button class="dash-small-btn" id="dashRefreshAll" title="Refresh visible dashboard feeds now (Shift+R)">↻ Refresh now</button>
         <label class="dashboard-refresh-control" title="Automatic refresh cadence for visible dashboard feeds">
-          Auto
-          <select id="dashRefreshInterval" aria-label="Dashboard auto refresh interval">
+          Feed refresh
+          <select id="dashRefreshInterval" aria-label="Dashboard feed refresh interval">
             <option value="15">15s</option>
             <option value="30" selected>30s</option>
             <option value="60">60s</option>
             <option value="120">2m</option>
           </select>
-          <span class="dashboard-refresh-note">staggered</span>
+          <span class="dashboard-refresh-note">auto</span>
         </label>
         <button class="dash-small-btn" id="dashAddCamera" title="Add a camera to this dashboard">+ Add camera</button>
         <button class="dash-small-btn dash-control-map" id="dashFitMap" title="Frame all dashboard cameras on the 2D map (0)">Map extent</button>
@@ -5582,6 +5647,8 @@ function createDefaultDashboardState() {
     mapWidth: 440,
     mapAsTile: false,
     lockLayout: false,
+    singleAutoScrollSec: 0,
+    singleAutoScrollCustomSec: 45,
     pageSize: DASHBOARD_PAGE_SIZE,
     mediaFit: 'contain'
   };
@@ -5642,6 +5709,10 @@ function hydrateDashboardState(raw = {}) {
   state.mapWidth = clampDashboardMapWidth(base.mapWidth ?? base.mapPanelWidth ?? base.sideMapWidth);
   state.mapAsTile = !!(base.mapAsTile || base.mapTileVisible);
   state.lockLayout = !!(base.lockLayout || base.mosaicLocked);
+  state.singleAutoScrollCustomSec = Math.max(5, Math.min(600, Math.round(Number(base.singleAutoScrollCustomSec || base.singleCarouselCustomSec || 45))));
+  const rawSingleAuto = Number(base.singleAutoScrollSec || base.singleCarouselSec || 0);
+  state.singleAutoScrollSec = Number.isFinite(rawSingleAuto) ? Math.max(0, Math.min(600, Math.round(rawSingleAuto))) : 0;
+  if (state.singleAutoScrollSec > 0 && state.singleAutoScrollSec < 5) state.singleAutoScrollSec = 5;
   state.pageSize = DASHBOARD_PAGE_SIZE;
   state.mediaFit = base.mediaFit === 'cover' ? 'cover' : 'contain';
 
@@ -5677,6 +5748,8 @@ function serializeDashboardState() {
     mapWidth: clampDashboardMapWidth(dashboardState.mapWidth),
     mapAsTile: !!dashboardState.mapAsTile,
     lockLayout: !!dashboardState.lockLayout,
+    singleAutoScrollSec: Number.isFinite(Number(dashboardState.singleAutoScrollSec)) ? Math.max(0, Math.min(600, Math.round(Number(dashboardState.singleAutoScrollSec)))) : 0,
+    singleAutoScrollCustomSec: Number.isFinite(Number(dashboardState.singleAutoScrollCustomSec)) ? Math.max(5, Math.min(600, Math.round(Number(dashboardState.singleAutoScrollCustomSec)))) : 45,
     pageSize: DASHBOARD_PAGE_SIZE,
     mediaFit: dashboardState.mediaFit === 'cover' ? 'cover' : 'contain'
   };
@@ -5693,6 +5766,8 @@ function serializeDashboardState() {
   state.mosaicLocked = state.lockLayout;
   state.mapPanelWidth = state.mapWidth;
   state.sideMapWidth = state.mapWidth;
+  state.singleCarouselSec = state.singleAutoScrollSec;
+  state.singleCarouselCustomSec = state.singleAutoScrollCustomSec;
   return state;
 }
 
@@ -5734,6 +5809,7 @@ let dashboardRefreshPaused = false;
 let dashboardRefreshIntervalSec = 30;
 let dashboardStaleAfterSec = 120;
 let dashboardStaleWatchTimer = null;
+let dashboardSingleAutoScrollTimer = null;
 let dashboardResizeActive = false;
 let dashboardMosaicDrag = null;
 let dashboardOrderDragId = null;
@@ -10005,6 +10081,7 @@ function setDashboardSelected(id) {
   else {
     renderDashboardMap();
     document.querySelectorAll('.dash-card').forEach(el => el.classList.toggle('selected', el.dataset.id === String(id)));
+    restartDashboardSingleAutoScroll();
   }
 }
 
@@ -10163,9 +10240,10 @@ function renderDashboard() {
   updateDashboardStatus();
   renderDashboardMap();
   updateDashboardMapPresentation();
+  restartDashboardSingleAutoScroll();
 }
 
-function navigateDashboardSingle(delta) {
+function navigateDashboardSingle(delta, options = {}) {
   const ids = dashboardState.order.map(String);
   if (!ids.length) return;
   const current = String(dashboardState.selectedCameraId || ids[0]);
@@ -10175,8 +10253,81 @@ function navigateDashboardSingle(delta) {
   const nextId = ids[idx];
   dashboardState.selectedCameraId = nextId;
   dashboardState.currentPage = dashboardPageIndexForId(nextId);
-  saveDashboardState();
+
+  // Auto-scroll is a transient playback/viewing action. It should not mark the
+  // dashboard dirty and should not trigger autosave on every camera advance.
+  if (!options.fromAutoScroll) saveDashboardState();
+
   renderDashboard();
+  if (!options.fromAutoScroll) restartDashboardSingleAutoScroll();
+}
+
+function dashboardSingleAutoScrollSeconds() {
+  const raw = Number(dashboardState.singleAutoScrollSec || 0);
+  if (!Number.isFinite(raw) || raw <= 0) return 0;
+  return Math.max(5, Math.min(600, Math.round(raw)));
+}
+
+function dashboardSingleAutoScrollActive() {
+  return activeView === 'dashboard'
+    && dashboardMode() === 'single'
+    && dashboardState.order.length > 1
+    && dashboardSingleAutoScrollSeconds() > 0;
+}
+
+function clearDashboardSingleAutoScrollTimer() {
+  if (dashboardSingleAutoScrollTimer) {
+    clearTimeout(dashboardSingleAutoScrollTimer);
+    dashboardSingleAutoScrollTimer = null;
+  }
+}
+
+function restartDashboardSingleAutoScroll() {
+  clearDashboardSingleAutoScrollTimer();
+  updateDashboardSingleAutoScrollUI();
+  if (!dashboardSingleAutoScrollActive()) return;
+  dashboardSingleAutoScrollTimer = setTimeout(() => {
+    dashboardSingleAutoScrollTimer = null;
+    if (!dashboardSingleAutoScrollActive()) return;
+    navigateDashboardSingle(1, { fromAutoScroll: true });
+    restartDashboardSingleAutoScroll();
+  }, dashboardSingleAutoScrollSeconds() * 1000);
+}
+
+function setDashboardSingleAutoScrollInterval(value) {
+  const customInput = document.getElementById('dashSingleAutoScrollCustom');
+  const parsed = value === 'custom'
+    ? Number(customInput?.value || dashboardState.singleAutoScrollCustomSec || 45)
+    : Number(value || 0);
+  const next = parsed > 0 ? Math.max(5, Math.min(600, Math.round(parsed))) : 0;
+  dashboardState.singleAutoScrollSec = next;
+  if (value === 'custom') dashboardState.singleAutoScrollCustomSec = next || 45;
+  saveDashboardState();
+  if (typeof markDashboardDirty === 'function') markDashboardDirty('single_auto_scroll');
+  restartDashboardSingleAutoScroll();
+  updateDashboardStatus();
+}
+
+function updateDashboardSingleAutoScrollUI() {
+  const wrap = document.getElementById('dashSingleAutoScrollWrap');
+  const select = document.getElementById('dashSingleAutoScrollInterval');
+  const custom = document.getElementById('dashSingleAutoScrollCustom');
+  if (!wrap || !select || !custom) return;
+  const sec = dashboardSingleAutoScrollSeconds();
+  const preset = ['0','10','30','60'].includes(String(sec)) ? String(sec) : (sec > 0 ? 'custom' : '0');
+  select.value = preset;
+  custom.value = String(Math.max(5, Math.min(600, Math.round(Number(dashboardState.singleAutoScrollCustomSec || sec || 45)))));
+  const canCycle = dashboardMode() === 'single' && dashboardState.order.length > 1;
+  wrap.classList.toggle('custom', preset === 'custom');
+  wrap.classList.toggle('active', canCycle && sec > 0);
+  wrap.classList.toggle('disabled', !canCycle);
+  select.disabled = !canCycle;
+  custom.disabled = !canCycle || preset !== 'custom';
+  wrap.title = !canCycle
+    ? 'Add at least 2 cameras to use camera cycling'
+    : (sec > 0
+      ? `Cycle cameras every ${sec} seconds in Single view`
+      : 'Cycle through cameras automatically in Single view');
 }
 
 function dashboardTileMenuHtml(cam, manualSpan) {
@@ -10874,7 +11025,12 @@ function updateDashboardStatus() {
   if (mode === 'grid') el.textContent = `${total} cameras · page ${page}/${pageCount} · ${visible} visible · ${cadence} · ${refreshed}`;
   else if (mode === 'mosaic') el.textContent = `${total} cameras · snapped mosaic${dashboardState.lockLayout ? ' · locked' : ''} · ${cadence} · ${refreshed}`;
   else if (mode === 'focus') el.textContent = `${total} cameras · focus preview · ${cadence} · ${refreshed}`;
-  else el.textContent = `${total} cameras · single feed · ${cadence} · ${refreshed}`;
+  else {
+    const auto = dashboardSingleAutoScrollActive()
+      ? `auto-scroll ${dashboardSingleAutoScrollSeconds()}s`
+      : 'auto-scroll off';
+    el.textContent = `${total} cameras · single feed · ${auto} · ${cadence} · ${refreshed}`;
+  }
 }
 
 function refreshDashboardAll() {
@@ -11715,6 +11871,10 @@ function updateDashboardToolbarVisibility() {
 
   // Mosaic: freeform drag/resize, Fit cameras, optional map tile. No density.
   setHidden('.dash-control-mosaic', mode !== 'mosaic');
+
+  // Single view gets the carousel/auto-scroll controls only.
+  setHidden('.dash-control-single', mode !== 'single');
+  updateDashboardSingleAutoScrollUI();
 
   // Side-map controls are grid-only. Mosaic uses the optional draggable map tile;
   // Focus and Single dedicate the whole dashboard to camera feeds.
@@ -13787,6 +13947,20 @@ window.startBillingPortal = startBillingPortal;
     loadDashboardRefreshSettings();
     dashRefreshInterval.onchange = () => updateDashboardRefreshInterval(dashRefreshInterval.value);
   }
+  const dashSingleAutoScrollInterval = document.getElementById('dashSingleAutoScrollInterval');
+  const dashSingleAutoScrollCustom = document.getElementById('dashSingleAutoScrollCustom');
+  if (dashSingleAutoScrollInterval) {
+    dashSingleAutoScrollInterval.onchange = () => setDashboardSingleAutoScrollInterval(dashSingleAutoScrollInterval.value);
+  }
+  if (dashSingleAutoScrollCustom) {
+    dashSingleAutoScrollCustom.onchange = () => {
+      dashboardState.singleAutoScrollCustomSec = Math.max(5, Math.min(600, Math.round(Number(dashSingleAutoScrollCustom.value) || 45)));
+      dashSingleAutoScrollCustom.value = String(dashboardState.singleAutoScrollCustomSec);
+      if (dashSingleAutoScrollInterval?.value === 'custom') setDashboardSingleAutoScrollInterval('custom');
+      else saveDashboardState();
+    };
+  }
+  updateDashboardSingleAutoScrollUI();
   startDashboardStaleWatcher();
   document.getElementById('dashAddCamera').onclick = openDashboardAddPanel;
   document.getElementById('dashFitMap').onclick = fitDashboardMap;
@@ -14016,6 +14190,7 @@ body.dashboard-active #dashboardBar {
 body.dashboard-active #dashboardBar .dash-seg,
 body.dashboard-active #dashboardBar .dash-page-controls,
 body.dashboard-active #dashboardBar .dashboard-refresh-control,
+body.dashboard-active #dashboardBar .dashboard-single-autoscroll,
 body.dashboard-active #dashboardBar #dashboardStatus,
 body.dashboard-active #dashboardBar #dashboardAutosaveStatus {
   flex: 0 0 auto !important;
