@@ -2460,11 +2460,13 @@ body.dashboard-map-drawer #dashboardFeedPane { min-width: 520px; }
   margin-top: 10px;
   border-top: 1px solid var(--c-border);
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
 .side-action-btn {
-  width: 100%;
+  flex: 1 1 calc(50% - 3px);
+  min-width: 0;
   height: 32px;
   background: var(--c-accent);
   color: #fff;
@@ -2486,6 +2488,35 @@ body.dashboard-map-drawer #dashboardFeedPane { min-width: 520px; }
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+.side-action-btn.pro-locked {
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
+  border: 1px solid rgba(37,99,235,0.25);
+}
+
+#viewSelectedIn3D {
+  flex-basis: 100%;
+}
+
+.side-action-btn.view-3d-action {
+  flex: 1 1 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 2px;
+  background: var(--c-accent);
+  color: #fff;
+  border: 1px solid var(--c-accent);
+}
+.side-action-btn.view-3d-action::before { content: '◈'; font-size: 11px; opacity: 0.9; }
+.side-action-btn.view-3d-action.pro-locked {
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
+  border: 1px solid rgba(37,99,235,0.25);
+}
+.side-action-btn.view-3d-action[style*="display: none"] { display: none !important; }
 
 
 /* ─── AREA SELECTION / POLYGON DASHBOARD TOOL ─── */
@@ -3801,6 +3832,7 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
       <div class="side-actions">
         <button class="side-action-btn" id="addSelectedToDashboard">+ Add to dashboard</button>
         <button class="side-action-btn secondary" id="openDashboardFromSide">Open dashboard</button>
+        <button class="side-action-btn view-3d-action" id="viewSelectedIn3D" type="button" title="Switch to photorealistic 3D and inspect this camera">View in 3D</button>
       </div>
     </div>
 
@@ -4988,6 +5020,82 @@ function notifyApp(title, message = '', type = 'ok') {
   if (typeof showVigilToast === 'function') showVigilToast(title, message, type);
   else showAppMessage({ title, message, type });
 }
+
+
+
+function ensureVisibleViewIn3DButton() {
+  const actions = document.querySelector('#camMeta .side-actions');
+  if (!actions) return null;
+  let btn = document.getElementById('viewSelectedIn3D');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.className = 'side-action-btn view-3d-action';
+    btn.id = 'viewSelectedIn3D';
+    btn.type = 'button';
+    btn.title = 'Switch to photorealistic 3D and inspect this camera';
+    btn.textContent = 'View in 3D';
+    actions.appendChild(btn);
+  }
+  btn.onclick = viewSelectedCameraIn3DTiles;
+  return btn;
+}
+
+function updateViewSelectedIn3DButton() {
+  const btn = ensureVisibleViewIn3DButton();
+  if (!btn) return;
+  const hasCamera = !!selectedCamera;
+  const shouldShow = hasCamera && !google3DEnabled;
+  btn.style.display = shouldShow ? 'inline-flex' : 'none';
+  if (!shouldShow) return;
+
+  const canUse3D = !!getPlanLimits().canUse3D;
+  btn.disabled = false;
+  btn.classList.toggle('pro-locked', !canUse3D);
+  btn.classList.toggle('secondary', canUse3D);
+  btn.textContent = canUse3D ? 'View in 3D' : 'View in 3D · Pro';
+  btn.title = canUse3D
+    ? 'Switch to photorealistic 3D and zoom to this camera field of view'
+    : '3D camera view is available on Pro';
+}
+
+async function viewSelectedCameraIn3DTiles() {
+  const cam = selectedCamera;
+  if (!cam) return;
+
+  if (!getPlanLimits().canUse3D) {
+    showUpgradePrompt('View cameras in photorealistic 3D, inspect field-of-view direction, and zoom directly to the camera’s 3D position.');
+    return;
+  }
+
+  const btn = document.getElementById('viewSelectedIn3D');
+  const oldText = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Loading 3D…';
+  }
+
+  try {
+    const switched = await setGlobeRenderMode('3d', 'selected-camera-view-3d');
+    if (!switched) return;
+
+    // Reuse the existing selected-camera path. This keeps the precise Cesium
+    // sample/frustum resolver separate from the approximate Supabase altitude
+    // used for normal unselected dots.
+    if (selectedCamera && String(selectedCamera.id) === String(cam.id)) {
+      await selectCamera(cam);
+    }
+  } catch (err) {
+    console.error('View selected camera in 3D failed:', err);
+    notifyApp('3D view failed', err && err.message ? err.message : 'Could not switch this camera into 3D view.', 'warn');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = oldText || 'View in 3D';
+    }
+    updateViewSelectedIn3DButton();
+  }
+}
+window.viewSelectedCameraIn3DTiles = viewSelectedCameraIn3DTiles;
 function updateAuthUI() {
   applyInitialPro3DModeIfNeeded();
   const status = document.getElementById('authStatus');
@@ -6825,6 +6933,7 @@ function updateGlobeModeButtons() {
       ? (google3DLoading ? 'Loading Google Photorealistic 3D Tiles…' : 'Google Photorealistic 3D Tiles active')
       : 'Switch to Google Photorealistic 3D Tiles — Pro only';
   }
+  updateViewSelectedIn3DButton();
 }
 window.updateGlobeModeButtons = updateGlobeModeButtons;
 
@@ -7365,6 +7474,8 @@ async function selectCamera(cam) {
   }
 
   populateSidePanel(cam);
+  ensureVisibleViewIn3DButton();
+  updateViewSelectedIn3DButton();
   document.getElementById('sidePanel').classList.add('open');
   document.getElementById('frustumInfo').style.left = '312px';
 }
@@ -7376,6 +7487,7 @@ function deselect() {
   }
   selectedCamera = null;
   selectedCameraResolvedSurfaceHeight = null;
+  updateViewSelectedIn3DButton();
   removeSelectedCameraMarker();
   removeFrustum();
   document.getElementById('sidePanel').classList.remove('open');
@@ -12504,6 +12616,11 @@ window.startBillingPortal = startBillingPortal;
     applyGoogleKeyButton.onclick = function () {
       setGlobeRenderMode('3d', 'settings-panel');
     };
+  }
+
+  const viewSelectedIn3DButton = ensureVisibleViewIn3DButton();
+  if (viewSelectedIn3DButton) {
+    viewSelectedIn3DButton.onclick = viewSelectedCameraIn3DTiles;
   }
 
   updateGlobeModeButtons();
