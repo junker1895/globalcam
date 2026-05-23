@@ -698,6 +698,148 @@ body {
 }
 body.dashboard-active #dashboardCreateWrap { display: none !important; }
 
+/* ─── MAP CONTEXT MENU ─── */
+.map-context-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.map-context-trigger {
+  background: var(--c-surface);
+  border-color: var(--c-border);
+  color: var(--c-text2);
+}
+.map-context-trigger:hover,
+.map-context-wrap.open .map-context-trigger {
+  background: var(--c-accent-bg);
+  border-color: rgba(37,99,235,0.25);
+  color: var(--c-accent);
+}
+.map-context-chevron {
+  margin-left: 1px;
+  color: currentColor;
+  transition: transform 140ms ease;
+}
+.map-context-wrap.open .map-context-chevron { transform: rotate(180deg); }
+.map-context-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 760;
+  width: 300px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  box-shadow: var(--c-shadow-md);
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-4px) scale(0.985);
+  transform-origin: top right;
+  pointer-events: none;
+  transition: opacity 130ms ease, transform 130ms ease;
+}
+.map-context-wrap.open .map-context-menu {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.map-context-head {
+  padding: 12px 13px 10px;
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface2);
+}
+.map-context-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--c-text);
+  letter-spacing: -0.01em;
+}
+.map-context-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--c-text3);
+}
+.map-context-item {
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text2);
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  font-family: var(--font);
+  cursor: pointer;
+}
+.map-context-item:last-child { border-bottom: 0; }
+.map-context-item:hover {
+  background: var(--c-accent-bg);
+  color: var(--c-text);
+}
+.map-context-check {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--c-border2);
+  background: var(--c-surface2);
+  color: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 900;
+}
+.map-context-item.active .map-context-check {
+  border-color: rgba(37,99,235,0.28);
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
+}
+.map-context-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.map-context-text strong {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--c-text);
+  line-height: 1.2;
+}
+.map-context-text small {
+  font-size: 11px;
+  color: var(--c-text3);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.map-context-mode-pill {
+  min-width: 42px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--c-surface2);
+  border: 1px solid var(--c-border);
+  color: var(--c-text3);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+  text-transform: uppercase;
+}
+.map-context-item.active .map-context-mode-pill {
+  color: var(--c-accent);
+  border-color: rgba(37,99,235,0.22);
+}
+body.dashboard-active #mapContextWrap { display: none !important; }
+
 /* ─── SETTINGS PANEL ─── */
 #settingsPanel {
   position: fixed;
@@ -3470,6 +3612,32 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
   </button>
 
   <button class="tbtn" id="btnLegend">Legend</button>
+
+  <div class="map-context-wrap" id="mapContextWrap">
+    <button class="tbtn map-context-trigger" id="btnMapContextMenu" type="button" aria-haspopup="true" aria-expanded="false" title="Toggle place names on the globe">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 18l-6 3V6l6-3 6 3 6-3v15l-6 3-6-3z"/>
+        <path d="M9 3v15M15 6v15"/>
+      </svg>
+      Map context
+      <svg class="map-context-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <path d="M6 9l6 6 6-6"/>
+      </svg>
+    </button>
+
+    <div class="map-context-menu" id="mapContextMenu" role="menu" aria-label="Map context options">
+      <div class="map-context-head">
+        <div class="map-context-title">Map context</div>
+        <div class="map-context-sub">Free built-in labels for the globe</div>
+      </div>
+
+      <button class="map-context-item active" id="btnTogglePlaceNames" type="button" role="menuitemcheckbox" aria-checked="true">
+        <span class="map-context-check">✓</span>
+        <span class="map-context-text"><strong>Place names</strong><small>Floating labels on the 2D and 3D globe</small></span>
+        <span class="map-context-mode-pill">Globe</span>
+      </button>
+    </div>
+  </div>
 
   <div id="barRight">
     <div class="dashboard-create-wrap" id="dashboardCreateWrap">
@@ -6922,6 +7090,244 @@ function refreshAllCameraEntityStylesForCurrentMode() {
   } catch (_) {}
 }
 
+
+
+// ==========================================================
+//  MAP CONTEXT LAYERS — free built-in Cesium place-name labels
+//  Stage 1 deliberately uses local/static data only: no paid provider,
+//  no OSM/CARTO raster overlay, and no external runtime tile usage.
+// ==========================================================
+const mapContextState = {
+  placeNames: true,
+  placeLabelsDataSource: null,
+  placeLabelUpdateTimer: null,
+};
+
+const MAP_CONTEXT_STARTER_PLACES = [
+  { name: 'Australia', lat: -25.2744, lng: 133.7751, level: 'country' },
+  { name: 'United States', lat: 39.8283, lng: -98.5795, level: 'country' },
+  { name: 'Canada', lat: 56.1304, lng: -106.3468, level: 'country' },
+  { name: 'Brazil', lat: -14.2350, lng: -51.9253, level: 'country' },
+  { name: 'United Kingdom', lat: 54.7, lng: -3.2, level: 'country' },
+  { name: 'France', lat: 46.2276, lng: 2.2137, level: 'country' },
+  { name: 'Germany', lat: 51.1657, lng: 10.4515, level: 'country' },
+  { name: 'India', lat: 20.5937, lng: 78.9629, level: 'country' },
+  { name: 'China', lat: 35.8617, lng: 104.1954, level: 'country' },
+  { name: 'Japan', lat: 36.2048, lng: 138.2529, level: 'country' },
+  { name: 'Indonesia', lat: -2.5, lng: 118.0, level: 'country' },
+  { name: 'South Africa', lat: -30.5595, lng: 22.9375, level: 'country' },
+  { name: 'New Zealand', lat: -40.9006, lng: 174.8860, level: 'country' },
+  { name: 'Mexico', lat: 23.6345, lng: -102.5528, level: 'country' },
+  { name: 'Argentina', lat: -38.4161, lng: -63.6167, level: 'country' },
+  { name: 'Russia', lat: 61.5240, lng: 105.3188, level: 'country' },
+
+  { name: 'Brisbane', lat: -27.4698, lng: 153.0251, level: 'major' },
+  { name: 'Sydney', lat: -33.8688, lng: 151.2093, level: 'major' },
+  { name: 'Melbourne', lat: -37.8136, lng: 144.9631, level: 'major' },
+  { name: 'Perth', lat: -31.9523, lng: 115.8613, level: 'major' },
+  { name: 'Adelaide', lat: -34.9285, lng: 138.6007, level: 'major' },
+  { name: 'Canberra', lat: -35.2809, lng: 149.1300, level: 'major' },
+  { name: 'Darwin', lat: -12.4634, lng: 130.8456, level: 'major' },
+  { name: 'Hobart', lat: -42.8821, lng: 147.3272, level: 'major' },
+  { name: 'Auckland', lat: -36.8509, lng: 174.7645, level: 'major' },
+  { name: 'Wellington', lat: -41.2865, lng: 174.7762, level: 'major' },
+
+  { name: 'London', lat: 51.5074, lng: -0.1278, level: 'major' },
+  { name: 'Paris', lat: 48.8566, lng: 2.3522, level: 'major' },
+  { name: 'Berlin', lat: 52.5200, lng: 13.4050, level: 'major' },
+  { name: 'Madrid', lat: 40.4168, lng: -3.7038, level: 'major' },
+  { name: 'Rome', lat: 41.9028, lng: 12.4964, level: 'major' },
+  { name: 'Amsterdam', lat: 52.3676, lng: 4.9041, level: 'major' },
+  { name: 'Dublin', lat: 53.3498, lng: -6.2603, level: 'major' },
+  { name: 'Stockholm', lat: 59.3293, lng: 18.0686, level: 'major' },
+  { name: 'Oslo', lat: 59.9139, lng: 10.7522, level: 'major' },
+  { name: 'Copenhagen', lat: 55.6761, lng: 12.5683, level: 'major' },
+  { name: 'Athens', lat: 37.9838, lng: 23.7275, level: 'major' },
+
+  { name: 'New York', lat: 40.7128, lng: -74.0060, level: 'major' },
+  { name: 'Los Angeles', lat: 34.0522, lng: -118.2437, level: 'major' },
+  { name: 'Chicago', lat: 41.8781, lng: -87.6298, level: 'major' },
+  { name: 'Houston', lat: 29.7604, lng: -95.3698, level: 'major' },
+  { name: 'Miami', lat: 25.7617, lng: -80.1918, level: 'major' },
+  { name: 'Seattle', lat: 47.6062, lng: -122.3321, level: 'major' },
+  { name: 'San Francisco', lat: 37.7749, lng: -122.4194, level: 'major' },
+  { name: 'Denver', lat: 39.7392, lng: -104.9903, level: 'major' },
+  { name: 'Toronto', lat: 43.6532, lng: -79.3832, level: 'major' },
+  { name: 'Vancouver', lat: 49.2827, lng: -123.1207, level: 'major' },
+  { name: 'Montreal', lat: 45.5017, lng: -73.5673, level: 'major' },
+  { name: 'Mexico City', lat: 19.4326, lng: -99.1332, level: 'major' },
+
+  { name: 'São Paulo', lat: -23.5558, lng: -46.6396, level: 'major' },
+  { name: 'Rio de Janeiro', lat: -22.9068, lng: -43.1729, level: 'major' },
+  { name: 'Buenos Aires', lat: -34.6037, lng: -58.3816, level: 'major' },
+  { name: 'Santiago', lat: -33.4489, lng: -70.6693, level: 'major' },
+  { name: 'Lima', lat: -12.0464, lng: -77.0428, level: 'major' },
+  { name: 'Bogotá', lat: 4.7110, lng: -74.0721, level: 'major' },
+
+  { name: 'Tokyo', lat: 35.6762, lng: 139.6503, level: 'major' },
+  { name: 'Seoul', lat: 37.5665, lng: 126.9780, level: 'major' },
+  { name: 'Beijing', lat: 39.9042, lng: 116.4074, level: 'major' },
+  { name: 'Shanghai', lat: 31.2304, lng: 121.4737, level: 'major' },
+  { name: 'Hong Kong', lat: 22.3193, lng: 114.1694, level: 'major' },
+  { name: 'Singapore', lat: 1.3521, lng: 103.8198, level: 'major' },
+  { name: 'Bangkok', lat: 13.7563, lng: 100.5018, level: 'major' },
+  { name: 'Jakarta', lat: -6.2088, lng: 106.8456, level: 'major' },
+  { name: 'Manila', lat: 14.5995, lng: 120.9842, level: 'major' },
+  { name: 'Kuala Lumpur', lat: 3.1390, lng: 101.6869, level: 'major' },
+  { name: 'Mumbai', lat: 19.0760, lng: 72.8777, level: 'major' },
+  { name: 'Delhi', lat: 28.7041, lng: 77.1025, level: 'major' },
+  { name: 'Dubai', lat: 25.2048, lng: 55.2708, level: 'major' },
+
+  { name: 'Cairo', lat: 30.0444, lng: 31.2357, level: 'major' },
+  { name: 'Nairobi', lat: -1.2921, lng: 36.8219, level: 'major' },
+  { name: 'Cape Town', lat: -33.9249, lng: 18.4241, level: 'major' },
+  { name: 'Johannesburg', lat: -26.2041, lng: 28.0473, level: 'major' },
+  { name: 'Lagos', lat: 6.5244, lng: 3.3792, level: 'major' },
+  { name: 'Casablanca', lat: 33.5731, lng: -7.5898, level: 'major' },
+  { name: 'Istanbul', lat: 41.0082, lng: 28.9784, level: 'major' },
+];
+
+function clearPlaceLabels() {
+  try {
+    if (mapContextState.placeLabelsDataSource && viewer && viewer.dataSources) {
+      mapContextState.placeLabelsDataSource.entities.removeAll();
+    }
+  } catch (_) {}
+}
+
+async function ensurePlaceLabelDataSource() {
+  if (!viewer || !viewer.dataSources || !Cesium) return null;
+  if (mapContextState.placeLabelsDataSource) return mapContextState.placeLabelsDataSource;
+  const ds = new Cesium.CustomDataSource('viewport-free-place-labels');
+  mapContextState.placeLabelsDataSource = ds;
+  try { await viewer.dataSources.add(ds); } catch (_) {}
+  return ds;
+}
+
+function placeLabelVisibleForHeight(place, cameraHeight) {
+  const h = Number(cameraHeight) || 0;
+  if (place.level === 'country') return h > 1600000;
+  if (h > 9000000) return ['London','New York','Tokyo','Sydney','Paris','Beijing','Singapore','Dubai','São Paulo'].includes(place.name);
+  if (h > 2800000) return true;
+  return true;
+}
+
+function placeLabelMaxDistance(place) {
+  return place.level === 'country' ? 22000000 : 7200000;
+}
+
+function placeLabelMinDistance(place) {
+  return place.level === 'country' ? 1200000 : 5000;
+}
+
+async function updatePlaceLabels() {
+  if (!viewer || !Cesium) return;
+  clearTimeout(mapContextState.placeLabelUpdateTimer);
+  mapContextState.placeLabelUpdateTimer = null;
+
+  if (!mapContextState.placeNames || activeView === 'dashboard') {
+    clearPlaceLabels();
+    return;
+  }
+
+  const ds = await ensurePlaceLabelDataSource();
+  if (!ds) return;
+  ds.entities.removeAll();
+
+  const cameraHeightNow = viewer && viewer.camera && viewer.camera.positionCartographic
+    ? Number(viewer.camera.positionCartographic.height)
+    : 0;
+
+  const maxLabels = cameraHeightNow > 9000000 ? 12 : cameraHeightNow > 2800000 ? 42 : 72;
+  const places = MAP_CONTEXT_STARTER_PLACES
+    .filter(place => placeLabelVisibleForHeight(place, cameraHeightNow))
+    .slice(0, maxLabels);
+
+  const cs = getComputedStyle(document.documentElement);
+  const fill = (cs.getPropertyValue('--c-surface').trim() || '#ffffff');
+  const outline = (cs.getPropertyValue('--c-text').trim() || '#0f172a');
+
+  places.forEach(place => {
+    const isCountry = place.level === 'country';
+    const labelHeight = isCountry ? 260000 : (google3DEnabled ? 450 : 8000);
+    const fontSize = isCountry ? 12 : 13;
+    ds.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(place.lng, place.lat, labelHeight),
+      label: {
+        text: place.name,
+        font: `${isCountry ? 800 : 700} ${fontSize}px Inter, system-ui, sans-serif`,
+        fillColor: Cesium.Color.fromCssColorString(fill).withAlpha(isCountry ? 0.72 : 0.92),
+        outlineColor: Cesium.Color.fromCssColorString(outline).withAlpha(0.82),
+        outlineWidth: isCountry ? 2 : 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.CENTER,
+        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        pixelOffset: new Cesium.Cartesian2(0, 0),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
+          placeLabelMinDistance(place),
+          placeLabelMaxDistance(place)
+        ),
+        scaleByDistance: new Cesium.NearFarScalar(5000, 1.08, placeLabelMaxDistance(place), isCountry ? 0.72 : 0.56),
+        translucencyByDistance: new Cesium.NearFarScalar(placeLabelMaxDistance(place) * 0.55, 1.0, placeLabelMaxDistance(place), 0.12),
+      }
+    });
+  });
+  try { viewer.scene.requestRender && viewer.scene.requestRender(); } catch (_) {}
+}
+
+function schedulePlaceLabelUpdate(delay = 180) {
+  clearTimeout(mapContextState.placeLabelUpdateTimer);
+  mapContextState.placeLabelUpdateTimer = setTimeout(() => updatePlaceLabels(), delay);
+}
+
+function updateMapContextButtonState() {
+  const placeBtn = document.getElementById('btnTogglePlaceNames');
+  if (placeBtn) {
+    placeBtn.classList.toggle('active', !!mapContextState.placeNames);
+    placeBtn.setAttribute('aria-checked', mapContextState.placeNames ? 'true' : 'false');
+  }
+}
+
+function updateMapContextLayers() {
+  if (!viewer) return;
+  updateMapContextButtonState();
+  if (activeView === 'dashboard') {
+    clearPlaceLabels();
+    return;
+  }
+  schedulePlaceLabelUpdate(120);
+}
+window.updateMapContextLayers = updateMapContextLayers;
+
+function setupMapContextMenu() {
+  const wrap = document.getElementById('mapContextWrap');
+  const trigger = document.getElementById('btnMapContextMenu');
+  const placeBtn = document.getElementById('btnTogglePlaceNames');
+  if (!wrap || !trigger) return;
+
+  const close = () => {
+    wrap.classList.remove('open');
+    trigger.setAttribute('aria-expanded', 'false');
+  };
+  const toggle = () => {
+    const open = !wrap.classList.contains('open');
+    document.querySelectorAll('.dashboard-create-wrap.open').forEach(el => el.classList.remove('open'));
+    wrap.classList.toggle('open', open);
+    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+
+  trigger.addEventListener('click', ev => { ev.stopPropagation(); toggle(); });
+  if (placeBtn) placeBtn.addEventListener('click', ev => {
+    ev.stopPropagation();
+    mapContextState.placeNames = !mapContextState.placeNames;
+    updateMapContextLayers();
+  });
+  document.addEventListener('click', ev => { if (!wrap.contains(ev.target)) close(); });
+  document.addEventListener('keydown', ev => { if (ev.key === 'Escape') close(); });
+  updateMapContextButtonState();
+}
+
 function updateGlobeModeButtons() {
   const enableBtn = document.getElementById('applyGoogleKey');
   const btn2D = document.getElementById('btn2DMode');
@@ -7022,6 +7428,7 @@ async function switchTo2DGlobe(reason = 'manual', token = ++google3DModeRequestI
   }
 
   updateGlobeModeButtons();
+  try { updateMapContextLayers(); } catch (_) {}
   try { viewer.scene.requestRender && viewer.scene.requestRender(); } catch (_) {}
   try { requestVisibleCamerasRefresh({ reason: reason || '2d-mode', force: true }); } catch (_) {}
   return token === google3DModeRequestId;
@@ -8310,6 +8717,8 @@ async function initializeMap() {
   document.getElementById('uploadOverlay').style.display = 'none';
   document.body.classList.add('app-ready');
   document.getElementById('topBar').style.display = 'flex';
+  setupMapContextMenu();
+  try { updateMapContextLayers(); } catch (_) {}
   document.body.classList.add('app-ready');
   document.getElementById('statusBar').style.display = 'flex';
   document.getElementById('progressFill').style.width = '90%';
@@ -14722,6 +15131,7 @@ function visibleViewportSpanDegrees() {
       document.getElementById('cameraCount').textContent = 'Indexed';
     }
     try { dataSource.clustering.enabled = false; } catch (_) {}
+    try { updateMapContextLayers(); } catch (_) {}
     if (viewer) viewer.scene.requestRender();
   }
 
