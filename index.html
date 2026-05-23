@@ -3445,7 +3445,7 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
     Viewport<span class="logo-dot">.</span>
   </div>
 
-  <div id="cameraCount">0 cameras</div>
+  <div id="cameraCount">Indexed</div>
   <div id="planBadge" title="Current feature tier">Guest</div>
 
   <button class="tbtn active" id="btnGlobeView">Globe</button>
@@ -7332,7 +7332,7 @@ async function createCameraEntities(cams) {
 
   viewer.dataSources.add(dataSource);
   document.getElementById('statusCameras').textContent =
-    `${total.toLocaleString()} cameras`;
+    'Camera layer loaded';
 }
 
 // ==========================================================
@@ -7979,7 +7979,7 @@ function clearSearchResults() {
   // Hide results panel
   document.getElementById('searchResults').style.display = 'none';
   document.getElementById('statusCameras').textContent =
-    cameras.length ? `${cameras.length.toLocaleString()} cameras` : 'Ready';
+    cameras.length ? 'Camera layer loaded' : 'Ready';
 }
 
 async function runLocationSearch(query) {
@@ -8294,7 +8294,7 @@ function loadFile(file) {
         cameras.forEach(c => { cameraMap.set(c.id, c); cameraMap.set(String(c.id), c); });
         fill.style.width = '80%';
         const altitudeCount = cameras.filter(c => cameraApproxGroundHeight(c) !== null).length;
-        txt.textContent  = `${cameras.length.toLocaleString()} cameras — ${altitudeCount.toLocaleString()} with altitude — building map…`;
+        txt.textContent  = 'Camera file loaded — building map…';
         setTimeout(initializeMap, 80);
       } catch (err) {
         txt.textContent = 'Error: ' + err.message;
@@ -8313,7 +8313,7 @@ async function initializeMap() {
   document.body.classList.add('app-ready');
   document.getElementById('statusBar').style.display = 'flex';
   document.getElementById('progressFill').style.width = '90%';
-  document.getElementById('cameraCount').textContent   = `${cameras.length.toLocaleString()} cameras`;
+  document.getElementById('cameraCount').textContent   = 'Indexed';
   updatePlanUI();
   loadDashboardState();
   updateDashboardBadge();
@@ -14713,13 +14713,13 @@ function visibleViewportSpanDegrees() {
     if (mode === 'clusters') {
       items = filterClustersForDisplay(items);
       items.forEach(addServerClusterEntity);
-      document.getElementById('statusCameras').textContent = `${items.length.toLocaleString()} clusters · ${CAMERA_TOTAL_ESTIMATE.toLocaleString()} cameras`;
-      document.getElementById('cameraCount').textContent = `${CAMERA_TOTAL_ESTIMATE.toLocaleString()} indexed`;
+      document.getElementById('statusCameras').textContent = 'Camera clusters loaded';
+      document.getElementById('cameraCount').textContent = 'Indexed';
     } else {
       cameras = items.map(mergeCamera).filter(Boolean);
       items.forEach(addCameraEntity);
-      document.getElementById('statusCameras').textContent = `${items.length.toLocaleString()} visible cameras · API`;
-      document.getElementById('cameraCount').textContent = `${CAMERA_TOTAL_ESTIMATE.toLocaleString()} indexed`;
+      document.getElementById('statusCameras').textContent = 'Visible cameras loaded';
+      document.getElementById('cameraCount').textContent = 'Indexed';
     }
     try { dataSource.clustering.enabled = false; } catch (_) {}
     if (viewer) viewer.scene.requestRender();
@@ -14806,7 +14806,7 @@ function visibleViewportSpanDegrees() {
     const status = document.getElementById('statusCameras');
 
     if (desiredMode !== 'clusters') setClusterLoadingStatus(false);
-    if (status) status.textContent = desiredMode === 'clusters' ? '' : 'Loading visible cameras…';
+    if (status) status.textContent = desiredMode === 'clusters' ? 'Loading camera clusters…' : 'Loading visible cameras…';
     try {
       if (desiredMode === 'clusters') await fetchClustersForView(seq);
       else await fetchCamerasForView(seq);
@@ -15257,7 +15257,7 @@ function visibleViewportSpanDegrees() {
     if (dashAddBtn) dashAddBtn.onclick = openDashboardAddPanel;
     const dashSearchBtn = document.getElementById('dashboardSearchRun');
     if (dashSearchBtn) dashSearchBtn.onclick = runDashboardSearch;
-    document.getElementById('cameraCount').textContent = `${CAMERA_TOTAL_ESTIMATE.toLocaleString()} indexed`;
+    document.getElementById('cameraCount').textContent = 'Indexed';
     document.getElementById('statusCameras').textContent = 'Loading camera layer…';
     hydrateSavedDashboardCameras();
     setTimeout(() => runViewportRecoverySequence('startup'), 80);
