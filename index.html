@@ -1658,7 +1658,8 @@ body.dashboard-active #clusterLoadingStatus {
 .dashboard-map-available-note {
   position: absolute;
   right: 12px;
-  top: 56px;
+  top: auto;
+  bottom: 12px;
   z-index: 405;
   padding: 6px 9px;
   border-radius: 999px;
@@ -2351,6 +2352,66 @@ body.dashboard-map-drawer #dashboardFeedPane { min-width: 520px; }
 .dash-map-tile-map { width: 100%; height: 100%; min-height: 0; cursor: grab; }
 .dash-map-tile-map:active { cursor: grabbing; }
 .dash-map-tile .leaflet-control-attribution { display: none; }
+
+/* Dashboard map display modes: side/off/full.
+   Full map is a presentation state only; it does not mutate camera layout,
+   mosaic positions, pagination, or saved camera order. */
+.dashboard-map-mode-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-surface2);
+  flex-shrink: 0;
+}
+.dashboard-map-mode-control button {
+  height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--c-text2);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.dashboard-map-mode-control button:hover {
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+.dashboard-map-mode-control button.active {
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
+  box-shadow: inset 0 0 0 1px rgba(37,99,235,0.20);
+}
+body.dashboard-map-full #dashboardShell {
+  position: relative;
+}
+body.dashboard-map-full #dashboardFeedPane {
+  display: none !important;
+}
+body.dashboard-map-full #dashboardMapResize {
+  display: none !important;
+}
+body.dashboard-map-full #dashboardMapPane {
+  display: flex !important;
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  flex-basis: auto !important;
+  border-left: none !important;
+}
+body.dashboard-map-full #dashboardMapPane.collapsed {
+  display: flex !important;
+}
+body.dashboard-map-full #dashboardMap {
+  min-height: 0;
+}
+
 /* Mosaic resize handles must sit above media/maps/images so they remain usable. */
 .mode-mosaic .dash-card .dash-resize { z-index: 8; display: block; pointer-events: auto; }
 .mode-mosaic .dash-card .dash-actions { z-index: 9; }
@@ -3936,6 +3997,11 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
       <div id="dashboardMapHeader">
         <span>2D situation map</span>
         <span class="spacer"></span>
+        <div class="dashboard-map-mode-control" id="dashboardMapModeControl" aria-label="Dashboard map display mode">
+          <button type="button" data-map-display="side" title="Show map beside camera tiles">Side</button>
+          <button type="button" data-map-display="full" title="Use the whole dashboard for the map">Full</button>
+          <button type="button" data-map-display="off" title="Hide the dashboard map">Off</button>
+        </div>
         <button class="dash-small-btn" id="dashMapDrawArea">Draw area</button>
         <button class="dash-small-btn" id="dashMapUploadArea">Upload area</button>
         <button class="dash-small-btn" id="dashMapUploadLayer">Upload layer</button>
@@ -5512,6 +5578,7 @@ function createDefaultDashboardState() {
     gridSpans: {},
     mosaicLayout: {},
     mapVisible: true,
+    mapDisplayMode: 'side',
     mapWidth: 440,
     mapAsTile: false,
     lockLayout: false,
@@ -5569,6 +5636,9 @@ function hydrateDashboardState(raw = {}) {
   state.gridSpans = base.gridSpans && typeof base.gridSpans === 'object' ? { ...base.gridSpans } : {};
   state.mosaicLayout = base.mosaicLayout && typeof base.mosaicLayout === 'object' ? { ...base.mosaicLayout } : (base.mosaic && typeof base.mosaic === 'object' ? { ...base.mosaic } : {});
   state.mapVisible = base.mapVisible !== false;
+  state.mapDisplayMode = ['off','side','full'].includes(base.mapDisplayMode)
+    ? base.mapDisplayMode
+    : (state.mapVisible ? 'side' : 'off');
   state.mapWidth = clampDashboardMapWidth(base.mapWidth ?? base.mapPanelWidth ?? base.sideMapWidth);
   state.mapAsTile = !!(base.mapAsTile || base.mapTileVisible);
   state.lockLayout = !!(base.lockLayout || base.mosaicLocked);
@@ -5603,6 +5673,7 @@ function serializeDashboardState() {
     gridSpans: dashboardState.gridSpans && typeof dashboardState.gridSpans === 'object' ? { ...dashboardState.gridSpans } : {},
     mosaicLayout: dashboardState.mosaicLayout && typeof dashboardState.mosaicLayout === 'object' ? { ...dashboardState.mosaicLayout } : {},
     mapVisible: dashboardState.mapVisible !== false,
+    mapDisplayMode: ['off','side','full'].includes(dashboardState.mapDisplayMode) ? dashboardState.mapDisplayMode : (dashboardState.mapVisible !== false ? 'side' : 'off'),
     mapWidth: clampDashboardMapWidth(dashboardState.mapWidth),
     mapAsTile: !!dashboardState.mapAsTile,
     lockLayout: !!dashboardState.lockLayout,
@@ -9807,6 +9878,7 @@ function switchView(view) {
     setTimeout(() => dashboardMap && dashboardMap.invalidateSize(), 80);
   } else {
     document.body.classList.remove('dashboard-map-drawer');
+    document.body.classList.remove('dashboard-map-full');
     document.getElementById('dashboardAddPanel').classList.remove('open');
     if (viewer) viewer.resize();
   }
@@ -11610,11 +11682,9 @@ function renderDashboardMap() {
 }
 
 function fitDashboardMap() {
-  if (!dashboardSideMapAllowed()) return;
-  if (!dashboardState.mapVisible) {
-    dashboardState.mapVisible = true;
-    updateDashboardMapPresentation();
-    initDashboardMap();
+  if (!dashboardSideMapAllowed() && dashboardState.mapDisplayMode !== 'full') return;
+  if (dashboardState.mapDisplayMode === 'off') {
+    setDashboardMapDisplayMode(dashboardSideMapAllowed() ? 'side' : 'full');
   }
   if (!dashboardMap) return;
   const pts = [];
@@ -11671,35 +11741,88 @@ function updateDashboardMapPresentation() {
   const addMapTile = document.getElementById('dashAddMapTile');
   if (!pane || !resize) return;
 
+  // Backwards compatibility: older saved dashboards only know mapVisible.
+  if (!['off','side','full'].includes(dashboardState.mapDisplayMode)) {
+    dashboardState.mapDisplayMode = dashboardState.mapVisible === false ? 'off' : 'side';
+  }
+  dashboardState.mapVisible = dashboardState.mapDisplayMode !== 'off';
+
+  const mode = dashboardMode();
   const sideAllowed = dashboardSideMapAllowed();
   const drawer = dashboardShouldUseMapDrawer();
-  const showSideMap = sideAllowed && dashboardState.mapVisible;
+  const showFullMap = activeView === 'dashboard' && dashboardState.mapDisplayMode === 'full';
+  const showSideMap = activeView === 'dashboard' && !showFullMap && sideAllowed && dashboardState.mapDisplayMode === 'side';
+  const showMap = showFullMap || showSideMap;
+
   dashboardState.mapWidth = clampDashboardMapWidth(dashboardState.mapWidth);
-  if (!drawer) {
+  if (!drawer && !showFullMap) {
     pane.style.width = dashboardState.mapWidth + 'px';
     pane.style.flexBasis = dashboardState.mapWidth + 'px';
+  } else if (showFullMap) {
+    pane.style.width = '';
+    pane.style.flexBasis = '';
   }
 
+  document.body.classList.toggle('dashboard-map-full', showFullMap);
   document.body.classList.toggle('dashboard-map-drawer', drawer && activeView === 'dashboard' && showSideMap);
-  pane.classList.toggle('collapsed', !showSideMap);
-  resize.classList.toggle('collapsed', !showSideMap || drawer);
+  pane.classList.toggle('collapsed', !showMap);
+  resize.classList.toggle('collapsed', !showSideMap || drawer || showFullMap);
 
-  if (toggle) toggle.textContent = dashboardState.mapVisible ? 'Hide map' : 'Show map';
-  if (collapse) collapse.textContent = 'Collapse';
+  document.querySelectorAll('#dashboardMapModeControl [data-map-display]').forEach(btn => {
+    const value = btn.getAttribute('data-map-display');
+    btn.classList.toggle('active', value === dashboardState.mapDisplayMode);
+    // Side map is the existing grid-only presentation. Full map works in any dashboard mode.
+    btn.disabled = value === 'side' && !sideAllowed;
+    btn.title = value === 'side' && !sideAllowed
+      ? 'Side map is available in Grid mode. Use Full map in this layout.'
+      : btn.title;
+  });
+
+  if (toggle) {
+    toggle.textContent = dashboardState.mapDisplayMode === 'off' ? 'Show map' : 'Hide map';
+    toggle.title = dashboardState.mapDisplayMode === 'off' ? 'Show side map (M)' : 'Hide dashboard map (M)';
+  }
+  if (collapse) collapse.textContent = showFullMap ? 'Side' : 'Collapse';
   if (addMapTile) {
     addMapTile.textContent = dashboardState.mapAsTile ? 'Map tile added' : '+ Map tile';
-    addMapTile.disabled = dashboardMode() !== 'mosaic' || dashboardState.mapAsTile;
+    addMapTile.disabled = mode !== 'mosaic' || dashboardState.mapAsTile;
   }
   const lockBtn = document.getElementById('dashLockMosaic');
   if (lockBtn) {
     lockBtn.textContent = dashboardState.lockLayout ? 'Unlock layout' : 'Lock layout';
     lockBtn.classList.toggle('active', !!dashboardState.lockLayout);
-    lockBtn.disabled = dashboardMode() !== 'mosaic';
+    lockBtn.disabled = mode !== 'mosaic';
   }
   updateDashboardToolbarVisibility();
 
-  if (dashboardMap && showSideMap) {
-    setTimeout(() => dashboardMap.invalidateSize(), 30);
+  if (dashboardMap && showMap) {
+    setTimeout(() => {
+      dashboardMap.invalidateSize();
+      renderDashboardMap();
+      scheduleDashboardAvailableCamerasRefresh(20);
+    }, 40);
+  }
+}
+
+function setDashboardMapDisplayMode(mode) {
+  const next = ['off','side','full'].includes(mode) ? mode : 'side';
+  if (next === 'side' && !dashboardSideMapAllowed()) {
+    dashboardState.mapDisplayMode = 'full';
+  } else {
+    dashboardState.mapDisplayMode = next;
+  }
+  dashboardState.mapVisible = dashboardState.mapDisplayMode !== 'off';
+  updateDashboardMapPresentation();
+  saveDashboardState();
+  if (typeof markDashboardDirty === 'function') markDashboardDirty('map_display_mode');
+  if (dashboardState.mapDisplayMode !== 'off') {
+    initDashboardMap();
+    setTimeout(() => {
+      if (!dashboardMap) return;
+      dashboardMap.invalidateSize();
+      renderDashboardMap();
+      if (dashboardState.mapDisplayMode === 'side' || dashboardState.mapDisplayMode === 'full') fitDashboardMap();
+    }, 90);
   }
 }
 
@@ -11708,18 +11831,14 @@ function ensureDashboardMapResponsive() {
 }
 
 function toggleDashboardMap(force) {
-  if (!dashboardSideMapAllowed()) return;
-  dashboardState.mapVisible = typeof force === 'boolean' ? force : !dashboardState.mapVisible;
-  updateDashboardMapPresentation();
-  saveDashboardState();
-  if (dashboardState.mapVisible) {
-    initDashboardMap();
-    setTimeout(() => {
-      if (dashboardMap) {
-        dashboardMap.invalidateSize();
-        fitDashboardMap();
-      }
-    }, 80);
+  if (typeof force === 'boolean') {
+    setDashboardMapDisplayMode(force ? 'side' : 'off');
+    return;
+  }
+  if (dashboardState.mapDisplayMode === 'off') {
+    setDashboardMapDisplayMode(dashboardSideMapAllowed() ? 'side' : 'full');
+  } else {
+    setDashboardMapDisplayMode('off');
   }
 }
 
@@ -13667,6 +13786,9 @@ window.startBillingPortal = startBillingPortal;
   document.getElementById('dashAddCamera').onclick = openDashboardAddPanel;
   document.getElementById('dashFitMap').onclick = fitDashboardMap;
   document.getElementById('dashMapFitHeader').onclick = fitDashboardMap;
+  document.querySelectorAll('#dashboardMapModeControl [data-map-display]').forEach(btn => {
+    btn.onclick = () => setDashboardMapDisplayMode(btn.getAttribute('data-map-display'));
+  });
   document.getElementById('dashToggleMap').onclick = () => toggleDashboardMap();
   const dashAddMapTile = document.getElementById('dashAddMapTile');
   if (dashAddMapTile) dashAddMapTile.onclick = () => toggleDashboardMapTile(true);
@@ -13674,7 +13796,10 @@ window.startBillingPortal = startBillingPortal;
   if (dashFitMosaicCameras) dashFitMosaicCameras.onclick = fitMosaicCameraTiles;
   const dashLockMosaic = document.getElementById('dashLockMosaic');
   if (dashLockMosaic) dashLockMosaic.onclick = () => toggleMosaicLayoutLock();
-  document.getElementById('dashMapCollapseHeader').onclick = () => toggleDashboardMap(false);
+  document.getElementById('dashMapCollapseHeader').onclick = () => {
+    if (dashboardState.mapDisplayMode === 'full') setDashboardMapDisplayMode(dashboardSideMapAllowed() ? 'side' : 'off');
+    else setDashboardMapDisplayMode('off');
+  };
   document.getElementById('dashClearAll').onclick = clearDashboard;
   document.getElementById('dashSaveView').onclick = saveCurrentDashboardView;
   document.getElementById('dashLoadView').onclick = openSavedDashboardsPanel;
