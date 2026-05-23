@@ -7101,6 +7101,7 @@ const mapContextState = {
   placeNames: true,
   placeLabelsDataSource: null,
   placeLabelUpdateTimer: null,
+  placeLabelCameraListenerInstalled: false,
 };
 
 const MAP_CONTEXT_STARTER_PLACES = [
@@ -7204,6 +7205,33 @@ async function ensurePlaceLabelDataSource() {
   return ds;
 }
 
+
+function placeLabelAngularDistanceFromCamera(place) {
+  if (!viewer || !viewer.camera || !viewer.camera.positionCartographic || !Cesium) return 0;
+  const camCarto = viewer.camera.positionCartographic;
+  const lat1 = Number(camCarto.latitude);
+  const lon1 = Number(camCarto.longitude);
+  const lat2 = Cesium.Math.toRadians(Number(place.lat));
+  const lon2 = Cesium.Math.toRadians(Number(place.lng));
+  if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return 0;
+  const dLat = lat2 - lat1;
+  const dLon = lon2 - lon1;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
+}
+
+function placeLabelIsOnVisibleGlobeFace(place, cameraHeight) {
+  // Extra guard in addition to Cesium depth testing. This prevents labels from
+  // being generated for the hidden side of the globe, so they cannot bleed
+  // through during high-altitude/low-detail render frames.
+  const h = Math.max(0, Number(cameraHeight) || 0);
+  const earthRadius = 6371000;
+  const horizonAngle = Math.acos(Math.min(1, earthRadius / (earthRadius + h)));
+  const maxAngle = Math.min(Cesium.Math.toRadians(102), horizonAngle + Cesium.Math.toRadians(10));
+  return placeLabelAngularDistanceFromCamera(place) <= maxAngle;
+}
+
 function placeLabelVisibleForHeight(place, cameraHeight) {
   const h = Number(cameraHeight) || 0;
   if (place.level === 'country') return h > 1600000;
@@ -7243,6 +7271,7 @@ async function updatePlaceLabels() {
   const maxLabels = cameraHeightNow > 9000000 ? 10 : cameraHeightNow > 2800000 ? 36 : 76;
   const places = MAP_CONTEXT_STARTER_PLACES
     .filter(place => placeLabelVisibleForHeight(place, cameraHeightNow))
+    .filter(place => placeLabelIsOnVisibleGlobeFace(place, cameraHeightNow))
     .slice(0, maxLabels);
 
   places.forEach(place => {
@@ -7265,7 +7294,8 @@ async function updatePlaceLabels() {
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         pixelOffset: new Cesium.Cartesian2(0, -6),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        // Keep depth testing on so labels on the far side of the globe are hidden.
+        disableDepthTestDistance: 0,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
           placeLabelMinDistance(place),
           maxDistance
@@ -7288,6 +7318,15 @@ function schedulePlaceLabelUpdate(delay = 180) {
   mapContextState.placeLabelUpdateTimer = setTimeout(() => updatePlaceLabels(), delay);
 }
 
+
+function installPlaceLabelCameraListener() {
+  if (mapContextState.placeLabelCameraListenerInstalled) return;
+  if (!viewer || !viewer.camera || !viewer.camera.changed) return;
+  mapContextState.placeLabelCameraListenerInstalled = true;
+  viewer.camera.changed.addEventListener(() => schedulePlaceLabelUpdate(260));
+  try { viewer.camera.moveEnd.addEventListener(() => schedulePlaceLabelUpdate(60)); } catch (_) {}
+}
+
 function updateMapContextButtonState() {
   const placeBtn = document.getElementById('btnTogglePlaceNames');
   if (placeBtn) {
@@ -7298,6 +7337,7 @@ function updateMapContextButtonState() {
 
 function updateMapContextLayers() {
   if (!viewer) return;
+  installPlaceLabelCameraListener();
   updateMapContextButtonState();
   if (activeView === 'dashboard') {
     clearPlaceLabels();
