@@ -13370,6 +13370,81 @@ function hideClusterLoadingStatusNow() {
     return toCamelCamera(Array.isArray(rows) ? rows[0] : null);
   }
 
+
+  function postgrestTextInFilter(ids) {
+    return `in.(${ids.map(id => `"${String(id).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`).join(',')})`;
+  }
+
+  async function fetchCameraAltitudeRowsByIds(ids) {
+    const unique = Array.from(new Set((ids || []).map(id => String(id)).filter(Boolean)));
+    if (!unique.length) return new Map();
+
+    const out = new Map();
+    const batchSize = 80;
+    for (let i = 0; i < unique.length; i += batchSize) {
+      const batch = unique.slice(i, i + batchSize);
+      const filter = postgrestTextInFilter(batch);
+      const url = `${SUPABASE_URL}/rest/v1/cameras?select=id,altitude_m,altitude_source,altitude_updated_at&id=${encodeURIComponent(filter)}`;
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          apikey: API_KEY,
+          Authorization: `Bearer ${API_KEY}`,
+          Accept: 'application/json',
+        },
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`altitude direct fetch failed ${res.status}: ${text.slice(0, 240)}`);
+      }
+      const rows = await res.json();
+      (Array.isArray(rows) ? rows : []).forEach(row => {
+        const alt = parseNullableNumber(firstNonEmpty(row.altitude_m, row.altitudeM));
+        if (row && row.id && Number.isFinite(alt)) {
+          out.set(String(row.id), {
+            altitudeM: alt,
+            altitudeSource: firstNonEmpty(row.altitude_source, row.altitudeSource),
+            altitudeUpdatedAt: firstNonEmpty(row.altitude_updated_at, row.altitudeUpdatedAt),
+          });
+        }
+      });
+    }
+    return out;
+  }
+
+  async function hydrateVisibleCameraAltitudes(cams) {
+    const list = Array.isArray(cams) ? cams : [];
+    const missingIds = list
+      .filter(cam => cam && cam.id && cameraApproxGroundHeight(cam) === null)
+      .map(cam => cam.id);
+    if (!missingIds.length) return list;
+
+    try {
+      const altitudeMap = await fetchCameraAltitudeRowsByIds(missingIds);
+      list.forEach(cam => {
+        const alt = altitudeMap.get(String(cam.id));
+        if (!alt) return;
+        cam.altitudeM = alt.altitudeM;
+        cam.altitudeSource = alt.altitudeSource;
+        cam.altitudeUpdatedAt = alt.altitudeUpdatedAt;
+        cam.metadata = { ...(cam.metadata || {}), altitude_m: alt.altitudeM };
+        try {
+          const existing = cameraMap && cameraMap.get(String(cam.id));
+          if (existing) {
+            existing.altitudeM = alt.altitudeM;
+            existing.altitudeSource = alt.altitudeSource;
+            existing.altitudeUpdatedAt = alt.altitudeUpdatedAt;
+            existing.metadata = { ...(existing.metadata || {}), altitude_m: alt.altitudeM };
+          }
+        } catch (_) {}
+      });
+      if (altitudeMap.size) console.info(`Loaded ${altitudeMap.size} camera altitudes directly from public.cameras`);
+    } catch (err) {
+      console.warn('Direct altitude hydration failed; RPC may need altitude_m added:', err);
+    }
+    return list;
+  }
+
   async function hydrateCameraDetail(idOrCam) {
     const id = String(typeof idOrCam === 'object' ? idOrCam.id : idOrCam);
     if (!id || id.startsWith('cluster:')) return null;
@@ -13898,6 +13973,7 @@ function visibleViewportSpanDegrees() {
       if (!cam || seen.has(cam.id)) return;
       seen.add(cam.id); rows.push(cam);
     });
+    await hydrateVisibleCameraAltitudes(rows);
     renderApiEntities(rows, 'cameras');
     hideClusterLoadingStatusNow();
   }
