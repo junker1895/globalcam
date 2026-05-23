@@ -5703,9 +5703,13 @@ function hydrateDashboardState(raw = {}) {
   state.gridSpans = base.gridSpans && typeof base.gridSpans === 'object' ? { ...base.gridSpans } : {};
   state.mosaicLayout = base.mosaicLayout && typeof base.mosaicLayout === 'object' ? { ...base.mosaicLayout } : (base.mosaic && typeof base.mosaic === 'object' ? { ...base.mosaic } : {});
   state.mapVisible = base.mapVisible !== false;
-  state.mapDisplayMode = ['off','side','full'].includes(base.mapDisplayMode)
+  // Fullscreen map is an in-session presentation state only. Never restore a
+  // dashboard directly into full map view on app/dashboard open, because it can
+  // cover the dashboard controls before the user has explicitly requested it.
+  const savedMapDisplayMode = ['off','side','full'].includes(base.mapDisplayMode)
     ? base.mapDisplayMode
     : (state.mapVisible ? 'side' : 'off');
+  state.mapDisplayMode = savedMapDisplayMode === 'full' ? 'side' : savedMapDisplayMode;
   state.mapWidth = clampDashboardMapWidth(base.mapWidth ?? base.mapPanelWidth ?? base.sideMapWidth);
   state.mapAsTile = !!(base.mapAsTile || base.mapTileVisible);
   state.lockLayout = !!(base.lockLayout || base.mosaicLocked);
@@ -9940,6 +9944,13 @@ function switchView(view) {
   document.getElementById('btnDashboardView').classList.toggle('active', activeView === 'dashboard');
 
   if (activeView === 'dashboard') {
+    // Do not let a saved/session fullscreen map state become the initial
+    // dashboard presentation. Full map can still be selected explicitly after
+    // the dashboard is open.
+    if (dashboardState.mapDisplayMode === 'full') {
+      dashboardState.mapDisplayMode = dashboardSideMapAllowed() ? 'side' : 'off';
+      dashboardState.mapVisible = dashboardState.mapDisplayMode !== 'off';
+    }
     closePip();
     legendOpen = false;
     settingsPanelOpen = false;
