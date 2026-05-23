@@ -4000,7 +4000,6 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
         <div class="dashboard-map-mode-control" id="dashboardMapModeControl" aria-label="Dashboard map display mode">
           <button type="button" data-map-display="side" title="Show map beside camera tiles">Side</button>
           <button type="button" data-map-display="full" title="Use the whole dashboard for the map">Full</button>
-          <button type="button" data-map-display="off" title="Hide the dashboard map">Off</button>
         </div>
         <button class="dash-small-btn" id="dashMapDrawArea">Draw area</button>
         <button class="dash-small-btn" id="dashMapUploadArea">Upload area</button>
@@ -4010,7 +4009,8 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
           <button id="dashZoomOut" type="button" title="Zoom out">−</button>
         </div>
         <button class="dash-small-btn" id="dashMapFitHeader">Fit</button>
-        <button class="dash-small-btn" id="dashMapCollapseHeader">Collapse</button>
+        <button class="dash-small-btn" id="dashMapCollapseHeader" title="Switch between side map and fullscreen map">Full</button>
+        <button class="dash-small-btn" id="dashMapCloseHeader" title="Hide map" aria-label="Hide dashboard map">×</button>
       </div>
       <div id="dashboardMap"></div>
     </aside>
@@ -11782,7 +11782,12 @@ function updateDashboardMapPresentation() {
     toggle.textContent = dashboardState.mapDisplayMode === 'off' ? 'Show map' : 'Hide map';
     toggle.title = dashboardState.mapDisplayMode === 'off' ? 'Show side map (M)' : 'Hide dashboard map (M)';
   }
-  if (collapse) collapse.textContent = showFullMap ? 'Side' : 'Collapse';
+  if (collapse) {
+    collapse.textContent = showFullMap ? 'Side' : 'Full';
+    collapse.title = showFullMap
+      ? 'Return to side map'
+      : 'Expand map fullscreen';
+  }
   if (addMapTile) {
     addMapTile.textContent = dashboardState.mapAsTile ? 'Map tile added' : '+ Map tile';
     addMapTile.disabled = mode !== 'mosaic' || dashboardState.mapAsTile;
@@ -13797,9 +13802,13 @@ window.startBillingPortal = startBillingPortal;
   const dashLockMosaic = document.getElementById('dashLockMosaic');
   if (dashLockMosaic) dashLockMosaic.onclick = () => toggleMosaicLayoutLock();
   document.getElementById('dashMapCollapseHeader').onclick = () => {
-    if (dashboardState.mapDisplayMode === 'full') setDashboardMapDisplayMode(dashboardSideMapAllowed() ? 'side' : 'off');
-    else setDashboardMapDisplayMode('off');
+    if (dashboardState.mapDisplayMode === 'full') {
+      setDashboardMapDisplayMode(dashboardSideMapAllowed() ? 'side' : 'full');
+    } else {
+      setDashboardMapDisplayMode('full');
+    }
   };
+  document.getElementById('dashMapCloseHeader').onclick = () => setDashboardMapDisplayMode('off');
   document.getElementById('dashClearAll').onclick = clearDashboard;
   document.getElementById('dashSaveView').onclick = saveCurrentDashboardView;
   document.getElementById('dashLoadView').onclick = openSavedDashboardsPanel;
