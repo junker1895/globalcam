@@ -7124,6 +7124,25 @@ const PLACE_LABELS_DETAIL_TILE_BASE_URL = 'https://pub-b5d5f6cb30d643b492c7f785b
 const PLACE_LABELS_DETAIL_TILE_Z = 3;
 const PLACE_LABELS_DETAIL_LOAD_MAX_HEIGHT_M = 6200000;
 
+
+// Shared helpers used by the map-context label layer. Some legacy/app parsing
+// helpers are scoped inside the camera API module, so keep these available
+// globally for this independent label renderer.
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return value;
+    }
+  }
+  return null;
+}
+
+// Compatibility guard for builds where the 3D tile loading overlay helper has
+// been renamed or omitted. This prevents 2D/3D mode switching from crashing.
+if (typeof window.hideCameraTilesLoadOverlay !== 'function') {
+  window.hideCameraTilesLoadOverlay = function hideCameraTilesLoadOverlay() {};
+}
+
 const MAP_CONTEXT_STARTER_PLACES = [
   // Countries / regions shown at globe scale
   { name: 'Australia', lat: -25.2744, lng: 133.7751, level: 'country', rank: 1 },
