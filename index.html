@@ -1819,12 +1819,14 @@ body.community-active #dashboardView {
   display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:14px; align-content:start;
 }
 .community-card {
-  min-height: 228px;
+  min-height: 246px;
   border:1px solid var(--c-border); border-radius:14px; background:var(--c-surface);
   box-shadow:var(--c-shadow); overflow:hidden; display:flex; flex-direction:column;
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
 }
+.community-card:hover { transform: translateY(-1px); box-shadow: var(--c-shadow-md); border-color: rgba(37,99,235,.22); }
 .community-card-preview {
-  height:96px; position:relative; overflow:hidden; background:
+  height:108px; position:relative; overflow:hidden; background:
     radial-gradient(circle at 20% 20%, rgba(37,99,235,.32), transparent 28%),
     radial-gradient(circle at 78% 30%, rgba(14,165,233,.22), transparent 26%),
     linear-gradient(135deg, var(--c-surface2), rgba(37,99,235,.10));
@@ -1833,7 +1835,31 @@ body.community-active #dashboardView {
   content:''; position:absolute; inset:0; background-image:
     linear-gradient(90deg, rgba(148,163,184,.18) 1px, transparent 1px),
     linear-gradient(rgba(148,163,184,.16) 1px, transparent 1px);
-  background-size:28px 28px; opacity:.7;
+  background-size:28px 28px; opacity:.42; pointer-events:none;
+}
+.community-card-preview.has-image::after {
+  background: linear-gradient(180deg, rgba(15,23,42,0.04), rgba(15,23,42,0.34));
+  opacity: 1;
+}
+.community-card-preview img {
+  width:100%; height:100%; object-fit:cover; display:block;
+  filter:saturate(1.05) contrast(1.02);
+}
+.community-card-preview-badge {
+  position:absolute; left:10px; bottom:9px; z-index:2;
+  height:22px; padding:0 8px; border-radius:999px;
+  display:inline-flex; align-items:center; gap:5px;
+  background:rgba(15,23,42,.72); color:#fff;
+  font-family:var(--mono); font-size:10px; font-weight:850;
+  backdrop-filter: blur(8px);
+}
+.community-card-placeholder-icon {
+  position:absolute; left:50%; top:50%; transform:translate(-50%, -50%);
+  width:42px; height:42px; border-radius:12px;
+  display:flex; align-items:center; justify-content:center;
+  border:1px solid rgba(37,99,235,.24);
+  background:rgba(255,255,255,.42); color:var(--c-accent);
+  font-size:21px; z-index:1; box-shadow:var(--c-shadow);
 }
 .community-card-body { padding:12px 13px 13px; display:flex; flex-direction:column; gap:9px; flex:1; }
 .community-card-title { font-size:14px; font-weight:850; color:var(--c-text); line-height:1.25; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
@@ -18547,11 +18573,85 @@ function visibleViewportSpanDegrees() {
     return `<span class="community-author-avatar">${cEsc(communityInitial(row))}</span>`;
   }
 
+  function communitySnapshotOrder(row) {
+    const snap = row?.dashboard_json_snapshot || row?.snapshot || null;
+    if (!snap || typeof snap !== 'object') return [];
+    const order = Array.isArray(snap.order) ? snap.order : (Array.isArray(snap.cameras) ? snap.cameras : []);
+    return order.map(String).filter(Boolean);
+  }
+
+  function communityCameraFeedUrlById(cameraId) {
+    if (!cameraId) return '';
+    let cam = null;
+    try {
+      cam = typeof dashboardCameraById === 'function'
+        ? dashboardCameraById(cameraId)
+        : (cameraMap?.get(String(cameraId)) || (Array.isArray(cameras) ? cameras.find(c => String(c.id) === String(cameraId)) : null));
+    } catch (_) { cam = null; }
+    if (!cam) return '';
+    try {
+      if (typeof getCameraFeed === 'function') {
+        const feed = getCameraFeed(cam);
+        if (feed?.imageUrl) return feed.imageUrl;
+      }
+    } catch (_) {}
+    const direct = cam.imageUrl || cam.image_url || cam.snapshotUrl || cam.snapshot_url || '';
+    if (direct) return direct;
+    const views = Array.isArray(cam.views) ? cam.views : [];
+    for (const v of views) {
+      const url = v?.imageUrl || v?.image_url || v?.snapshotUrl || v?.snapshot_url || v?.url || '';
+      if (url) return url;
+    }
+    return '';
+  }
+
+  function communityThumbnailUrl(row) {
+    if (row?.thumbnail_url) return row.thumbnail_url;
+    const ids = communitySnapshotOrder(row);
+    for (const id of ids) {
+      const url = communityCameraFeedUrlById(id);
+      if (url) return url;
+    }
+    return '';
+  }
+
+  function communityCardPreviewHtml(row) {
+    const thumb = communityThumbnailUrl(row);
+    const count = Number(row.camera_count || communitySnapshotOrder(row).length || 0);
+    if (thumb) {
+      return `<div class="community-card-preview has-image"><img loading="lazy" alt="${cEsc(row.title || 'Community dashboard preview')}" src="${cEsc(thumb)}" onerror="this.closest('.community-card-preview').classList.remove('has-image');this.remove();"><span class="community-card-preview-badge">📷 ${count}</span></div>`;
+    }
+    return `<div class="community-card-preview"><div class="community-card-placeholder-icon">◈</div><span class="community-card-preview-badge">📷 ${count}</span></div>`;
+  }
+
+  async function hydrateCommunityRowsWithSnapshots(rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    const missing = list.filter(row => row?.id && !row.dashboard_json_snapshot).map(row => String(row.id));
+    if (!missing.length) return list;
+    const client = communityClient();
+    if (!client) return list;
+    try {
+      const { data, error } = await client
+        .from('community_dashboards')
+        .select('id,dashboard_json_snapshot')
+        .in('id', missing);
+      if (error) throw error;
+      const snapMap = new Map((Array.isArray(data) ? data : []).map(row => [String(row.id), row.dashboard_json_snapshot]));
+      list.forEach(row => {
+        const snap = snapMap.get(String(row.id));
+        if (snap) row.dashboard_json_snapshot = snap;
+      });
+    } catch (err) {
+      console.warn('Community thumbnail snapshot lookup failed:', err?.message || err);
+    }
+    return list;
+  }
+
   function communityCardHtml(row) {
     const plan = String(row.owner_plan_snapshot || 'free').toLowerCase();
     const tags = Array.isArray(row.tags) && row.tags.length ? row.tags.slice(0, 3).map(t => `#${cEsc(t)}`).join(' ') : '';
     return `<article class="community-card" data-id="${cEsc(row.id)}">
-      <div class="community-card-preview"></div>
+      ${communityCardPreviewHtml(row)}
       <div class="community-card-body">
         <div class="community-author">
           ${communityAuthorAvatar(row)}
@@ -18619,7 +18719,7 @@ function visibleViewportSpanDegrees() {
         p_offset: 0
       });
       if (error) throw error;
-      communityRows = Array.isArray(data) ? data : [];
+      communityRows = await hydrateCommunityRowsWithSnapshots(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Community browse failed:', err);
       communityRows = [];
