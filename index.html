@@ -1867,6 +1867,49 @@ body.community-active #dashboardView {
 }
 .community-snapshot-banner strong { color:var(--c-text); }
 .community-snapshot-banner .community-action { height:28px; }
+.dashboard-community-locked {
+  border-style: dashed !important;
+  border-color: rgba(245,158,11,0.42) !important;
+  background:
+    radial-gradient(circle at 50% 20%, rgba(245,158,11,0.14), transparent 34%),
+    var(--c-surface) !important;
+}
+.dashboard-community-locked .dash-media {
+  background: linear-gradient(135deg, rgba(15,23,42,0.08), rgba(245,158,11,0.13));
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:16px;
+}
+.community-locked-card {
+  width:min(330px, 92%);
+  text-align:center;
+  border:1px solid rgba(245,158,11,0.35);
+  border-radius:14px;
+  background:rgba(255,255,255,0.84);
+  box-shadow:0 10px 30px rgba(15,23,42,0.12);
+  padding:16px 14px;
+  backdrop-filter: blur(8px);
+}
+[data-theme="dark"] .community-locked-card { background:rgba(26,33,51,0.86); }
+.community-locked-icon { font-size:22px; margin-bottom:6px; }
+.community-locked-title { font-weight:900; color:var(--c-text); font-size:13px; margin-bottom:4px; }
+.community-locked-detail { font-size:11px; color:var(--c-text2); line-height:1.45; margin-bottom:10px; }
+.community-locked-upgrade {
+  height:30px;
+  border-radius:8px;
+  border:1px solid var(--c-accent);
+  background:var(--c-accent);
+  color:#fff;
+  font-family:var(--font);
+  font-size:12px;
+  font-weight:850;
+  padding:0 12px;
+  cursor:pointer;
+}
+.community-locked-upgrade:hover { opacity:.9; }
+.dashboard-community-locked .dash-feed-state-dot,
+.dashboard-community-locked .dash-resize { display:none !important; }
 
 /* ─── DASHBOARD VIEW ─── */
 #dashboardView {
@@ -10958,8 +11001,16 @@ function renderDashboard() {
   const cardHtml = cams.map((cam, idx) => dashboardCardHtml(cam, idx));
   if (mode === 'mosaic' && dashboardState.mapAsTile) cardHtml.push(dashboardMapTileHtml());
   wall.innerHTML = cardHtml.join('');
+  wall.querySelectorAll('.community-locked-upgrade').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (typeof showUpgradePrompt === 'function') showUpgradePrompt('Upgrade to Pro to unlock all cameras in community dashboards.');
+      else if (typeof notifyApp === 'function') notifyApp('Upgrade to Pro', 'Upgrade to unlock all cameras in community dashboards.', 'warn');
+    });
+  });
   if (mode === 'mosaic') updateMosaicCanvasHeight();
-  cams.forEach((cam, idx) => mountDashboardFeed(cam, idx));
+  cams.forEach((cam, idx) => {
+    if (!isCommunityLockedDashboardCamera(cam)) mountDashboardFeed(cam, idx);
+  });
   if (mode === 'mosaic' && dashboardState.mapAsTile) {
     setTimeout(() => { initDashboardMapTile(); renderDashboardMapTile(); }, 40);
   }
@@ -11146,6 +11197,78 @@ function moveDashboardCameraRelative(id, delta) {
   return true;
 }
 
+function isViewingCommunityDashboardSnapshot() {
+  return !!window.openCommunityDashboardRecord;
+}
+
+function communityDashboardCameraLimit() {
+  if (!isViewingCommunityDashboardSnapshot()) return Infinity;
+  const limits = typeof getPlanLimits === 'function' ? getPlanLimits() : { maxDashboardCameras: 2 };
+  const max = Number(limits.maxDashboardCameras || 0);
+  return Number.isFinite(max) && max > 0 ? max : 0;
+}
+
+function communityDashboardCameraIndex(cam) {
+  const id = String(cam?.id || '');
+  const order = Array.isArray(dashboardState?.order) ? dashboardState.order.map(String) : [];
+  const idx = order.indexOf(id);
+  return idx >= 0 ? idx : 0;
+}
+
+function isCommunityLockedDashboardCamera(cam) {
+  if (!isViewingCommunityDashboardSnapshot()) return false;
+  if (String(currentPlan || '').toLowerCase() === 'pro') return false;
+  const max = communityDashboardCameraLimit();
+  if (max >= 999) return false;
+  return communityDashboardCameraIndex(cam) >= max;
+}
+
+function communityLockedDashboardCardHtml(cam, idx, opts = {}) {
+  const title = escapeHtml(cameraTitle(cam));
+  const mode = dashboardMode();
+  const selected = dashboardState.selectedCameraId === String(cam.id);
+  const isFocusMain = mode === 'focus' && String(cam.id) === String(dashboardState.selectedCameraId);
+  const isFocusThumb = mode === 'focus' && String(cam.id) !== String(dashboardState.selectedCameraId);
+  const isSingle = mode === 'single' && String(cam.id) === String(dashboardState.selectedCameraId);
+  let mosaicStyle = '';
+  if (mode === 'mosaic') {
+    const pos = normaliseMosaicPos(dashboardState.mosaicLayout[cam.id] || defaultMosaicPos(idx));
+    dashboardState.mosaicLayout[cam.id] = pos;
+    mosaicStyle = mosaicInlineStyle(pos);
+  }
+  const manualSpan = mode === 'grid' ? dashboardGridSpanForId(cam.id) : 1;
+  const cls = [
+    'dash-card',
+    'dashboard-community-locked',
+    selected ? 'selected' : '',
+    mode === 'grid' && manualSpan > 1 ? `grid-span-${manualSpan}` : '',
+    isFocusMain ? 'focus-main' : '',
+    isFocusThumb ? 'focus-thumb' : '',
+    isSingle ? 'single-active' : ''
+  ].filter(Boolean).join(' ');
+  const singleNav = isSingle ? `
+    <button class="single-nav-btn prev" data-action="single-prev" title="Previous camera" aria-label="Previous camera">‹</button>
+    <button class="single-nav-btn next" data-action="single-next" title="Next camera" aria-label="Next camera">›</button>` : '';
+  const max = communityDashboardCameraLimit();
+  const cameraNumber = communityDashboardCameraIndex(cam) + 1;
+  return `<article class="${cls}" data-id="${escapeHtml(cam.id)}" ${mosaicStyle}>
+    ${singleNav}
+    <div class="dash-media">
+      <div class="community-locked-card">
+        <div class="community-locked-icon">🔒</div>
+        <div class="community-locked-title">Upgrade to Pro to view this camera</div>
+        <div class="community-locked-detail">This community dashboard has more cameras than your current plan allows. Camera ${cameraNumber} is locked; your plan includes the first ${max}.</div>
+        <button class="community-locked-upgrade" type="button">Upgrade to Pro</button>
+      </div>
+    </div>
+    <div class="dash-meta">
+      <div class="dash-title" title="${title}">${title}</div>
+      <div class="dash-sub">Community dashboard camera locked</div>
+      <div class="dash-feed-age">Upgrade required</div>
+    </div>
+  </article>`;
+}
+
 function dashboardCardHtml(cam, idx) {
   const title = escapeHtml(cameraTitle(cam));
   const heading = inferHeading(cam);
@@ -11159,6 +11282,10 @@ function dashboardCardHtml(cam, idx) {
   const isFocusThumb = mode === 'focus' && String(cam.id) !== String(dashboardState.selectedCameraId);
   const isSingle = mode === 'single' && String(cam.id) === String(dashboardState.selectedCameraId);
   const selected = dashboardState.selectedCameraId === String(cam.id);
+
+  if (isCommunityLockedDashboardCamera(cam)) {
+    return communityLockedDashboardCardHtml(cam, idx);
+  }
 
   let mosaicStyle = '';
   if (mode === 'mosaic') {
@@ -18353,6 +18480,7 @@ function visibleViewportSpanDegrees() {
   let communityLoading = false;
   let communitySearchTimer = null;
   let openCommunityDashboardRecord = null;
+  window.openCommunityDashboardRecord = null;
   let privateDashboardStateBeforeCommunity = null;
 
   function cEsc(value) {
@@ -18567,6 +18695,8 @@ function visibleViewportSpanDegrees() {
           if (typeof renderDashboard === 'function') renderDashboard();
         }
         removeCommunitySnapshotBanner();
+        openCommunityDashboardRecord = null;
+        window.openCommunityDashboardRecord = null;
       }
     } catch (err) {
       console.error('Copy community dashboard failed:', err);
@@ -18613,6 +18743,7 @@ function visibleViewportSpanDegrees() {
         ? serialiseDashboardStateForStorage()
         : JSON.parse(JSON.stringify(dashboardState || {}));
       openCommunityDashboardRecord = row;
+      window.openCommunityDashboardRecord = row;
       try {
         await client.rpc('increment_community_dashboard_view', { p_dashboard_id: id });
       } catch (_) {}
@@ -18653,6 +18784,34 @@ function visibleViewportSpanDegrees() {
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireCommunityBrowser, { once: true });
   else wireCommunityBrowser();
+})();
+</script>
+
+
+<script>
+// Community dashboard camera gating: clear the read-only community context whenever a private dashboard is loaded/cleared.
+(function installCommunityLockContextCleanup(){
+  function clearCommunityDashboardContext(){
+    try { window.openCommunityDashboardRecord = null; } catch (_) {}
+  }
+  const originalLoadSaved = window.loadSavedDashboardViewObject;
+  if (typeof originalLoadSaved === 'function' && !window.__communityLockLoadSavedPatched) {
+    window.__communityLockLoadSavedPatched = true;
+    window.loadSavedDashboardViewObject = async function communityLockAwareLoadSavedDashboard(){
+      clearCommunityDashboardContext();
+      return await originalLoadSaved.apply(this, arguments);
+    };
+    try { loadSavedDashboardViewObject = window.loadSavedDashboardViewObject; } catch (_) {}
+  }
+  const originalClearDashboard = window.clearDashboard;
+  if (typeof originalClearDashboard === 'function' && !window.__communityLockClearPatched) {
+    window.__communityLockClearPatched = true;
+    window.clearDashboard = function communityLockAwareClearDashboard(){
+      clearCommunityDashboardContext();
+      return originalClearDashboard.apply(this, arguments);
+    };
+    try { clearDashboard = window.clearDashboard; } catch (_) {}
+  }
 })();
 </script>
 
