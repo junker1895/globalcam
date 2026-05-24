@@ -20156,5 +20156,39 @@ function visibleViewportSpanDegrees() {
 })();
 </script>
 
+
+
+<!-- Community report modal: actual app DOM instance. The earlier modal markup in this file is inside the popout-image HTML string and is not part of the main document. -->
+<div id="communityReportModal" aria-hidden="true">
+  <div class="community-report-card" role="dialog" aria-modal="true" aria-labelledby="communityReportTitle">
+    <div class="community-report-head">
+      <div class="community-report-title" id="communityReportTitle">Report dashboard</div>
+      <button class="community-report-close" id="communityReportClose" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="community-report-body">
+      <div class="community-report-note" id="communityReportNote">Reports are reviewed manually. Reporting will not immediately remove a dashboard.</div>
+      <div class="community-report-field">
+        <label for="communityReportReason">Reason</label>
+        <select id="communityReportReason">
+          <option value="spam">Spam</option>
+          <option value="inappropriate">Inappropriate / unsafe</option>
+          <option value="broken">Broken dashboard or bad feeds</option>
+          <option value="copyright">Copyright or source issue</option>
+          <option value="misleading">Misleading title/location</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div class="community-report-field">
+        <label for="communityReportDetails">Details <span style="font-weight:500;color:var(--c-text3);">optional</span></label>
+        <textarea id="communityReportDetails" maxlength="800" placeholder="Add anything useful for review…"></textarea>
+      </div>
+      <div class="community-report-message" id="communityReportMessage"></div>
+    </div>
+    <div class="community-report-actions">
+      <button class="community-action" id="communityReportCancel" type="button">Cancel</button>
+      <button class="community-action report" id="communityReportSubmit" type="button">Submit report</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
