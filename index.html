@@ -17618,7 +17618,8 @@ function visibleViewportSpanDegrees() {
 
   function suggestedCommunityTitle() {
     try {
-      if (window.activeDashboardName && String(window.activeDashboardName).trim()) return String(window.activeDashboardName).trim();
+      const activeName = getCommunitySourceDashboardName();
+      if (activeName) return activeName;
     } catch (_) {}
     const count = Array.isArray(dashboardState?.order) ? dashboardState.order.length : 0;
     return count ? 'Camera dashboard' : 'Community dashboard';
@@ -17646,13 +17647,25 @@ function visibleViewportSpanDegrees() {
     return true;
   }
 
+  function getCommunitySourceDashboardId() {
+    const id = window.__communityActiveDashboardId || window.activeDashboardId || window.currentDashboardId || null;
+    return id ? String(id) : null;
+  }
+
+  function getCommunitySourceDashboardName() {
+    const name = window.__communityActiveDashboardName || window.activeDashboardName || window.currentDashboardName || '';
+    return String(name || '').trim();
+  }
+
   async function findExistingCommunityPublish() {
     const client = typeof initSupabaseClient === 'function' ? initSupabaseClient() : null;
-    if (!client || !currentUser) return null;
+    const sourceId = getCommunitySourceDashboardId();
+    if (!client || !currentUser || !sourceId) return null;
     const { data, error } = await client
       .from('community_dashboards')
-      .select('id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
+      .select('id,source_dashboard_id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
       .eq('owner_user_id', currentUser.id)
+      .eq('source_dashboard_id', sourceId)
       .eq('is_published', true)
       .order('updated_at', { ascending: false })
       .limit(1);
@@ -17671,6 +17684,14 @@ function visibleViewportSpanDegrees() {
       btn.textContent = 'Publish';
       btn.classList.remove('community-published');
       btn.title = 'Sign in to publish this dashboard snapshot to Community';
+      return;
+    }
+    const sourceId = getCommunitySourceDashboardId();
+    if (!sourceId) {
+      communityPublishedRecord = null;
+      btn.textContent = 'Publish';
+      btn.classList.remove('community-published');
+      btn.title = 'Publish this dashboard snapshot to Community';
       return;
     }
     communityPublishedRecord = await findExistingCommunityPublish();
@@ -17698,6 +17719,7 @@ function visibleViewportSpanDegrees() {
     const summary = document.getElementById('communityPublishSummary');
     const heading = document.getElementById('communityPublishTitle');
     const snap = getCommunityDashboardSnapshot();
+    const sourceId = getCommunitySourceDashboardId();
 
     if (heading) heading.textContent = communityPublishedRecord ? 'Update Community Dashboard' : 'Publish to Community';
     if (title) title.value = communityPublishedRecord?.title || suggestedCommunityTitle();
@@ -17708,7 +17730,7 @@ function visibleViewportSpanDegrees() {
     if (unpublish) unpublish.style.display = communityPublishedRecord ? '' : 'none';
     if (summary) {
       summary.innerHTML = communityEscape(snap.count + ' camera' + (snap.count === 1 ? '' : 's') + ' · snapshot only · shown as @' + (currentProfile?.username || '')) + '<br>' +
-        communityEscape('Creator badge: ' + String(currentPlan || currentProfile?.plan || 'free').toUpperCase());
+        communityEscape((sourceId ? 'Linked to this saved dashboard' : 'New community post') + ' · Creator badge: ' + String(currentPlan || currentProfile?.plan || 'free').toUpperCase());
     }
     setCommunityPublishMessage('');
     modal.classList.add('open');
@@ -17744,7 +17766,7 @@ function visibleViewportSpanDegrees() {
     }
     const payload = {
       owner_user_id: currentUser.id,
-      source_dashboard_id: null,
+      source_dashboard_id: getCommunitySourceDashboardId(),
       title,
       description: description || null,
       location_label: location || null,
@@ -17828,6 +17850,56 @@ function visibleViewportSpanDegrees() {
     }
   }
 
+  function setCommunityActiveDashboard(view) {
+    if (view && view.id) {
+      window.__communityActiveDashboardId = String(view.id);
+      window.__communityActiveDashboardName = view.name || '';
+    } else {
+      window.__communityActiveDashboardId = null;
+      window.__communityActiveDashboardName = '';
+    }
+    communityPublishedRecord = null;
+    setTimeout(refreshCommunityPublishButton, 120);
+  }
+
+  function patchCommunityDashboardIdentityTracking() {
+    if (window.__communityDashboardIdentityPatched) return;
+    window.__communityDashboardIdentityPatched = true;
+
+    const originalLoadSavedDashboardViewObject = window.loadSavedDashboardViewObject;
+    if (typeof originalLoadSavedDashboardViewObject === 'function') {
+      window.loadSavedDashboardViewObject = async function communityAwareLoadSavedDashboardViewObject(view) {
+        const result = await originalLoadSavedDashboardViewObject.apply(this, arguments);
+        setCommunityActiveDashboard(view || null);
+        return result;
+      };
+    }
+
+    const originalSaveCurrentDashboardView = window.saveCurrentDashboardView;
+    if (typeof originalSaveCurrentDashboardView === 'function') {
+      window.saveCurrentDashboardView = async function communityAwareSaveCurrentDashboardView() {
+        const result = await originalSaveCurrentDashboardView.apply(this, arguments);
+        try {
+          const rows = typeof getSavedDashboardViews === 'function' ? await getSavedDashboardViews(true) : [];
+          if (Array.isArray(rows) && rows.length) setCommunityActiveDashboard(rows[0]);
+          else setCommunityActiveDashboard(null);
+        } catch (_) {
+          setTimeout(refreshCommunityPublishButton, 250);
+        }
+        return result;
+      };
+    }
+
+    const originalClearDashboard = window.clearDashboard;
+    if (typeof originalClearDashboard === 'function') {
+      window.clearDashboard = function communityAwareClearDashboard() {
+        const result = originalClearDashboard.apply(this, arguments);
+        setCommunityActiveDashboard(null);
+        return result;
+      };
+    }
+  }
+
   function wireCommunityPublishing() {
     document.getElementById('dashPublishCommunity')?.addEventListener('click', openCommunityPublishModal);
     document.getElementById('communityPublishClose')?.addEventListener('click', closeCommunityPublishModal);
@@ -17838,6 +17910,7 @@ function visibleViewportSpanDegrees() {
       if (ev.target && ev.target.id === 'communityPublishModal') closeCommunityPublishModal();
     });
     refreshCommunityPublishButton();
+    patchCommunityDashboardIdentityTracking();
     setInterval(() => {
       if (document.body.classList.contains('dashboard-active')) refreshCommunityPublishButton();
     }, 15000);
