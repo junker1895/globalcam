@@ -1759,6 +1759,115 @@ body.dashboard-active #clusterLoadingStatus {
   transform: scale(0.86);
 }
 
+
+
+/* ─── COMMUNITY BROWSER VIEW ─── */
+#communityView {
+  position: fixed;
+  top: var(--top-h);
+  left: 0;
+  right: 0;
+  bottom: var(--bar-h);
+  z-index: 43;
+  display: none;
+  flex-direction: column;
+  background: var(--c-bg);
+  overflow: hidden;
+}
+body.community-active #cesiumContainer,
+body.community-active #sidePanel,
+body.community-active #frustumInfo,
+body.community-active #pip,
+body.community-active #minimap-wrap,
+body.community-active #legend,
+body.community-active #settingsPanel,
+body.community-active #dashboardView {
+  display: none !important;
+}
+.community-shell { display:flex; flex-direction:column; min-height:0; height:100%; }
+.community-head {
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+.community-title-wrap { min-width: 0; }
+.community-kicker { font-family:var(--mono); font-size:10px; font-weight:800; letter-spacing:.07em; text-transform:uppercase; color:var(--c-accent); }
+.community-title { margin-top:2px; font-size:20px; font-weight:850; letter-spacing:-.035em; color:var(--c-text); }
+.community-subtitle { margin-top:2px; font-size:12px; color:var(--c-text3); }
+.community-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+.community-search {
+  width: 280px; height:34px; border:1px solid var(--c-border); border-radius:8px;
+  background:var(--c-surface2); color:var(--c-text); padding:0 10px; outline:none;
+  font-family:var(--font); font-size:13px;
+}
+.community-search:focus { border-color:var(--c-accent); box-shadow:0 0 0 3px rgba(37,99,235,.12); background:var(--c-surface); }
+.community-sort {
+  height:34px; border:1px solid var(--c-border); border-radius:8px; background:var(--c-surface2);
+  color:var(--c-text2); padding:0 9px; font-family:var(--font); font-size:12px; font-weight:700;
+}
+.community-refresh-btn {
+  height:34px; padding:0 11px; border:1px solid var(--c-border); border-radius:8px;
+  background:var(--c-surface); color:var(--c-text2); font-family:var(--font); font-size:12px; font-weight:800; cursor:pointer;
+}
+.community-refresh-btn:hover { background:var(--c-surface2); color:var(--c-text); }
+#communityGrid {
+  flex:1; min-height:0; overflow:auto; padding:16px 18px 24px;
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:14px; align-content:start;
+}
+.community-card {
+  min-height: 228px;
+  border:1px solid var(--c-border); border-radius:14px; background:var(--c-surface);
+  box-shadow:var(--c-shadow); overflow:hidden; display:flex; flex-direction:column;
+}
+.community-card-preview {
+  height:96px; position:relative; overflow:hidden; background:
+    radial-gradient(circle at 20% 20%, rgba(37,99,235,.32), transparent 28%),
+    radial-gradient(circle at 78% 30%, rgba(14,165,233,.22), transparent 26%),
+    linear-gradient(135deg, var(--c-surface2), rgba(37,99,235,.10));
+}
+.community-card-preview::after {
+  content:''; position:absolute; inset:0; background-image:
+    linear-gradient(90deg, rgba(148,163,184,.18) 1px, transparent 1px),
+    linear-gradient(rgba(148,163,184,.16) 1px, transparent 1px);
+  background-size:28px 28px; opacity:.7;
+}
+.community-card-body { padding:12px 13px 13px; display:flex; flex-direction:column; gap:9px; flex:1; }
+.community-card-title { font-size:14px; font-weight:850; color:var(--c-text); line-height:1.25; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+.community-card-desc { font-size:11px; color:var(--c-text3); line-height:1.4; min-height:16px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+.community-author { display:flex; align-items:center; gap:8px; min-width:0; }
+.community-author-avatar { width:24px; height:24px; border-radius:999px; overflow:hidden; background:var(--c-accent-bg); color:var(--c-accent); display:inline-flex; align-items:center; justify-content:center; font-family:var(--mono); font-weight:900; font-size:10px; flex:0 0 auto; }
+.community-author-avatar img { width:100%; height:100%; object-fit:cover; display:block; }
+.community-author-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--mono); font-size:11px; color:var(--c-text2); }
+.community-plan { margin-left:auto; height:19px; padding:0 7px; border-radius:999px; background:var(--c-surface2); border:1px solid var(--c-border); font-family:var(--mono); font-size:9px; font-weight:900; color:var(--c-text3); line-height:17px; text-transform:uppercase; }
+.community-plan.pro { color:var(--c-accent); background:var(--c-accent-bg); border-color:rgba(37,99,235,.25); }
+.community-meta { display:flex; flex-wrap:wrap; gap:6px; font-family:var(--mono); font-size:10px; color:var(--c-text3); }
+.community-pill { display:inline-flex; align-items:center; gap:4px; height:20px; padding:0 7px; border-radius:999px; background:var(--c-surface2); border:1px solid var(--c-border); }
+.community-card-actions { margin-top:auto; display:flex; gap:7px; align-items:center; }
+.community-action { height:30px; padding:0 10px; border-radius:7px; border:1px solid var(--c-border); background:var(--c-surface); color:var(--c-text2); font-family:var(--font); font-size:12px; font-weight:800; cursor:pointer; }
+.community-action:hover { background:var(--c-surface2); color:var(--c-text); }
+.community-action.primary { background:var(--c-accent); border-color:var(--c-accent); color:#fff; }
+.community-action.active { background:var(--c-accent-bg); border-color:rgba(37,99,235,.25); color:var(--c-accent); }
+.community-empty { grid-column:1/-1; min-height:260px; display:flex; align-items:center; justify-content:center; text-align:center; color:var(--c-text3); border:1px dashed var(--c-border2); border-radius:14px; background:var(--c-surface); padding:24px; }
+.community-snapshot-banner {
+  margin: 10px 12px 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(37,99,235,.24);
+  border-radius: 10px;
+  background: var(--c-accent-bg);
+  color: var(--c-text2);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  font-size:12px;
+}
+.community-snapshot-banner strong { color:var(--c-text); }
+.community-snapshot-banner .community-action { height:28px; }
+
 /* ─── DASHBOARD VIEW ─── */
 #dashboardView {
   position: fixed;
@@ -3970,6 +4079,7 @@ body.dashboard-active #dashPublishCommunity.community-unsynced {
 
   <button class="tbtn active" id="btnGlobeView">Globe</button>
   <button class="tbtn" id="btnDashboardView">Dashboard <span class="nav-badge" id="dashboardNavBadge">0</span></button>
+  <button class="tbtn" id="btnCommunityView">Community</button>
 
   <div class="divider"></div>
 
@@ -4298,6 +4408,30 @@ body.dashboard-active #dashPublishCommunity.community-unsynced {
 <div id="clusterLoadingStatus" aria-live="polite">
   <span class="cluster-loading-spinner"></span>
   <span id="clusterLoadingText">Loading clusters…</span>
+</div>
+
+
+<div id="communityView">
+  <div class="community-shell">
+    <div class="community-head">
+      <div class="community-title-wrap">
+        <div class="community-kicker">Community</div>
+        <div class="community-title">Published dashboards</div>
+        <div class="community-subtitle">Browse operational camera dashboards shared by other signed-in users.</div>
+      </div>
+      <div class="community-controls">
+        <input id="communitySearch" class="community-search" type="text" placeholder="Search title, location, tags…">
+        <select id="communitySort" class="community-sort" aria-label="Community dashboard sort">
+          <option value="recent">Recent</option>
+          <option value="most_viewed">Most viewed</option>
+          <option value="most_bookmarked">Most bookmarked</option>
+          <option value="most_liked">Most liked</option>
+        </select>
+        <button id="communityRefresh" class="community-refresh-btn" type="button">Refresh</button>
+      </div>
+    </div>
+    <div id="communityGrid"></div>
+  </div>
 </div>
 
 <div id="dashboardView">
@@ -10500,11 +10634,25 @@ function updateDashboardBadge() {
 }
 
 function switchView(view) {
-  activeView = view === 'dashboard' ? 'dashboard' : 'globe';
+  activeView = view === 'dashboard' ? 'dashboard' : (view === 'community' ? 'community' : 'globe');
   document.body.classList.toggle('dashboard-active', activeView === 'dashboard');
+  document.body.classList.toggle('community-active', activeView === 'community');
   document.getElementById('dashboardView').style.display = activeView === 'dashboard' ? 'flex' : 'none';
+  const communityViewEl = document.getElementById('communityView');
+  if (communityViewEl) communityViewEl.style.display = activeView === 'community' ? 'flex' : 'none';
   document.getElementById('btnGlobeView').classList.toggle('active', activeView === 'globe');
   document.getElementById('btnDashboardView').classList.toggle('active', activeView === 'dashboard');
+  document.getElementById('btnCommunityView')?.classList.toggle('active', activeView === 'community');
+
+  if (activeView === 'community') {
+    closePip();
+    legendOpen = false;
+    settingsPanelOpen = false;
+    document.getElementById('legend').style.display = 'none';
+    document.getElementById('settingsPanel').style.display = 'none';
+    document.getElementById('btnLegend').classList.remove('active');
+    if (typeof loadCommunityDashboards === 'function') loadCommunityDashboards();
+  }
 
   if (activeView === 'dashboard') {
     // Do not let a saved/session fullscreen map state become the initial
@@ -14529,6 +14677,7 @@ window.startBillingPortal = startBillingPortal;
   // View switching
   document.getElementById('btnGlobeView').onclick = () => switchView('globe');
   document.getElementById('btnDashboardView').onclick = () => switchView('dashboard');
+  document.getElementById('btnCommunityView')?.addEventListener('click', () => switchView('community'));
 
   // Add selected camera to dashboard from the globe side panel
   document.getElementById('addSelectedToDashboard').onclick = () => {
@@ -18184,6 +18333,241 @@ function visibleViewportSpanDegrees() {
     };
     try { renderSavedDashboardsPanel = window.renderSavedDashboardsPanel; } catch (_) {}
   }
+})();
+</script>
+
+
+
+<script>
+// ==========================================================
+//  COMMUNITY BROWSER PATCH
+//  Browse/open published dashboard snapshots; bookmark/like toggles.
+// ==========================================================
+(function installCommunityBrowser(){
+  let communityRows = [];
+  let communityLoading = false;
+  let communitySearchTimer = null;
+  let openCommunityDashboardRecord = null;
+  let privateDashboardStateBeforeCommunity = null;
+
+  function cEsc(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
+  }
+
+  function communityClient() {
+    return typeof initSupabaseClient === 'function' ? initSupabaseClient() : null;
+  }
+
+  function requireCommunityAuth() {
+    if (currentUser) return true;
+    if (typeof notifyApp === 'function') notifyApp('Login required', 'Community dashboards are available to signed-in users.', 'warn');
+    if (typeof openAuthModal === 'function') openAuthModal('login');
+    return false;
+  }
+
+  function communityInitial(row) {
+    const name = row?.owner_username_snapshot || row?.title || '?';
+    return String(name).charAt(0).toUpperCase() || '?';
+  }
+
+  function communityAuthorAvatar(row) {
+    const url = row?.owner_avatar_url_snapshot;
+    if (url) return `<span class="community-author-avatar"><img alt="${cEsc(row.owner_username_snapshot || 'User')}" src="${cEsc(url)}"></span>`;
+    return `<span class="community-author-avatar">${cEsc(communityInitial(row))}</span>`;
+  }
+
+  function communityCardHtml(row) {
+    const plan = String(row.owner_plan_snapshot || 'free').toLowerCase();
+    const tags = Array.isArray(row.tags) && row.tags.length ? row.tags.slice(0, 3).map(t => `#${cEsc(t)}`).join(' ') : '';
+    return `<article class="community-card" data-id="${cEsc(row.id)}">
+      <div class="community-card-preview"></div>
+      <div class="community-card-body">
+        <div class="community-author">
+          ${communityAuthorAvatar(row)}
+          <span class="community-author-name">@${cEsc(row.owner_username_snapshot || 'unknown')}</span>
+          <span class="community-plan ${plan === 'pro' ? 'pro' : ''}">${cEsc(plan)}</span>
+        </div>
+        <div class="community-card-title">${cEsc(row.title || 'Untitled dashboard')}</div>
+        <div class="community-card-desc">${cEsc(row.description || row.location_label || tags || 'Published camera dashboard')}</div>
+        <div class="community-meta">
+          ${row.location_label ? `<span class="community-pill">📍 ${cEsc(row.location_label)}</span>` : ''}
+          <span class="community-pill">📷 ${Number(row.camera_count || 0)}</span>
+          <span class="community-pill">👁 ${Number(row.view_count || 0)}</span>
+          <span class="community-pill">🔖 ${Number(row.bookmark_count || 0)}</span>
+        </div>
+        <div class="community-card-actions">
+          <button class="community-action primary community-open" type="button">Open</button>
+          <button class="community-action community-bookmark ${row.is_bookmarked ? 'active' : ''}" type="button">${row.is_bookmarked ? 'Bookmarked' : 'Bookmark'}</button>
+          <button class="community-action community-like ${row.is_liked ? 'active' : ''}" type="button">${row.is_liked ? 'Liked' : 'Like'}</button>
+        </div>
+      </div>
+    </article>`;
+  }
+
+  function renderCommunityDashboards() {
+    const grid = document.getElementById('communityGrid');
+    if (!grid) return;
+    if (communityLoading) {
+      grid.innerHTML = '<div class="community-empty"><div><strong>Loading community dashboards…</strong><br>Fetching published snapshots.</div></div>';
+      return;
+    }
+    if (!currentUser) {
+      grid.innerHTML = '<div class="community-empty"><div><strong>Sign in to view Community.</strong><br>Community dashboards are only visible to logged-in users.</div></div>';
+      return;
+    }
+    if (!communityRows.length) {
+      grid.innerHTML = '<div class="community-empty"><div><strong>No community dashboards found.</strong><br>Try a different search, or publish one of your saved dashboards.</div></div>';
+      return;
+    }
+    grid.innerHTML = communityRows.map(communityCardHtml).join('');
+    grid.querySelectorAll('.community-card').forEach(card => {
+      const id = card.dataset.id;
+      card.querySelector('.community-open')?.addEventListener('click', () => openCommunityDashboard(id));
+      card.querySelector('.community-bookmark')?.addEventListener('click', () => toggleCommunityBookmark(id));
+      card.querySelector('.community-like')?.addEventListener('click', () => toggleCommunityLike(id));
+    });
+  }
+
+  async function loadCommunityDashboards() {
+    if (!document.getElementById('communityView')) return;
+    if (!requireCommunityAuth()) { renderCommunityDashboards(); return; }
+    const client = communityClient();
+    if (!client) return;
+    const search = document.getElementById('communitySearch')?.value || '';
+    const sort = document.getElementById('communitySort')?.value || 'recent';
+    communityLoading = true;
+    renderCommunityDashboards();
+    try {
+      const { data, error } = await client.rpc('browse_community_dashboards', {
+        p_search: search,
+        p_sort: sort,
+        p_limit: 40,
+        p_offset: 0
+      });
+      if (error) throw error;
+      communityRows = Array.isArray(data) ? data : [];
+    } catch (err) {
+      console.error('Community browse failed:', err);
+      communityRows = [];
+      const grid = document.getElementById('communityGrid');
+      if (grid) grid.innerHTML = `<div class="community-empty"><div><strong>Could not load Community.</strong><br>${cEsc(err?.message || 'Unknown error')}</div></div>`;
+      return;
+    } finally {
+      communityLoading = false;
+    }
+    renderCommunityDashboards();
+  }
+
+  async function toggleCommunityBookmark(id) {
+    if (!requireCommunityAuth()) return;
+    const client = communityClient();
+    try {
+      const { data, error } = await client.rpc('toggle_community_dashboard_bookmark', { p_dashboard_id: id });
+      if (error) throw error;
+      const row = communityRows.find(r => String(r.id) === String(id));
+      if (row) {
+        const next = !!data;
+        row.is_bookmarked = next;
+        row.bookmark_count = Math.max(0, Number(row.bookmark_count || 0) + (next ? 1 : -1));
+      }
+      renderCommunityDashboards();
+    } catch (err) {
+      if (typeof notifyApp === 'function') notifyApp('Bookmark failed', err?.message || String(err), 'err');
+    }
+  }
+
+  async function toggleCommunityLike(id) {
+    if (!requireCommunityAuth()) return;
+    const client = communityClient();
+    try {
+      const { data, error } = await client.rpc('toggle_community_dashboard_like', { p_dashboard_id: id });
+      if (error) throw error;
+      const row = communityRows.find(r => String(r.id) === String(id));
+      if (row) {
+        const next = !!data;
+        row.is_liked = next;
+        row.like_count = Math.max(0, Number(row.like_count || 0) + (next ? 1 : -1));
+      }
+      renderCommunityDashboards();
+    } catch (err) {
+      if (typeof notifyApp === 'function') notifyApp('Like failed', err?.message || String(err), 'err');
+    }
+  }
+
+  async function hydrateCommunitySnapshotCameras(snapshot) {
+    const ids = Array.isArray(snapshot?.order) ? snapshot.order.map(String).filter(Boolean) : [];
+    const missing = ids.filter(id => !(typeof dashboardCameraById === 'function' && dashboardCameraById(id)));
+    if (!missing.length || typeof hydrateCameraDetail !== 'function') return;
+    await Promise.allSettled(missing.slice(0, 60).map(id => hydrateCameraDetail(id)));
+  }
+
+  function removeCommunitySnapshotBanner() {
+    document.getElementById('communitySnapshotBanner')?.remove();
+  }
+
+  function renderCommunitySnapshotBanner(row) {
+    removeCommunitySnapshotBanner();
+    const pane = document.getElementById('dashboardFeedPane');
+    const wall = document.getElementById('dashboardFeedWall');
+    if (!pane || !wall || !row) return;
+    const banner = document.createElement('div');
+    banner.id = 'communitySnapshotBanner';
+    banner.className = 'community-snapshot-banner';
+    banner.innerHTML = `<div><strong>Viewing community snapshot:</strong> ${cEsc(row.title || 'Untitled dashboard')} · @${cEsc(row.owner_username_snapshot || 'unknown')} · ${Number(row.camera_count || 0)} cameras</div>
+      <button class="community-action" id="communityBackToBrowser" type="button">Back to Community</button>`;
+    pane.insertBefore(banner, wall);
+    document.getElementById('communityBackToBrowser')?.addEventListener('click', () => switchView('community'));
+  }
+
+  async function openCommunityDashboard(id) {
+    if (!requireCommunityAuth()) return;
+    const client = communityClient();
+    try {
+      const { data, error } = await client.rpc('get_community_dashboard', { p_dashboard_id: id });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row || !row.dashboard_json_snapshot) throw new Error('Community dashboard not found.');
+      privateDashboardStateBeforeCommunity = typeof serialiseDashboardStateForStorage === 'function'
+        ? serialiseDashboardStateForStorage()
+        : JSON.parse(JSON.stringify(dashboardState || {}));
+      openCommunityDashboardRecord = row;
+      await client.rpc('increment_community_dashboard_view', { p_dashboard_id: id }).catch(() => {});
+      const snapshot = row.dashboard_json_snapshot || {};
+      await hydrateCommunitySnapshotCameras(snapshot);
+      dashboardState = typeof normaliseDashboardState === 'function' ? normaliseDashboardState(snapshot) : snapshot;
+      if (typeof installDashboardStateCompatibilityAliases === 'function') installDashboardStateCompatibilityAliases(dashboardState);
+      if (dashboardState.selectedCameraId && !dashboardState.order.includes(String(dashboardState.selectedCameraId))) dashboardState.selectedCameraId = dashboardState.order[0] || null;
+      if (!dashboardState.selectedCameraId && dashboardState.order?.length) dashboardState.selectedCameraId = dashboardState.order[0];
+      dashboardState._fitPending = true;
+      switchView('dashboard');
+      renderCommunitySnapshotBanner(row);
+      if (typeof renderDashboard === 'function') renderDashboard();
+      if (typeof updateDashboardBadge === 'function') updateDashboardBadge();
+      if (typeof trackEvent === 'function') trackEvent('community_dashboard_opened', { community_dashboard_id: id, dashboard_camera_count: row.camera_count || 0 });
+    } catch (err) {
+      console.error('Open community dashboard failed:', err);
+      if (typeof notifyApp === 'function') notifyApp('Could not open community dashboard', err?.message || String(err), 'err');
+    }
+  }
+
+  function wireCommunityBrowser() {
+    const search = document.getElementById('communitySearch');
+    const sort = document.getElementById('communitySort');
+    const refresh = document.getElementById('communityRefresh');
+    search?.addEventListener('input', () => {
+      clearTimeout(communitySearchTimer);
+      communitySearchTimer = setTimeout(loadCommunityDashboards, 350);
+    });
+    sort?.addEventListener('change', loadCommunityDashboards);
+    refresh?.addEventListener('click', loadCommunityDashboards);
+  }
+
+  window.loadCommunityDashboards = loadCommunityDashboards;
+  window.openCommunityDashboard = openCommunityDashboard;
+  window.renderCommunityDashboards = renderCommunityDashboards;
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireCommunityBrowser, { once: true });
+  else wireCommunityBrowser();
 })();
 </script>
 
