@@ -1867,6 +1867,44 @@ body.community-active #dashboardView {
 }
 .community-snapshot-banner strong { color:var(--c-text); }
 .community-snapshot-banner .community-action { height:28px; }
+
+.community-snapshot-banner.detail {
+  margin: 10px 12px 0;
+  padding: 11px 12px;
+  border: 1px solid rgba(37,99,235,.24);
+  border-radius: 12px;
+  background: var(--c-surface);
+  color: var(--c-text2);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  box-shadow: var(--c-shadow);
+}
+.community-snapshot-main { min-width:0; display:flex; flex-direction:column; gap:6px; }
+.community-snapshot-status {
+  display:inline-flex; align-items:center; gap:6px; width:max-content;
+  height:20px; padding:0 8px; border-radius:999px;
+  background:var(--c-accent-bg); color:var(--c-accent);
+  border:1px solid rgba(37,99,235,.22);
+  font-family:var(--mono); font-size:10px; font-weight:900; text-transform:uppercase;
+}
+.community-snapshot-title-row { display:flex; align-items:center; gap:8px; min-width:0; flex-wrap:wrap; }
+.community-snapshot-title { font-size:15px; font-weight:900; color:var(--c-text); line-height:1.2; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.community-snapshot-location { font-size:11px; color:var(--c-text3); font-family:var(--mono); }
+.community-snapshot-author-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0; }
+.community-snapshot-avatar { width:24px; height:24px; border-radius:999px; overflow:hidden; background:var(--c-accent-bg); color:var(--c-accent); display:inline-flex; align-items:center; justify-content:center; font-family:var(--mono); font-size:10px; font-weight:900; flex:0 0 auto; }
+.community-snapshot-avatar img { width:100%; height:100%; object-fit:cover; display:block; }
+.community-snapshot-author { font-family:var(--mono); font-size:11px; color:var(--c-text2); font-weight:800; }
+.community-snapshot-plan { height:19px; padding:0 7px; border-radius:999px; background:var(--c-surface2); border:1px solid var(--c-border); color:var(--c-text3); font-family:var(--mono); font-size:9px; font-weight:900; line-height:17px; text-transform:uppercase; }
+.community-snapshot-plan.pro { color:var(--c-accent); background:var(--c-accent-bg); border-color:rgba(37,99,235,.25); }
+.community-snapshot-stat { height:20px; padding:0 7px; border-radius:999px; background:var(--c-surface2); border:1px solid var(--c-border); color:var(--c-text3); font-family:var(--mono); font-size:10px; line-height:18px; }
+.community-snapshot-actions { display:flex; align-items:center; justify-content:flex-end; gap:7px; flex-wrap:wrap; }
+.community-snapshot-actions .community-action { height:30px; }
+@media (max-width: 860px) {
+  .community-snapshot-banner.detail { grid-template-columns:1fr; align-items:start; }
+  .community-snapshot-actions { justify-content:flex-start; }
+}
 .dashboard-community-locked {
   border-style: dashed !important;
   border-color: rgba(245,158,11,0.42) !important;
@@ -18601,10 +18639,16 @@ function visibleViewportSpanDegrees() {
       const { data, error } = await client.rpc('toggle_community_dashboard_bookmark', { p_dashboard_id: id });
       if (error) throw error;
       const row = communityRows.find(r => String(r.id) === String(id));
+      const next = !!data;
       if (row) {
-        const next = !!data;
         row.is_bookmarked = next;
         row.bookmark_count = Math.max(0, Number(row.bookmark_count || 0) + (next ? 1 : -1));
+      }
+      if (openCommunityDashboardRecord && String(openCommunityDashboardRecord.id) === String(id)) {
+        openCommunityDashboardRecord.is_bookmarked = next;
+        openCommunityDashboardRecord.bookmark_count = Math.max(0, Number(openCommunityDashboardRecord.bookmark_count || 0) + (next ? 1 : -1));
+        window.openCommunityDashboardRecord = openCommunityDashboardRecord;
+        renderCommunitySnapshotBanner(openCommunityDashboardRecord);
       }
       renderCommunityDashboards();
     } catch (err) {
@@ -18619,10 +18663,16 @@ function visibleViewportSpanDegrees() {
       const { data, error } = await client.rpc('toggle_community_dashboard_like', { p_dashboard_id: id });
       if (error) throw error;
       const row = communityRows.find(r => String(r.id) === String(id));
+      const next = !!data;
       if (row) {
-        const next = !!data;
         row.is_liked = next;
         row.like_count = Math.max(0, Number(row.like_count || 0) + (next ? 1 : -1));
+      }
+      if (openCommunityDashboardRecord && String(openCommunityDashboardRecord.id) === String(id)) {
+        openCommunityDashboardRecord.is_liked = next;
+        openCommunityDashboardRecord.like_count = Math.max(0, Number(openCommunityDashboardRecord.like_count || 0) + (next ? 1 : -1));
+        window.openCommunityDashboardRecord = openCommunityDashboardRecord;
+        renderCommunitySnapshotBanner(openCommunityDashboardRecord);
       }
       renderCommunityDashboards();
     } catch (err) {
@@ -18666,6 +18716,10 @@ function visibleViewportSpanDegrees() {
       await client.rpc('increment_community_dashboard_copy', { p_dashboard_id: id }).catch?.(() => {});
       const localRow = communityRows.find(r => String(r.id) === String(id));
       if (localRow) localRow.copy_count = Number(localRow.copy_count || 0) + 1;
+      if (openCommunityDashboardRecord && String(openCommunityDashboardRecord.id) === String(id)) {
+        openCommunityDashboardRecord.copy_count = Number(openCommunityDashboardRecord.copy_count || 0) + 1;
+        window.openCommunityDashboardRecord = openCommunityDashboardRecord;
+      }
       if (typeof renderCommunityDashboards === 'function') renderCommunityDashboards();
       if (typeof getSavedDashboardViews === 'function') {
         try { await getSavedDashboardViews(true); } catch (_) {}
@@ -18715,20 +18769,49 @@ function visibleViewportSpanDegrees() {
     document.getElementById('communitySnapshotBanner')?.remove();
   }
 
+  function communitySnapshotAvatar(row) {
+    const url = row?.owner_avatar_url_snapshot;
+    if (url) return `<span class="community-snapshot-avatar"><img alt="${cEsc(row.owner_username_snapshot || 'User')}" src="${cEsc(url)}"></span>`;
+    return `<span class="community-snapshot-avatar">${cEsc(communityInitial(row))}</span>`;
+  }
+
   function renderCommunitySnapshotBanner(row) {
     removeCommunitySnapshotBanner();
     const pane = document.getElementById('dashboardFeedPane');
     const wall = document.getElementById('dashboardFeedWall');
     if (!pane || !wall || !row) return;
+    const plan = String(row.owner_plan_snapshot || 'free').toLowerCase();
+    const location = row.location_label ? `<span class="community-snapshot-location">📍 ${cEsc(row.location_label)}</span>` : '';
     const banner = document.createElement('div');
     banner.id = 'communitySnapshotBanner';
-    banner.className = 'community-snapshot-banner';
-    banner.innerHTML = `<div><strong>Viewing community snapshot:</strong> ${cEsc(row.title || 'Untitled dashboard')} · @${cEsc(row.owner_username_snapshot || 'unknown')} · ${Number(row.camera_count || 0)} cameras</div>
-      <button class="community-action" id="communityCopyOpenDashboard" type="button">Copy to my dashboards</button>
-      <button class="community-action" id="communityBackToBrowser" type="button">Back to Community</button>`;
+    banner.className = 'community-snapshot-banner detail';
+    banner.innerHTML = `<div class="community-snapshot-main">
+        <div class="community-snapshot-status">Viewing community snapshot</div>
+        <div class="community-snapshot-title-row">
+          <div class="community-snapshot-title" title="${cEsc(row.title || 'Untitled dashboard')}">${cEsc(row.title || 'Untitled dashboard')}</div>
+          ${location}
+        </div>
+        <div class="community-snapshot-author-row">
+          ${communitySnapshotAvatar(row)}
+          <span class="community-snapshot-author">@${cEsc(row.owner_username_snapshot || 'unknown')}</span>
+          <span class="community-snapshot-plan ${plan === 'pro' ? 'pro' : ''}">${cEsc(plan)}</span>
+          <span class="community-snapshot-stat">📷 ${Number(row.camera_count || 0)}</span>
+          <span class="community-snapshot-stat">👁 ${Number(row.view_count || 0)}</span>
+          <span class="community-snapshot-stat">🔖 ${Number(row.bookmark_count || 0)}</span>
+          <span class="community-snapshot-stat">♥ ${Number(row.like_count || 0)}</span>
+        </div>
+      </div>
+      <div class="community-snapshot-actions">
+        <button class="community-action" id="communityBackToBrowser" type="button">Back to Community</button>
+        <button class="community-action ${row.is_bookmarked ? 'active' : ''}" id="communityBookmarkOpenDashboard" type="button">${row.is_bookmarked ? 'Bookmarked' : 'Bookmark'}</button>
+        <button class="community-action ${row.is_liked ? 'active' : ''}" id="communityLikeOpenDashboard" type="button">${row.is_liked ? 'Liked' : 'Like'}</button>
+        <button class="community-action primary" id="communityCopyOpenDashboard" type="button">Copy</button>
+      </div>`;
     pane.insertBefore(banner, wall);
-    document.getElementById('communityCopyOpenDashboard')?.addEventListener('click', () => copyCommunityDashboard(row.id, { openAfterCopy: true }));
     document.getElementById('communityBackToBrowser')?.addEventListener('click', () => switchView('community'));
+    document.getElementById('communityBookmarkOpenDashboard')?.addEventListener('click', () => toggleCommunityBookmark(row.id));
+    document.getElementById('communityLikeOpenDashboard')?.addEventListener('click', () => toggleCommunityLike(row.id));
+    document.getElementById('communityCopyOpenDashboard')?.addEventListener('click', () => copyCommunityDashboard(row.id, { openAfterCopy: true }));
   }
 
   async function openCommunityDashboard(id) {
@@ -18746,7 +18829,12 @@ function visibleViewportSpanDegrees() {
       window.openCommunityDashboardRecord = row;
       try {
         await client.rpc('increment_community_dashboard_view', { p_dashboard_id: id });
+        row.view_count = Number(row.view_count || 0) + 1;
+        const localRow = communityRows.find(r => String(r.id) === String(id));
+        if (localRow) localRow.view_count = row.view_count;
       } catch (_) {}
+      openCommunityDashboardRecord = row;
+      window.openCommunityDashboardRecord = row;
       const snapshot = row.dashboard_json_snapshot || {};
       await hydrateCommunitySnapshotCameras(snapshot);
       dashboardState = typeof normaliseDashboardState === 'function' ? normaliseDashboardState(snapshot) : snapshot;
@@ -18793,6 +18881,7 @@ function visibleViewportSpanDegrees() {
 (function installCommunityLockContextCleanup(){
   function clearCommunityDashboardContext(){
     try { window.openCommunityDashboardRecord = null; } catch (_) {}
+    try { document.getElementById('communitySnapshotBanner')?.remove(); } catch (_) {}
   }
   const originalLoadSaved = window.loadSavedDashboardViewObject;
   if (typeof originalLoadSaved === 'function' && !window.__communityLockLoadSavedPatched) {
