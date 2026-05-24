@@ -1799,6 +1799,38 @@ body.community-active #dashboardView {
 .community-title { margin-top:2px; font-size:20px; font-weight:850; letter-spacing:-.035em; color:var(--c-text); }
 .community-subtitle { margin-top:2px; font-size:12px; color:var(--c-text3); }
 .community-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+
+.community-search-wrap { position:relative; display:inline-flex; align-items:center; }
+.community-search-wrap .community-search { padding-right:32px; }
+.community-clear-search {
+  position:absolute; right:5px; top:50%; transform:translateY(-50%);
+  width:24px; height:24px; border:0; border-radius:6px; background:transparent;
+  color:var(--c-text3); font-size:18px; line-height:1; cursor:pointer; display:none;
+}
+.community-clear-search.visible { display:inline-flex; align-items:center; justify-content:center; }
+.community-clear-search:hover { background:var(--c-surface); color:var(--c-text); }
+.community-browser-status {
+  padding: 8px 18px 0;
+  color: var(--c-text3);
+  font-family: var(--mono);
+  font-size: 10px;
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+}
+.community-refresh-btn.loading { opacity:.72; pointer-events:none; }
+.community-skeleton-card {
+  min-height:246px; border:1px solid var(--c-border); border-radius:14px; background:var(--c-surface);
+  overflow:hidden; box-shadow:var(--c-shadow);
+}
+.community-skeleton-preview { height:108px; background:linear-gradient(90deg, var(--c-surface2), rgba(148,163,184,.18), var(--c-surface2)); background-size:220% 100%; animation:communityPulse 1100ms ease-in-out infinite; }
+.community-skeleton-body { padding:12px 13px 13px; display:grid; gap:10px; }
+.community-skeleton-line { height:11px; border-radius:99px; background:var(--c-surface2); overflow:hidden; position:relative; }
+.community-skeleton-line.short { width:54%; }
+.community-skeleton-line.medium { width:76%; }
+.community-skeleton-line::after { content:''; position:absolute; inset:0; background:linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent); transform:translateX(-100%); animation:communityShimmer 1200ms ease-in-out infinite; }
+@keyframes communityPulse { 0%,100%{background-position:0% 50%;} 50%{background-position:100% 50%;} }
+@keyframes communityShimmer { 100% { transform:translateX(100%); } }
+.community-empty strong { color:var(--c-text); }
+.community-empty .community-empty-actions { margin-top:12px; display:flex; justify-content:center; gap:8px; }
 .community-search {
   width: 280px; height:34px; border:1px solid var(--c-border); border-radius:8px;
   background:var(--c-surface2); color:var(--c-text); padding:0 10px; outline:none;
@@ -3401,6 +3433,23 @@ body.community-active #viewerNavControls {
   display: none !important;
 }
 
+
+/* Community mode owns its own browser controls. Hide globe/dashboard-specific top-bar controls. */
+body.community-active #searchWrap,
+body.community-active #btnFrustums,
+body.community-active #btnLegend,
+body.community-active #mapContextWrap,
+body.community-active #dashboardCreateWrap,
+body.community-active #btnNorthUp,
+body.community-active #btn2DMode,
+body.community-active #btnSettings {
+  display: none !important;
+}
+
+body.community-active #barRight {
+  margin-left: auto;
+}
+
 body.area-drawing #viewerNavControls,
 body.tiles-view-loading #viewerNavControls { opacity: 0.58; }
 #viewerNavControls .nav-expandable {
@@ -4532,16 +4581,21 @@ body.dashboard-active #dashPublishCommunity.community-unsynced {
         <div class="community-subtitle">Browse operational camera dashboards shared by other signed-in users.</div>
       </div>
       <div class="community-controls">
-        <input id="communitySearch" class="community-search" type="text" placeholder="Search title, location, tags…">
+        <div class="community-search-wrap">
+          <input id="communitySearch" class="community-search" type="text" placeholder="Search title, location, tags…">
+          <button id="communityClearSearch" class="community-clear-search" type="button" title="Clear search" aria-label="Clear community search">×</button>
+        </div>
         <select id="communitySort" class="community-sort" aria-label="Community dashboard sort">
           <option value="recent">Recent</option>
           <option value="most_viewed">Most viewed</option>
           <option value="most_bookmarked">Most bookmarked</option>
           <option value="most_liked">Most liked</option>
+          <option value="most_copied">Most copied</option>
         </select>
         <button id="communityRefresh" class="community-refresh-btn" type="button">Refresh</button>
       </div>
     </div>
+    <div id="communityBrowserStatus" class="community-browser-status"></div>
     <div id="communityGrid"></div>
   </div>
 </div>
@@ -10763,6 +10817,8 @@ function switchView(view) {
     document.getElementById('legend').style.display = 'none';
     document.getElementById('settingsPanel').style.display = 'none';
     document.getElementById('btnLegend').classList.remove('active');
+    document.getElementById('mapContextWrap')?.classList.remove('open');
+    document.getElementById('dashboardCreateWrap')?.classList.remove('open');
     if (typeof loadCommunityDashboards === 'function') loadCommunityDashboards();
   }
 
@@ -17730,7 +17786,7 @@ function visibleViewportSpanDegrees() {
       if (client2 && currentUser && ids.length) {
         const { data: pubs, error: pubsError } = await client2
           .from('community_dashboards')
-          .select('id,source_dashboard_id,title,is_published,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot')
+          .select('id,source_dashboard_id,title,is_published,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot,thumbnail_url')
           .eq('owner_user_id', currentUser.id)
           .eq('is_published', true)
           .in('source_dashboard_id', ids);
@@ -18019,7 +18075,7 @@ function visibleViewportSpanDegrees() {
     if (!client || !currentUser || !ids.length) return new Map();
     const { data, error } = await client
       .from('community_dashboards')
-      .select('id,source_dashboard_id,title,is_published,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot')
+      .select('id,source_dashboard_id,title,is_published,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot,thumbnail_url')
       .eq('owner_user_id', currentUser.id)
       .eq('is_published', true)
       .in('source_dashboard_id', ids);
@@ -18089,7 +18145,7 @@ function visibleViewportSpanDegrees() {
     if (!client || !currentUser || !sourceId) return null;
     const { data, error } = await client
       .from('community_dashboards')
-      .select('id,source_dashboard_id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot')
+      .select('id,source_dashboard_id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot,thumbnail_url')
       .eq('owner_user_id', currentUser.id)
       .eq('source_dashboard_id', sourceId)
       .eq('is_published', true)
@@ -18203,6 +18259,148 @@ function visibleViewportSpanDegrees() {
     modal.setAttribute('aria-hidden', 'true');
   }
 
+  const COMMUNITY_THUMBNAIL_BUCKET = 'community-thumbnails';
+
+  function communitySnapshotCameraIds(snapshot) {
+    const order = Array.isArray(snapshot?.order) ? snapshot.order : (Array.isArray(snapshot?.cameras) ? snapshot.cameras : []);
+    return order.map(id => String(id || '')).filter(Boolean);
+  }
+
+  function communityCameraFeedUrlForThumbnail(id) {
+    let cam = null;
+    try {
+      if (typeof findCameraById === 'function') cam = findCameraById(id);
+    } catch (_) {}
+    try {
+      if (!cam && typeof cameraMap !== 'undefined' && cameraMap && typeof cameraMap.get === 'function') cam = cameraMap.get(String(id));
+    } catch (_) {}
+    if (!cam) return '';
+    const direct = cam.imageUrl || cam.image_url || cam.snapshotUrl || cam.snapshot_url || cam.thumbnailUrl || cam.thumbnail_url || '';
+    if (direct) return String(direct);
+    const views = Array.isArray(cam.views) ? cam.views : [];
+    for (const v of views) {
+      const url = v?.imageUrl || v?.image_url || v?.snapshotUrl || v?.snapshot_url || v?.thumbnailUrl || v?.thumbnail_url || v?.url || '';
+      if (url) return String(url);
+    }
+    return '';
+  }
+
+  function firstCommunityThumbnailSource(snapshot) {
+    const ids = communitySnapshotCameraIds(snapshot);
+    for (const id of ids) {
+      const url = communityCameraFeedUrlForThumbnail(id);
+      if (url) return url;
+    }
+    return '';
+  }
+
+  function loadImageForThumbnail(url) {
+    return new Promise((resolve, reject) => {
+      if (!url) return reject(new Error('No thumbnail source image.'));
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.referrerPolicy = 'no-referrer';
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Could not load thumbnail image.'));
+      img.src = url;
+    });
+  }
+
+  function drawCommunityThumbnailFallback(ctx, width, height, meta = {}) {
+    const title = String(meta.title || 'Community dashboard').trim();
+    const location = String(meta.location || '').trim();
+    const count = Number(meta.count || 0);
+    const grad = ctx.createLinearGradient(0, 0, width, height);
+    grad.addColorStop(0, '#0f172a');
+    grad.addColorStop(0.48, '#1e3a8a');
+    grad.addColorStop(1, '#2563eb');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    for (let x = -80; x < width + 80; x += 80) {
+      ctx.beginPath();
+      ctx.arc(x, height * 0.72 + Math.sin(x / 55) * 24, 58, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.fillRect(0, height - 82, width, 82);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '700 34px Inter, system-ui, sans-serif';
+    ctx.textBaseline = 'top';
+    const maxTitle = title.length > 34 ? title.slice(0, 33) + '…' : title;
+    ctx.fillText(maxTitle, 30, height - 66);
+    ctx.font = '600 18px Inter, system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.86)';
+    const sub = `${location ? location + ' · ' : ''}${count} camera${count === 1 ? '' : 's'}`;
+    ctx.fillText(sub, 32, height - 28);
+    ctx.strokeStyle = 'rgba(255,255,255,0.24)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(18, 18, width - 36, height - 36);
+  }
+
+  async function renderCommunityThumbnailBlob(snapshot, meta = {}) {
+    const width = 640;
+    const height = 360;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    let drewImage = false;
+    const sourceUrl = firstCommunityThumbnailSource(snapshot);
+    if (sourceUrl) {
+      try {
+        const img = await loadImageForThumbnail(sourceUrl);
+        const iw = img.naturalWidth || img.width;
+        const ih = img.naturalHeight || img.height;
+        if (iw && ih) {
+          const scale = Math.max(width / iw, height / ih);
+          const dw = iw * scale;
+          const dh = ih * scale;
+          const dx = (width - dw) / 2;
+          const dy = (height - dh) / 2;
+          ctx.drawImage(img, dx, dy, dw, dh);
+          drewImage = true;
+          const overlay = ctx.createLinearGradient(0, height * 0.55, 0, height);
+          overlay.addColorStop(0, 'rgba(15,23,42,0.02)');
+          overlay.addColorStop(1, 'rgba(15,23,42,0.72)');
+          ctx.fillStyle = overlay;
+          ctx.fillRect(0, 0, width, height);
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '700 26px Inter, system-ui, sans-serif';
+          ctx.textBaseline = 'bottom';
+          const title = String(meta.title || 'Community dashboard');
+          ctx.fillText(title.length > 38 ? title.slice(0, 37) + '…' : title, 26, height - 26);
+        }
+      } catch (err) {
+        drewImage = false;
+      }
+    }
+    if (!drewImage) drawCommunityThumbnailFallback(ctx, width, height, meta);
+    const blob = await new Promise(resolve => {
+      try { canvas.toBlob(resolve, 'image/webp', 0.82); } catch (_) { resolve(null); }
+    });
+    if (!blob) {
+      // If the source image tainted the canvas, retry with a generated fallback.
+      ctx.clearRect(0, 0, width, height);
+      drawCommunityThumbnailFallback(ctx, width, height, meta);
+      return await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', 0.82));
+    }
+    return blob;
+  }
+
+  async function uploadCommunityDashboardThumbnail(client, dashboardId, snapshot, meta = {}) {
+    if (!client || !currentUser || !dashboardId) return null;
+    const blob = await renderCommunityThumbnailBlob(snapshot, meta);
+    if (!blob) return null;
+    const path = `${currentUser.id}/${dashboardId}.webp`;
+    const { error } = await client.storage
+      .from(COMMUNITY_THUMBNAIL_BUCKET)
+      .upload(path, blob, { contentType: 'image/webp', upsert: true, cacheControl: '3600' });
+    if (error) throw error;
+    const { data } = client.storage.from(COMMUNITY_THUMBNAIL_BUCKET).getPublicUrl(path);
+    return data?.publicUrl ? `${data.publicUrl}?v=${Date.now()}` : null;
+  }
+
   async function saveCommunityPublish() {
     if (communityPublishBusy) return;
     if (!canUseCommunityPublishing()) return;
@@ -18259,13 +18457,13 @@ function visibleViewportSpanDegrees() {
           .update(payload)
           .eq('id', communityPublishedRecord.id)
           .eq('owner_user_id', currentUser.id)
-          .select('id,source_dashboard_id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot')
+          .select('id,source_dashboard_id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot,thumbnail_url')
           .maybeSingle();
       } else {
         result = await client
           .from('community_dashboards')
           .insert(payload)
-          .select('id,source_dashboard_id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot')
+          .select('id,source_dashboard_id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot,thumbnail_url')
           .maybeSingle();
       }
       if (result.error) throw result.error;
@@ -18283,6 +18481,24 @@ function visibleViewportSpanDegrees() {
         communityPublishedRecord.is_published = true;
         communityPublishedRecord.updated_at = payload.updated_at;
         communityPublishedRecord.published_at = payload.published_at;
+        communityPublishedRecord.thumbnail_url = communityPublishedRecord.thumbnail_url || result.data?.thumbnail_url || null;
+      }
+      if (communityPublishedRecord?.id) {
+        try {
+          setCommunityPublishMessage('Generating thumbnail…');
+          const thumbnailUrl = await uploadCommunityDashboardThumbnail(client, communityPublishedRecord.id, snap.state, { title, location, count: snap.count });
+          if (thumbnailUrl) {
+            const { error: thumbnailError } = await client
+              .from('community_dashboards')
+              .update({ thumbnail_url: thumbnailUrl, updated_at: payload.updated_at })
+              .eq('id', communityPublishedRecord.id)
+              .eq('owner_user_id', currentUser.id);
+            if (thumbnailError) throw thumbnailError;
+            communityPublishedRecord.thumbnail_url = thumbnailUrl;
+          }
+        } catch (thumbErr) {
+          console.warn('Community thumbnail upload failed:', thumbErr?.message || thumbErr);
+        }
       }
       await refreshCommunityPublishButton();
       if (communityPublishedRecord) {
@@ -18477,7 +18693,7 @@ function visibleViewportSpanDegrees() {
     if (!ids.length) return list;
     const { data, error } = await client
       .from('community_dashboards')
-      .select('id,source_dashboard_id,title,is_published,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot')
+      .select('id,source_dashboard_id,title,is_published,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot,thumbnail_url')
       .eq('owner_user_id', user.id)
       .eq('is_published', true)
       .in('source_dashboard_id', ids);
@@ -18543,6 +18759,8 @@ function visibleViewportSpanDegrees() {
   let communityRows = [];
   let communityLoading = false;
   let communitySearchTimer = null;
+  const COMMUNITY_BROWSER_PREFS_KEY = 'viewport.community.browserPrefs.v1';
+  let communityLastLoadedAt = null;
   let openCommunityDashboardRecord = null;
   window.openCommunityDashboardRecord = null;
   let privateDashboardStateBeforeCommunity = null;
@@ -18560,6 +18778,71 @@ function visibleViewportSpanDegrees() {
     if (typeof notifyApp === 'function') notifyApp('Login required', 'Community dashboards are available to signed-in users.', 'warn');
     if (typeof openAuthModal === 'function') openAuthModal('login');
     return false;
+  }
+
+  function readCommunityBrowserPrefs() {
+    try { return JSON.parse(localStorage.getItem(COMMUNITY_BROWSER_PREFS_KEY) || '{}') || {}; } catch (_) { return {}; }
+  }
+
+  function saveCommunityBrowserPrefs() {
+    try {
+      localStorage.setItem(COMMUNITY_BROWSER_PREFS_KEY, JSON.stringify({
+        search: document.getElementById('communitySearch')?.value || '',
+        sort: document.getElementById('communitySort')?.value || 'recent'
+      }));
+    } catch (_) {}
+  }
+
+  function restoreCommunityBrowserPrefs() {
+    const prefs = readCommunityBrowserPrefs();
+    const search = document.getElementById('communitySearch');
+    const sort = document.getElementById('communitySort');
+    if (search && typeof prefs.search === 'string') search.value = prefs.search;
+    if (sort && typeof prefs.sort === 'string' && [...sort.options].some(o => o.value === prefs.sort)) sort.value = prefs.sort;
+    updateCommunityBrowserControls();
+  }
+
+  function communitySortLabel(value) {
+    return ({
+      recent: 'Recent',
+      most_viewed: 'Most viewed',
+      most_bookmarked: 'Most bookmarked',
+      most_liked: 'Most liked',
+      most_copied: 'Most copied'
+    })[value || 'recent'] || 'Recent';
+  }
+
+  function updateCommunityBrowserControls() {
+    const searchValue = document.getElementById('communitySearch')?.value || '';
+    const clear = document.getElementById('communityClearSearch');
+    if (clear) clear.classList.toggle('visible', !!searchValue.trim());
+    const refresh = document.getElementById('communityRefresh');
+    if (refresh) {
+      refresh.classList.toggle('loading', !!communityLoading);
+      refresh.textContent = communityLoading ? 'Loading…' : 'Refresh';
+    }
+    const status = document.getElementById('communityBrowserStatus');
+    if (status) {
+      const sort = document.getElementById('communitySort')?.value || 'recent';
+      const parts = [];
+      if (currentUser) parts.push(`${communityRows.length} dashboard${communityRows.length === 1 ? '' : 's'}`);
+      if (searchValue.trim()) parts.push(`Search: “${searchValue.trim()}”`);
+      parts.push(`Sort: ${communitySortLabel(sort)}`);
+      if (communityLastLoadedAt && !communityLoading) parts.push(`Updated ${communityLastLoadedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+      status.textContent = communityLoading ? 'Loading published community dashboards…' : parts.join(' · ');
+    }
+  }
+
+  function communityLoadingSkeletonHtml(count = 6) {
+    return Array.from({ length: count }).map(() => `<article class="community-skeleton-card" aria-hidden="true">
+      <div class="community-skeleton-preview"></div>
+      <div class="community-skeleton-body">
+        <div class="community-skeleton-line short"></div>
+        <div class="community-skeleton-line"></div>
+        <div class="community-skeleton-line medium"></div>
+        <div class="community-skeleton-line short"></div>
+      </div>
+    </article>`).join('');
   }
 
   function communityInitial(row) {
@@ -18633,13 +18916,14 @@ function visibleViewportSpanDegrees() {
     try {
       const { data, error } = await client
         .from('community_dashboards')
-        .select('id,dashboard_json_snapshot')
+        .select('id,dashboard_json_snapshot,thumbnail_url')
         .in('id', missing);
       if (error) throw error;
-      const snapMap = new Map((Array.isArray(data) ? data : []).map(row => [String(row.id), row.dashboard_json_snapshot]));
+      const snapMap = new Map((Array.isArray(data) ? data : []).map(row => [String(row.id), row]));
       list.forEach(row => {
-        const snap = snapMap.get(String(row.id));
-        if (snap) row.dashboard_json_snapshot = snap;
+        const extra = snapMap.get(String(row.id));
+        if (extra?.dashboard_json_snapshot) row.dashboard_json_snapshot = extra.dashboard_json_snapshot;
+        if (extra?.thumbnail_url) row.thumbnail_url = extra.thumbnail_url;
       });
     } catch (err) {
       console.warn('Community thumbnail snapshot lookup failed:', err?.message || err);
@@ -18680,8 +18964,9 @@ function visibleViewportSpanDegrees() {
   function renderCommunityDashboards() {
     const grid = document.getElementById('communityGrid');
     if (!grid) return;
+    updateCommunityBrowserControls();
     if (communityLoading) {
-      grid.innerHTML = '<div class="community-empty"><div><strong>Loading community dashboards…</strong><br>Fetching published snapshots.</div></div>';
+      grid.innerHTML = communityLoadingSkeletonHtml(8);
       return;
     }
     if (!currentUser) {
@@ -18689,7 +18974,10 @@ function visibleViewportSpanDegrees() {
       return;
     }
     if (!communityRows.length) {
-      grid.innerHTML = '<div class="community-empty"><div><strong>No community dashboards found.</strong><br>Try a different search, or publish one of your saved dashboards.</div></div>';
+      const hasSearch = !!(document.getElementById('communitySearch')?.value || '').trim();
+      grid.innerHTML = `<div class="community-empty"><div><strong>${hasSearch ? 'No dashboards match that search.' : 'No community dashboards found.'}</strong><br>${hasSearch ? 'Clear the search or try a location, title, or tag.' : 'Publish one of your saved dashboards to get started.'}<div class="community-empty-actions">${hasSearch ? '<button class="community-action" id="communityEmptyClear" type="button">Clear search</button>' : ''}<button class="community-action" id="communityEmptyRefresh" type="button">Refresh</button></div></div></div>`;
+      grid.querySelector('#communityEmptyClear')?.addEventListener('click', () => { const input = document.getElementById('communitySearch'); if (input) input.value = ''; saveCommunityBrowserPrefs(); updateCommunityBrowserControls(); loadCommunityDashboards(); });
+      grid.querySelector('#communityEmptyRefresh')?.addEventListener('click', () => loadCommunityDashboards());
       return;
     }
     grid.innerHTML = communityRows.map(communityCardHtml).join('');
@@ -18709,7 +18997,9 @@ function visibleViewportSpanDegrees() {
     if (!client) return;
     const search = document.getElementById('communitySearch')?.value || '';
     const sort = document.getElementById('communitySort')?.value || 'recent';
+    saveCommunityBrowserPrefs();
     communityLoading = true;
+    updateCommunityBrowserControls();
     renderCommunityDashboards();
     try {
       const { data, error } = await client.rpc('browse_community_dashboards', {
@@ -18720,15 +19010,19 @@ function visibleViewportSpanDegrees() {
       });
       if (error) throw error;
       communityRows = await hydrateCommunityRowsWithSnapshots(Array.isArray(data) ? data : []);
+      communityLastLoadedAt = new Date();
     } catch (err) {
       console.error('Community browse failed:', err);
       communityRows = [];
       const grid = document.getElementById('communityGrid');
-      if (grid) grid.innerHTML = `<div class="community-empty"><div><strong>Could not load Community.</strong><br>${cEsc(err?.message || 'Unknown error')}</div></div>`;
+      if (grid) grid.innerHTML = `<div class="community-empty"><div><strong>Could not load Community.</strong><br>${cEsc(err?.message || 'Unknown error')}<div class="community-empty-actions"><button class="community-action" id="communityErrorRefresh" type="button">Try again</button></div></div></div>`;
+      grid?.querySelector('#communityErrorRefresh')?.addEventListener('click', () => loadCommunityDashboards());
+      updateCommunityBrowserControls();
       return;
     } finally {
       communityLoading = false;
     }
+    updateCommunityBrowserControls();
     renderCommunityDashboards();
   }
 
@@ -18957,12 +19251,27 @@ function visibleViewportSpanDegrees() {
     const search = document.getElementById('communitySearch');
     const sort = document.getElementById('communitySort');
     const refresh = document.getElementById('communityRefresh');
+    const clear = document.getElementById('communityClearSearch');
+    restoreCommunityBrowserPrefs();
     search?.addEventListener('input', () => {
+      updateCommunityBrowserControls();
       clearTimeout(communitySearchTimer);
       communitySearchTimer = setTimeout(loadCommunityDashboards, 350);
     });
-    sort?.addEventListener('change', loadCommunityDashboards);
+    search?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { clearTimeout(communitySearchTimer); loadCommunityDashboards(); }
+      if (e.key === 'Escape') { e.target.value = ''; saveCommunityBrowserPrefs(); updateCommunityBrowserControls(); loadCommunityDashboards(); }
+    });
+    clear?.addEventListener('click', () => {
+      if (search) search.value = '';
+      saveCommunityBrowserPrefs();
+      updateCommunityBrowserControls();
+      loadCommunityDashboards();
+      search?.focus();
+    });
+    sort?.addEventListener('change', () => { saveCommunityBrowserPrefs(); updateCommunityBrowserControls(); loadCommunityDashboards(); });
     refresh?.addEventListener('click', loadCommunityDashboards);
+    updateCommunityBrowserControls();
   }
 
   window.loadCommunityDashboards = loadCommunityDashboards;
