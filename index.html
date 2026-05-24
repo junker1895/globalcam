@@ -3288,7 +3288,12 @@ body.tiles-view-loading #cesiumContainer .cesium-widget canvas {
   background: rgba(26,33,51,0.96);
   border-color: var(--c-border2);
 }
-body.app-ready.globe-zoom-ready:not(.dashboard-active) #viewerNavControls { display: flex; }
+body.app-ready.globe-zoom-ready:not(.dashboard-active):not(.community-active) #viewerNavControls { display: flex; }
+
+body.community-active #viewerNavControls {
+  display: none !important;
+}
+
 body.area-drawing #viewerNavControls,
 body.tiles-view-loading #viewerNavControls { opacity: 0.58; }
 #viewerNavControls .nav-expandable {
