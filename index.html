@@ -3790,6 +3790,16 @@ body.dashboard-active #dashPublishCommunity.community-published {
   color: var(--c-accent);
   border-color: rgba(37,99,235,0.25);
 }
+body.dashboard-active #dashPublishCommunity.community-unsynced {
+  background: rgba(245,158,11,0.12);
+  color: var(--c-warn);
+  border-color: rgba(245,158,11,0.38);
+}
+.saved-dash-publish-badge.unsynced {
+  background: rgba(245,158,11,0.12) !important;
+  color: var(--c-warn) !important;
+  border-color: rgba(245,158,11,0.35) !important;
+}
 </style>
 
 
@@ -15159,7 +15169,7 @@ body.dashboard-active #dashboardFeedWall {
       return `
         <div class="saved-dash-row2" data-id="${escapeHtml(v.id)}">
           <div style="min-width:0;">
-            <div class="saved-dash-name" title="${escapeHtml(v.name)}">${escapeHtml(v.name)} ${v.communityPublished ? '<span class="saved-dash-publish-badge">Published</span>' : '<span class="saved-dash-publish-badge unpublished">Not published</span>'}</div>
+            <div class="saved-dash-name" title="${escapeHtml(v.name)}">${escapeHtml(v.name)} ${v.communityUnsynced ? '<span class="saved-dash-publish-badge unsynced">Published · unsynced</span>' : (v.communityPublished ? '<span class="saved-dash-publish-badge">Published</span>' : '<span class="saved-dash-publish-badge unpublished">Not published</span>')}</div>
             <div class="saved-dash-meta">${stateCams} camera${stateCams === 1 ? '' : 's'} · ${escapeHtml(layout)}${escapeHtml(grid)}<br>Updated ${escapeHtml(updated)} · Created ${escapeHtml(created)}</div>
           </div>
           <div class="saved-dash-actions2">
@@ -17375,7 +17385,7 @@ function visibleViewportSpanDegrees() {
       if (client2 && currentUser && ids.length) {
         const { data: pubs, error: pubsError } = await client2
           .from('community_dashboards')
-          .select('id,source_dashboard_id,title,is_published,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
+          .select('id,source_dashboard_id,title,is_published,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot')
           .eq('owner_user_id', currentUser.id)
           .eq('is_published', true)
           .in('source_dashboard_id', ids);
@@ -17444,7 +17454,7 @@ function visibleViewportSpanDegrees() {
       return `
         <div class="saved-dash-row2" data-id="${sdEscape(v.id)}">
           <div style="min-width:0;">
-            <div class="saved-dash-name" title="${sdEscape(v.name)}">${sdEscape(v.name)} ${v.communityPublished ? '<span class="saved-dash-publish-badge">Published</span>' : '<span class="saved-dash-publish-badge unpublished">Not published</span>'}</div>
+            <div class="saved-dash-name" title="${sdEscape(v.name)}">${sdEscape(v.name)} ${v.communityUnsynced ? '<span class="saved-dash-publish-badge unsynced">Published · unsynced</span>' : (v.communityPublished ? '<span class="saved-dash-publish-badge">Published</span>' : '<span class="saved-dash-publish-badge unpublished">Not published</span>')}</div>
             <div class="saved-dash-meta">${stateCams} camera${stateCams === 1 ? '' : 's'} · ${sdEscape(layout)}${sdEscape(grid)}<br>Updated ${sdEscape(sdFormatDate(v.updatedAt))} · Created ${sdEscape(sdFormatDate(v.createdAt))}</div>
           </div>
           <div class="saved-dash-actions2">
@@ -17664,7 +17674,7 @@ function visibleViewportSpanDegrees() {
     if (!client || !currentUser || !ids.length) return new Map();
     const { data, error } = await client
       .from('community_dashboards')
-      .select('id,source_dashboard_id,title,is_published,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
+      .select('id,source_dashboard_id,title,is_published,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot')
       .eq('owner_user_id', currentUser.id)
       .eq('is_published', true)
       .in('source_dashboard_id', ids);
@@ -17734,7 +17744,7 @@ function visibleViewportSpanDegrees() {
     if (!client || !currentUser || !sourceId) return null;
     const { data, error } = await client
       .from('community_dashboards')
-      .select('id,source_dashboard_id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
+      .select('id,source_dashboard_id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot')
       .eq('owner_user_id', currentUser.id)
       .eq('source_dashboard_id', sourceId)
       .eq('is_published', true)
@@ -17747,13 +17757,45 @@ function visibleViewportSpanDegrees() {
     return Array.isArray(data) && data.length ? data[0] : null;
   }
 
+  function isCommunityPublishedSnapshotUnsynced() {
+    if (!communityPublishedRecord || !communityPublishedRecord.dashboard_json_snapshot) return false;
+    try {
+      const current = getCommunityDashboardSnapshot();
+      return communityStableStringify(current.state) !== communityStableStringify(communityPublishedRecord.dashboard_json_snapshot);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function setCommunityPublishButtonVisualState(btn) {
+    if (!btn) return;
+    const unsynced = isCommunityPublishedSnapshotUnsynced();
+    btn.classList.toggle('community-unsynced', !!unsynced);
+    if (communityPublishedRecord) {
+      btn.textContent = unsynced ? 'Published • Unsynced changes' : 'Published';
+      btn.title = unsynced
+        ? 'This private dashboard has changes that are not in the public Community snapshot yet. Open this to update the published version.'
+        : 'This dashboard has a published Community snapshot. Open this to update or unpublish it.';
+    }
+  }
+
+  let communityDirtyIndicatorTimer = null;
+  function scheduleCommunityPublishIndicatorRefresh() {
+    if (communityDirtyIndicatorTimer) window.clearTimeout(communityDirtyIndicatorTimer);
+    communityDirtyIndicatorTimer = window.setTimeout(() => {
+      communityDirtyIndicatorTimer = null;
+      const btn = document.getElementById('dashPublishCommunity');
+      if (btn && communityPublishedRecord) setCommunityPublishButtonVisualState(btn);
+    }, 80);
+  }
+
   async function refreshCommunityPublishButton() {
     const btn = document.getElementById('dashPublishCommunity');
     if (!btn) return;
     if (!currentUser) {
       communityPublishedRecord = null;
       btn.textContent = 'Publish';
-      btn.classList.remove('community-published');
+      btn.classList.remove('community-published', 'community-unsynced');
       btn.title = 'Sign in to publish this dashboard snapshot to Community';
       return;
     }
@@ -17761,7 +17803,7 @@ function visibleViewportSpanDegrees() {
     if (!sourceId) {
       communityPublishedRecord = null;
       btn.textContent = 'Publish';
-      btn.classList.remove('community-published');
+      btn.classList.remove('community-published', 'community-unsynced');
       btn.title = 'Publish this dashboard snapshot to Community';
       return;
     }
@@ -17769,10 +17811,10 @@ function visibleViewportSpanDegrees() {
     if (communityPublishedRecord) {
       btn.textContent = 'Published';
       btn.classList.add('community-published');
-      btn.title = 'Update or unpublish your community dashboard snapshot';
+      setCommunityPublishButtonVisualState(btn);
     } else {
       btn.textContent = 'Publish';
-      btn.classList.remove('community-published');
+      btn.classList.remove('community-published', 'community-unsynced');
       btn.title = 'Publish this dashboard snapshot to Community';
     }
   }
@@ -17872,13 +17914,13 @@ function visibleViewportSpanDegrees() {
           .update(payload)
           .eq('id', communityPublishedRecord.id)
           .eq('owner_user_id', currentUser.id)
-          .select('id,source_dashboard_id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
+          .select('id,source_dashboard_id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot')
           .maybeSingle();
       } else {
         result = await client
           .from('community_dashboards')
           .insert(payload)
-          .select('id,source_dashboard_id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
+          .select('id,source_dashboard_id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot')
           .maybeSingle();
       }
       if (result.error) throw result.error;
@@ -17978,6 +18020,34 @@ function visibleViewportSpanDegrees() {
     }
   }
 
+  function installCommunityUnsyncedWatchers() {
+    if (window.__communityUnsyncedWatchersInstalled) return;
+    window.__communityUnsyncedWatchersInstalled = true;
+    const originalRenderDashboard = window.renderDashboard;
+    if (typeof originalRenderDashboard === 'function') {
+      window.renderDashboard = function communityRenderDashboardUnsyncedWrapper() {
+        const result = originalRenderDashboard.apply(this, arguments);
+        scheduleCommunityPublishIndicatorRefresh();
+        return result;
+      };
+      try { renderDashboard = window.renderDashboard; } catch (_) {}
+    }
+    const originalMarkDirty = window.markDashboardDirty;
+    if (typeof originalMarkDirty === 'function') {
+      window.markDashboardDirty = function communityMarkDashboardDirtyWrapper() {
+        const result = originalMarkDirty.apply(this, arguments);
+        scheduleCommunityPublishIndicatorRefresh();
+        return result;
+      };
+      try { markDashboardDirty = window.markDashboardDirty; } catch (_) {}
+    }
+    window.setInterval(() => {
+      if (document.body.classList.contains('dashboard-active') && communityPublishedRecord) {
+        scheduleCommunityPublishIndicatorRefresh();
+      }
+    }, 1200);
+  }
+
   function wireCommunityPublishing() {
     document.getElementById('dashPublishCommunity')?.addEventListener('click', openCommunityPublishModal);
     document.getElementById('communityPublishClose')?.addEventListener('click', closeCommunityPublishModal);
@@ -17988,6 +18058,7 @@ function visibleViewportSpanDegrees() {
       if (ev.target && ev.target.id === 'communityPublishModal') closeCommunityPublishModal();
     });
     refreshCommunityPublishButton();
+    installCommunityUnsyncedWatchers();
     patchCommunityDashboardIdentityTracking();
     setInterval(() => {
       if (document.body.classList.contains('dashboard-active')) refreshCommunityPublishButton();
@@ -18039,7 +18110,7 @@ function visibleViewportSpanDegrees() {
     if (!ids.length) return list;
     const { data, error } = await client
       .from('community_dashboards')
-      .select('id,source_dashboard_id,title,is_published,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
+      .select('id,source_dashboard_id,title,is_published,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot')
       .eq('owner_user_id', user.id)
       .eq('is_published', true)
       .in('source_dashboard_id', ids);
@@ -18052,6 +18123,7 @@ function visibleViewportSpanDegrees() {
       const pub = map.get(String(v.id));
       v.communityPublished = !!pub;
       v.communityPublish = pub || null;
+      try { v.communityUnsynced = !!pub && !!pub.dashboard_json_snapshot && communityStableStringify(v.state) !== communityStableStringify(pub.dashboard_json_snapshot); } catch (_) { v.communityUnsynced = false; }
     });
     return list;
   }
@@ -18081,8 +18153,8 @@ function visibleViewportSpanDegrees() {
         const nameEl = row.querySelector('.saved-dash-name');
         if (!nameEl || !view || nameEl.querySelector('.saved-dash-publish-badge')) return;
         const badge = document.createElement('span');
-        badge.className = 'saved-dash-publish-badge' + (view.communityPublished ? '' : ' unpublished');
-        badge.textContent = view.communityPublished ? 'Published' : 'Not published';
+        badge.className = 'saved-dash-publish-badge' + (view.communityUnsynced ? ' unsynced' : (view.communityPublished ? '' : ' unpublished'));
+        badge.textContent = view.communityUnsynced ? 'Published · unsynced' : (view.communityPublished ? 'Published' : 'Not published');
         nameEl.appendChild(document.createTextNode(' '));
         nameEl.appendChild(badge);
       });
