@@ -3665,6 +3665,131 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
 .dashboard-single-autoscroll.disabled input {
   cursor: not-allowed;
 }
+
+
+/* ─── COMMUNITY PUBLISH MODAL ─── */
+#communityPublishModal {
+  position: fixed;
+  inset: 0;
+  z-index: 1360;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15,23,42,0.42);
+  backdrop-filter: blur(4px);
+}
+#communityPublishModal.open { display: flex; }
+.community-publish-card {
+  width: 460px;
+  max-width: calc(100vw - 28px);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  box-shadow: 0 24px 80px rgba(15,23,42,0.35);
+  overflow: hidden;
+}
+.community-publish-head {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--c-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.community-publish-title { font-size: 15px; font-weight: 800; color: var(--c-text); }
+.community-publish-close {
+  width: 28px; height: 28px; border: none; border-radius: 7px;
+  background: transparent; color: var(--c-text3); font-size: 20px; line-height: 1;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+}
+.community-publish-close:hover { background: var(--c-surface2); color: var(--c-text); }
+.community-publish-body { padding: 14px 16px 12px; }
+.community-publish-note {
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 9px;
+  background: var(--c-surface2);
+  color: var(--c-text2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+#communityPublishModal textarea {
+  width: 100%;
+  min-height: 82px;
+  resize: vertical;
+  border: 1px solid var(--c-border);
+  border-radius: 7px;
+  background: var(--c-surface2);
+  color: var(--c-text);
+  padding: 9px 10px;
+  outline: none;
+  font-family: var(--font);
+  font-size: 13px;
+}
+#communityPublishModal input {
+  width: 100%;
+  height: 36px;
+  border: 1px solid var(--c-border);
+  border-radius: 7px;
+  background: var(--c-surface2);
+  color: var(--c-text);
+  padding: 0 10px;
+  outline: none;
+  font-family: var(--font);
+  font-size: 13px;
+}
+#communityPublishModal input:focus,
+#communityPublishModal textarea:focus {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
+  background: var(--c-surface);
+}
+.community-publish-summary {
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--c-text3);
+  line-height: 1.55;
+}
+.community-publish-message {
+  margin-top: 8px;
+  min-height: 16px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--c-text2);
+  line-height: 1.45;
+}
+.community-publish-message.error { color: var(--c-danger); }
+.community-publish-actions {
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--c-border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.community-publish-spacer { flex: 1; }
+.community-publish-btn {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text2);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.community-publish-btn:hover { background: var(--c-surface2); color: var(--c-text); }
+.community-publish-btn.primary { background: var(--c-accent); border-color: var(--c-accent); color: #fff; }
+.community-publish-btn.danger { border-color: rgba(220,38,38,0.28); color: var(--c-danger); }
+.community-publish-btn:disabled { opacity: .55; cursor: not-allowed; }
+body.dashboard-active #dashPublishCommunity.community-published {
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
+  border-color: rgba(37,99,235,0.25);
+}
 </style>
 
 
@@ -4120,6 +4245,44 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
   </div>
 </div>
 
+
+<!-- ─── COMMUNITY PUBLISH MODAL ─── -->
+<div id="communityPublishModal" aria-hidden="true">
+  <div class="community-publish-card" role="dialog" aria-modal="true" aria-labelledby="communityPublishTitle">
+    <div class="community-publish-head">
+      <div class="community-publish-title" id="communityPublishTitle">Publish to Community</div>
+      <button class="community-publish-close" id="communityPublishClose" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="community-publish-body">
+      <div class="community-publish-note" id="communityPublishNote">This creates a public snapshot. Later private edits will not change the community version unless you update it.</div>
+      <div class="auth-field">
+        <label for="communityPublishName">Title</label>
+        <input id="communityPublishName" type="text" maxlength="90" placeholder="e.g. Brisbane river cameras">
+      </div>
+      <div class="auth-field">
+        <label for="communityPublishLocation">Location</label>
+        <input id="communityPublishLocation" type="text" maxlength="120" placeholder="e.g. Brisbane, Queensland">
+      </div>
+      <div class="auth-field">
+        <label for="communityPublishTags">Tags</label>
+        <input id="communityPublishTags" type="text" maxlength="160" placeholder="flood, traffic, city">
+      </div>
+      <div class="auth-field">
+        <label for="communityPublishDescription">Description</label>
+        <textarea id="communityPublishDescription" maxlength="500" placeholder="What is this dashboard useful for?"></textarea>
+      </div>
+      <div class="community-publish-summary" id="communityPublishSummary"></div>
+      <div class="community-publish-message" id="communityPublishMessage"></div>
+    </div>
+    <div class="community-publish-actions">
+      <button class="community-publish-btn danger" id="communityPublishUnpublish" type="button" style="display:none">Unpublish</button>
+      <span class="community-publish-spacer"></span>
+      <button class="community-publish-btn" id="communityPublishCancel" type="button">Cancel</button>
+      <button class="community-publish-btn primary" id="communityPublishSave" type="button">Publish</button>
+    </div>
+  </div>
+</div>
+
 <!-- ─── DASHBOARD VIEW ─── -->
 
 <div id="clusterLoadingStatus" aria-live="polite">
@@ -4182,6 +4345,7 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
         <button class="dash-small-btn dash-control-mosaic" id="dashLockMosaic" title="Lock Mosaic layout so tiles cannot be dragged or resized (L)">Lock layout</button>
         <button class="dash-small-btn" id="dashClearAll" title="Clear this dashboard">Clear</button>
         <button class="dash-small-btn" id="dashSaveView" title="Save view now (Ctrl/Cmd+S)">Save view</button>
+        <button class="dash-small-btn" id="dashPublishCommunity" title="Publish this dashboard snapshot to Community">Publish</button>
         <button class="dash-small-btn" id="dashLoadView" title="Right-click to delete a saved view">Load view</button>
         <div class="dash-page-controls" id="dashPageButtons" aria-label="Dashboard pages"></div>
         <button class="dash-small-btn dash-shortcut-btn" id="dashShortcutHelp" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
@@ -17417,6 +17581,285 @@ function visibleViewportSpanDegrees() {
       requestAnimationFrame(stabiliseDashboardBar);
       return result;
     };
+  }
+})();
+</script>
+
+
+<script>
+// ==========================================================
+//  COMMUNITY DASHBOARD PUBLISHING PATCH
+//  Publishes the current dashboard as a signed-in, username-backed snapshot.
+// ==========================================================
+(function installCommunityDashboardPublishing(){
+  let communityPublishedRecord = null;
+  let communityPublishBusy = false;
+
+  function communityEscape(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
+  }
+
+  function setCommunityPublishMessage(text, isError = false) {
+    const el = document.getElementById('communityPublishMessage');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('error', !!isError);
+  }
+
+  function getCommunityDashboardSnapshot() {
+    const state = typeof dashboardStateForPreset === 'function'
+      ? dashboardStateForPreset()
+      : (typeof serialiseDashboardStateForStorage === 'function' ? serialiseDashboardStateForStorage() : JSON.parse(JSON.stringify(window.dashboardState || {})));
+    const count = typeof dashboardCameraCountFromStateValue === 'function'
+      ? dashboardCameraCountFromStateValue(state)
+      : (Array.isArray(state?.order) ? state.order.length : (Array.isArray(dashboardState?.order) ? dashboardState.order.length : 0));
+    return { state, count };
+  }
+
+  function suggestedCommunityTitle() {
+    try {
+      if (window.activeDashboardName && String(window.activeDashboardName).trim()) return String(window.activeDashboardName).trim();
+    } catch (_) {}
+    const count = Array.isArray(dashboardState?.order) ? dashboardState.order.length : 0;
+    return count ? 'Camera dashboard' : 'Community dashboard';
+  }
+
+  function parseCommunityTags(raw) {
+    return [...new Set(String(raw || '')
+      .split(',')
+      .map(t => t.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, ''))
+      .filter(Boolean)
+      .slice(0, 8))];
+  }
+
+  function canUseCommunityPublishing({ promptProfile = true } = {}) {
+    if (!currentUser) {
+      if (typeof notifyApp === 'function') notifyApp('Login required', 'You need to be signed in to publish community dashboards.', 'warn');
+      else alert('You need to be signed in to publish community dashboards.');
+      return false;
+    }
+    if (!currentProfile || !currentProfile.username) {
+      if (typeof notifyApp === 'function') notifyApp('Username required', 'Choose a username before publishing community dashboards.', 'warn');
+      if (promptProfile && typeof openProfileModal === 'function') openProfileModal({ force: true });
+      return false;
+    }
+    return true;
+  }
+
+  async function findExistingCommunityPublish() {
+    const client = typeof initSupabaseClient === 'function' ? initSupabaseClient() : null;
+    if (!client || !currentUser) return null;
+    const { data, error } = await client
+      .from('community_dashboards')
+      .select('id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
+      .eq('owner_user_id', currentUser.id)
+      .eq('is_published', true)
+      .order('updated_at', { ascending: false })
+      .limit(1);
+    if (error) {
+      console.warn('Community publish lookup failed:', error.message);
+      return null;
+    }
+    return Array.isArray(data) && data.length ? data[0] : null;
+  }
+
+  async function refreshCommunityPublishButton() {
+    const btn = document.getElementById('dashPublishCommunity');
+    if (!btn) return;
+    if (!currentUser) {
+      communityPublishedRecord = null;
+      btn.textContent = 'Publish';
+      btn.classList.remove('community-published');
+      btn.title = 'Sign in to publish this dashboard snapshot to Community';
+      return;
+    }
+    communityPublishedRecord = await findExistingCommunityPublish();
+    if (communityPublishedRecord) {
+      btn.textContent = 'Published';
+      btn.classList.add('community-published');
+      btn.title = 'Update or unpublish your community dashboard snapshot';
+    } else {
+      btn.textContent = 'Publish';
+      btn.classList.remove('community-published');
+      btn.title = 'Publish this dashboard snapshot to Community';
+    }
+  }
+
+  function openCommunityPublishModal() {
+    if (!canUseCommunityPublishing()) return;
+    const modal = document.getElementById('communityPublishModal');
+    if (!modal) return;
+    const title = document.getElementById('communityPublishName');
+    const location = document.getElementById('communityPublishLocation');
+    const tags = document.getElementById('communityPublishTags');
+    const desc = document.getElementById('communityPublishDescription');
+    const save = document.getElementById('communityPublishSave');
+    const unpublish = document.getElementById('communityPublishUnpublish');
+    const summary = document.getElementById('communityPublishSummary');
+    const heading = document.getElementById('communityPublishTitle');
+    const snap = getCommunityDashboardSnapshot();
+
+    if (heading) heading.textContent = communityPublishedRecord ? 'Update Community Dashboard' : 'Publish to Community';
+    if (title) title.value = communityPublishedRecord?.title || suggestedCommunityTitle();
+    if (location) location.value = communityPublishedRecord?.location_label || '';
+    if (tags) tags.value = Array.isArray(communityPublishedRecord?.tags) ? communityPublishedRecord.tags.join(', ') : '';
+    if (desc) desc.value = communityPublishedRecord?.description || '';
+    if (save) save.textContent = communityPublishedRecord ? 'Update published version' : 'Publish';
+    if (unpublish) unpublish.style.display = communityPublishedRecord ? '' : 'none';
+    if (summary) {
+      summary.innerHTML = communityEscape(snap.count + ' camera' + (snap.count === 1 ? '' : 's') + ' · snapshot only · shown as @' + (currentProfile?.username || '')) + '<br>' +
+        communityEscape('Creator badge: ' + String(currentPlan || currentProfile?.plan || 'free').toUpperCase());
+    }
+    setCommunityPublishMessage('');
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+    setTimeout(() => title?.focus(), 40);
+  }
+
+  function closeCommunityPublishModal() {
+    const modal = document.getElementById('communityPublishModal');
+    if (!modal) return;
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  async function saveCommunityPublish() {
+    if (communityPublishBusy) return;
+    if (!canUseCommunityPublishing()) return;
+    const client = typeof initSupabaseClient === 'function' ? initSupabaseClient() : null;
+    if (!client) return;
+    const title = String(document.getElementById('communityPublishName')?.value || '').trim();
+    const location = String(document.getElementById('communityPublishLocation')?.value || '').trim();
+    const tags = parseCommunityTags(document.getElementById('communityPublishTags')?.value || '');
+    const description = String(document.getElementById('communityPublishDescription')?.value || '').trim();
+    if (!title) {
+      setCommunityPublishMessage('Add a title before publishing.', true);
+      document.getElementById('communityPublishName')?.focus();
+      return;
+    }
+    const snap = getCommunityDashboardSnapshot();
+    if (!snap.count) {
+      setCommunityPublishMessage('Add at least one camera before publishing.', true);
+      return;
+    }
+    const payload = {
+      owner_user_id: currentUser.id,
+      source_dashboard_id: null,
+      title,
+      description: description || null,
+      location_label: location || null,
+      tags,
+      dashboard_json_snapshot: snap.state,
+      camera_count: snap.count,
+      owner_username_snapshot: currentProfile.username,
+      owner_plan_snapshot: String(currentPlan || currentProfile?.plan || 'free').toLowerCase(),
+      owner_avatar_url_snapshot: currentProfile.avatar_url || null,
+      is_published: true,
+      updated_at: new Date().toISOString(),
+      published_at: new Date().toISOString()
+    };
+    const save = document.getElementById('communityPublishSave');
+    const unpublish = document.getElementById('communityPublishUnpublish');
+    communityPublishBusy = true;
+    if (save) save.disabled = true;
+    if (unpublish) unpublish.disabled = true;
+    setCommunityPublishMessage(communityPublishedRecord ? 'Updating published snapshot…' : 'Publishing snapshot…');
+    try {
+      let result;
+      if (communityPublishedRecord?.id) {
+        result = await client
+          .from('community_dashboards')
+          .update(payload)
+          .eq('id', communityPublishedRecord.id)
+          .eq('owner_user_id', currentUser.id)
+          .select('id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
+          .maybeSingle();
+      } else {
+        result = await client
+          .from('community_dashboards')
+          .insert(payload)
+          .select('id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
+          .maybeSingle();
+      }
+      if (result.error) throw result.error;
+      communityPublishedRecord = result.data || communityPublishedRecord;
+      await refreshCommunityPublishButton();
+      closeCommunityPublishModal();
+      if (typeof showVigilToast === 'function') showVigilToast('Community dashboard published', title, 'ok');
+      else if (typeof notifyApp === 'function') notifyApp('Community dashboard published', title, 'ok');
+      if (typeof trackEvent === 'function') trackEvent('community_dashboard_published', { community_dashboard_id: communityPublishedRecord?.id || null, dashboard_camera_count: snap.count });
+    } catch (err) {
+      console.error('Community publish failed:', err);
+      setCommunityPublishMessage(err?.message || 'Could not publish dashboard.', true);
+    } finally {
+      communityPublishBusy = false;
+      if (save) save.disabled = false;
+      if (unpublish) unpublish.disabled = false;
+    }
+  }
+
+  async function unpublishCommunityDashboard() {
+    if (communityPublishBusy || !communityPublishedRecord?.id) return;
+    const ok = typeof confirmAppAction === 'function'
+      ? await confirmAppAction('Unpublish community dashboard?', 'This removes it from the community area. Your private dashboard is not affected.', 'Unpublish', true)
+      : window.confirm('Unpublish community dashboard?');
+    if (!ok) return;
+    const client = typeof initSupabaseClient === 'function' ? initSupabaseClient() : null;
+    if (!client || !currentUser) return;
+    communityPublishBusy = true;
+    setCommunityPublishMessage('Unpublishing…');
+    try {
+      const { error } = await client
+        .from('community_dashboards')
+        .update({ is_published: false, updated_at: new Date().toISOString() })
+        .eq('id', communityPublishedRecord.id)
+        .eq('owner_user_id', currentUser.id);
+      if (error) throw error;
+      communityPublishedRecord = null;
+      await refreshCommunityPublishButton();
+      closeCommunityPublishModal();
+      if (typeof showVigilToast === 'function') showVigilToast('Community dashboard unpublished', 'It is no longer visible in Community.', 'ok');
+      else if (typeof notifyApp === 'function') notifyApp('Community dashboard unpublished', 'It is no longer visible in Community.', 'ok');
+    } catch (err) {
+      console.error('Community unpublish failed:', err);
+      setCommunityPublishMessage(err?.message || 'Could not unpublish dashboard.', true);
+    } finally {
+      communityPublishBusy = false;
+    }
+  }
+
+  function wireCommunityPublishing() {
+    document.getElementById('dashPublishCommunity')?.addEventListener('click', openCommunityPublishModal);
+    document.getElementById('communityPublishClose')?.addEventListener('click', closeCommunityPublishModal);
+    document.getElementById('communityPublishCancel')?.addEventListener('click', closeCommunityPublishModal);
+    document.getElementById('communityPublishSave')?.addEventListener('click', saveCommunityPublish);
+    document.getElementById('communityPublishUnpublish')?.addEventListener('click', unpublishCommunityDashboard);
+    document.getElementById('communityPublishModal')?.addEventListener('click', ev => {
+      if (ev.target && ev.target.id === 'communityPublishModal') closeCommunityPublishModal();
+    });
+    refreshCommunityPublishButton();
+    setInterval(() => {
+      if (document.body.classList.contains('dashboard-active')) refreshCommunityPublishButton();
+    }, 15000);
+  }
+
+  const originalApplyAuthSession = window.applyAuthSession;
+  if (typeof originalApplyAuthSession === 'function') {
+    window.applyAuthSession = async function communityAwareApplyAuthSession() {
+      const result = await originalApplyAuthSession.apply(this, arguments);
+      setTimeout(refreshCommunityPublishButton, 300);
+      return result;
+    };
+  }
+
+  const originalOpenProfileModal = window.openProfileModal;
+  window.refreshCommunityPublishButton = refreshCommunityPublishButton;
+  window.openCommunityPublishModal = openCommunityPublishModal;
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wireCommunityPublishing, { once: true });
+  } else {
+    wireCommunityPublishing();
   }
 })();
 </script>
