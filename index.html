@@ -18399,9 +18399,11 @@ function visibleViewportSpanDegrees() {
           <span class="community-pill">📷 ${Number(row.camera_count || 0)}</span>
           <span class="community-pill">👁 ${Number(row.view_count || 0)}</span>
           <span class="community-pill">🔖 ${Number(row.bookmark_count || 0)}</span>
+          <span class="community-pill">⧉ ${Number(row.copy_count || 0)}</span>
         </div>
         <div class="community-card-actions">
           <button class="community-action primary community-open" type="button">Open</button>
+          <button class="community-action community-copy" type="button">Copy</button>
           <button class="community-action community-bookmark ${row.is_bookmarked ? 'active' : ''}" type="button">${row.is_bookmarked ? 'Bookmarked' : 'Bookmark'}</button>
           <button class="community-action community-like ${row.is_liked ? 'active' : ''}" type="button">${row.is_liked ? 'Liked' : 'Like'}</button>
         </div>
@@ -18428,6 +18430,7 @@ function visibleViewportSpanDegrees() {
     grid.querySelectorAll('.community-card').forEach(card => {
       const id = card.dataset.id;
       card.querySelector('.community-open')?.addEventListener('click', () => openCommunityDashboard(id));
+      card.querySelector('.community-copy')?.addEventListener('click', () => copyCommunityDashboard(id));
       card.querySelector('.community-bookmark')?.addEventListener('click', () => toggleCommunityBookmark(id));
       card.querySelector('.community-like')?.addEventListener('click', () => toggleCommunityLike(id));
     });
@@ -18499,6 +18502,78 @@ function visibleViewportSpanDegrees() {
     }
   }
 
+  async function fetchCommunityDashboardSnapshot(id) {
+    const client = communityClient();
+    if (!client) throw new Error('Supabase is not available.');
+    const { data, error } = await client.rpc('get_community_dashboard', { p_dashboard_id: id });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row || !row.dashboard_json_snapshot) throw new Error('Community dashboard not found.');
+    return row;
+  }
+
+  async function copyCommunityDashboard(id, opts = {}) {
+    if (!requireCommunityAuth()) return;
+    const client = communityClient();
+    if (!client) return;
+    try {
+      const row = await fetchCommunityDashboardSnapshot(id);
+      const snapshot = row.dashboard_json_snapshot || {};
+      const nameBase = String(row.title || 'Community dashboard').trim() || 'Community dashboard';
+      const privateName = nameBase.endsWith('copy') ? nameBase : `${nameBase} copy`;
+      const cameraCount = Number(row.camera_count || (Array.isArray(snapshot.order) ? snapshot.order.length : 0));
+      const insertPayload = {
+        user_id: currentUser.id,
+        name: privateName,
+        dashboard_json: snapshot,
+        camera_count: cameraCount,
+        updated_at: new Date().toISOString()
+      };
+      const { data: inserted, error: insertError } = await client
+        .from('dashboards')
+        .insert(insertPayload)
+        .select('id,user_id,name,dashboard_json,camera_count,created_at,updated_at')
+        .maybeSingle();
+      if (insertError) throw insertError;
+      await client.rpc('increment_community_dashboard_copy', { p_dashboard_id: id }).catch?.(() => {});
+      const localRow = communityRows.find(r => String(r.id) === String(id));
+      if (localRow) localRow.copy_count = Number(localRow.copy_count || 0) + 1;
+      if (typeof renderCommunityDashboards === 'function') renderCommunityDashboards();
+      if (typeof getSavedDashboardViews === 'function') {
+        try { await getSavedDashboardViews(true); } catch (_) {}
+      }
+      if (typeof renderSavedDashboardsPanel === 'function') {
+        try { await renderSavedDashboardsPanel(true); } catch (_) {}
+      }
+      if (typeof notifyApp === 'function') notifyApp('Copied to My dashboards', privateName, 'ok');
+      else if (typeof showVigilToast === 'function') showVigilToast('Copied to My dashboards', privateName, 'ok');
+      if (typeof trackEvent === 'function') trackEvent('community_dashboard_copied', { community_dashboard_id: id, dashboard_camera_count: cameraCount });
+      if (opts.openAfterCopy !== false) {
+        const savedView = {
+          id: inserted?.id,
+          name: inserted?.name || privateName,
+          state: inserted?.dashboard_json || snapshot,
+          camera_count: cameraCount,
+          created_at: inserted?.created_at,
+          updated_at: inserted?.updated_at
+        };
+        if (typeof loadSavedDashboardViewObject === 'function') {
+          await loadSavedDashboardViewObject(savedView);
+        } else {
+          await hydrateCommunitySnapshotCameras(snapshot);
+          dashboardState = typeof normaliseDashboardState === 'function' ? normaliseDashboardState(snapshot) : snapshot;
+          if (typeof installDashboardStateCompatibilityAliases === 'function') installDashboardStateCompatibilityAliases(dashboardState);
+          switchView('dashboard');
+          if (typeof renderDashboard === 'function') renderDashboard();
+        }
+        removeCommunitySnapshotBanner();
+      }
+    } catch (err) {
+      console.error('Copy community dashboard failed:', err);
+      if (typeof notifyApp === 'function') notifyApp('Could not copy dashboard', err?.message || String(err), 'err');
+    }
+  }
+
   async function hydrateCommunitySnapshotCameras(snapshot) {
     const ids = Array.isArray(snapshot?.order) ? snapshot.order.map(String).filter(Boolean) : [];
     const missing = ids.filter(id => !(typeof dashboardCameraById === 'function' && dashboardCameraById(id)));
@@ -18519,8 +18594,10 @@ function visibleViewportSpanDegrees() {
     banner.id = 'communitySnapshotBanner';
     banner.className = 'community-snapshot-banner';
     banner.innerHTML = `<div><strong>Viewing community snapshot:</strong> ${cEsc(row.title || 'Untitled dashboard')} · @${cEsc(row.owner_username_snapshot || 'unknown')} · ${Number(row.camera_count || 0)} cameras</div>
+      <button class="community-action" id="communityCopyOpenDashboard" type="button">Copy to my dashboards</button>
       <button class="community-action" id="communityBackToBrowser" type="button">Back to Community</button>`;
     pane.insertBefore(banner, wall);
+    document.getElementById('communityCopyOpenDashboard')?.addEventListener('click', () => copyCommunityDashboard(row.id, { openAfterCopy: true }));
     document.getElementById('communityBackToBrowser')?.addEventListener('click', () => switchView('community'));
   }
 
@@ -18571,6 +18648,7 @@ function visibleViewportSpanDegrees() {
 
   window.loadCommunityDashboards = loadCommunityDashboards;
   window.openCommunityDashboard = openCommunityDashboard;
+  window.copyCommunityDashboard = copyCommunityDashboard;
   window.renderCommunityDashboards = renderCommunityDashboards;
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireCommunityBrowser, { once: true });
