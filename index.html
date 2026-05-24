@@ -17925,7 +17925,29 @@ function visibleViewportSpanDegrees() {
       }
       if (result.error) throw result.error;
       communityPublishedRecord = result.data || communityPublishedRecord;
+      // The local dashboard should be considered synced immediately after a successful publish/update.
+      // Some browsers/Supabase responses can briefly return a cached/previous snapshot, so force the
+      // in-memory publish record to the exact snapshot we just wrote before refreshing the button.
+      if (communityPublishedRecord) {
+        communityPublishedRecord.dashboard_json_snapshot = snap.state;
+        communityPublishedRecord.source_dashboard_id = sourceDashboardId;
+        communityPublishedRecord.title = title;
+        communityPublishedRecord.description = description || null;
+        communityPublishedRecord.location_label = location || null;
+        communityPublishedRecord.tags = tags;
+        communityPublishedRecord.is_published = true;
+        communityPublishedRecord.updated_at = payload.updated_at;
+        communityPublishedRecord.published_at = payload.published_at;
+      }
       await refreshCommunityPublishButton();
+      if (communityPublishedRecord) {
+        communityPublishedRecord.dashboard_json_snapshot = snap.state;
+        const btnNow = document.getElementById('dashPublishCommunity');
+        if (btnNow) setCommunityPublishButtonVisualState(btnNow);
+      }
+      if (typeof window.refreshSavedDashboardsPublishStatus === 'function') {
+        setTimeout(() => window.refreshSavedDashboardsPublishStatus(), 100);
+      }
       closeCommunityPublishModal();
       if (typeof showVigilToast === 'function') showVigilToast('Community dashboard published', title, 'ok');
       else if (typeof notifyApp === 'function') notifyApp('Community dashboard published', title, 'ok');
