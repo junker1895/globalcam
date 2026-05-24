@@ -1886,6 +1886,18 @@ body.community-active #dashboardView {
   font-family:var(--mono); font-size:10px; font-weight:850;
   backdrop-filter: blur(8px);
 }
+.community-featured-badge {
+  position:absolute; right:10px; top:9px; z-index:3;
+  height:22px; padding:0 8px; border-radius:999px;
+  display:inline-flex; align-items:center; gap:5px;
+  background:rgba(245,158,11,.92); color:#fff;
+  font-family:var(--mono); font-size:9px; font-weight:900;
+  letter-spacing:.035em; text-transform:uppercase;
+  box-shadow:0 4px 12px rgba(15,23,42,.22);
+  backdrop-filter:blur(8px);
+}
+.community-card.community-featured { border-color:rgba(245,158,11,.30); }
+.community-card.community-featured:hover { border-color:rgba(245,158,11,.55); }
 .community-card-placeholder-icon {
   position:absolute; left:50%; top:50%; transform:translate(-50%, -50%);
   width:42px; height:42px; border-radius:12px;
@@ -4640,6 +4652,8 @@ body.community-thumbnail-capture #dashboardFeedWall::-webkit-scrollbar {
           <button id="communityClearSearch" class="community-clear-search" type="button" title="Clear search" aria-label="Clear community search">×</button>
         </div>
         <select id="communitySort" class="community-sort" aria-label="Community dashboard sort">
+          <option value="trending">Trending</option>
+          <option value="featured">Featured</option>
           <option value="recent">Recent</option>
           <option value="most_viewed">Most viewed</option>
           <option value="most_bookmarked">Most bookmarked</option>
@@ -18932,7 +18946,7 @@ function visibleViewportSpanDegrees() {
     try {
       localStorage.setItem(COMMUNITY_BROWSER_PREFS_KEY, JSON.stringify({
         search: document.getElementById('communitySearch')?.value || '',
-        sort: document.getElementById('communitySort')?.value || 'recent'
+        sort: document.getElementById('communitySort')?.value || 'trending'
       }));
     } catch (_) {}
   }
@@ -18948,12 +18962,14 @@ function visibleViewportSpanDegrees() {
 
   function communitySortLabel(value) {
     return ({
+      trending: 'Trending',
+      featured: 'Featured',
       recent: 'Recent',
       most_viewed: 'Most viewed',
       most_bookmarked: 'Most bookmarked',
       most_liked: 'Most liked',
       most_copied: 'Most copied'
-    })[value || 'recent'] || 'Recent';
+    })[value || 'trending'] || 'Trending';
   }
 
   function updateCommunityBrowserControls() {
@@ -18967,7 +18983,7 @@ function visibleViewportSpanDegrees() {
     }
     const status = document.getElementById('communityBrowserStatus');
     if (status) {
-      const sort = document.getElementById('communitySort')?.value || 'recent';
+      const sort = document.getElementById('communitySort')?.value || 'trending';
       const parts = [];
       if (currentUser) parts.push(`${communityRows.length} dashboard${communityRows.length === 1 ? '' : 's'}`);
       if (searchValue.trim()) parts.push(`Search: “${searchValue.trim()}”`);
@@ -19046,9 +19062,9 @@ function visibleViewportSpanDegrees() {
     const thumb = communityThumbnailUrl(row);
     const count = Number(row.camera_count || communitySnapshotOrder(row).length || 0);
     if (thumb) {
-      return `<div class="community-card-preview has-image"><img loading="lazy" alt="${cEsc(row.title || 'Community dashboard preview')}" src="${cEsc(thumb)}" onerror="this.closest('.community-card-preview').classList.remove('has-image');this.remove();"><span class="community-card-preview-badge">📷 ${count}</span></div>`;
+      return `<div class="community-card-preview has-image"><img loading="lazy" alt="${cEsc(row.title || 'Community dashboard preview')}" src="${cEsc(thumb)}" onerror="this.closest('.community-card-preview').classList.remove('has-image');this.remove();">${row.is_featured ? '<span class="community-featured-badge">★ Featured</span>' : ''}<span class="community-card-preview-badge">📷 ${count}</span></div>`;
     }
-    return `<div class="community-card-preview"><div class="community-card-placeholder-icon">◈</div><span class="community-card-preview-badge">📷 ${count}</span></div>`;
+    return `<div class="community-card-preview"><div class="community-card-placeholder-icon">◈</div>${row.is_featured ? '<span class="community-featured-badge">★ Featured</span>' : ''}<span class="community-card-preview-badge">📷 ${count}</span></div>`;
   }
 
   async function hydrateCommunityRowsWithSnapshots(rows) {
@@ -19060,7 +19076,7 @@ function visibleViewportSpanDegrees() {
     try {
       const { data, error } = await client
         .from('community_dashboards')
-        .select('id,dashboard_json_snapshot,thumbnail_url')
+        .select('id,dashboard_json_snapshot,thumbnail_url,is_featured')
         .in('id', missing);
       if (error) throw error;
       const snapMap = new Map((Array.isArray(data) ? data : []).map(row => [String(row.id), row]));
@@ -19068,6 +19084,7 @@ function visibleViewportSpanDegrees() {
         const extra = snapMap.get(String(row.id));
         if (extra?.dashboard_json_snapshot) row.dashboard_json_snapshot = extra.dashboard_json_snapshot;
         if (extra?.thumbnail_url) row.thumbnail_url = extra.thumbnail_url;
+        if (typeof extra?.is_featured === 'boolean') row.is_featured = extra.is_featured;
       });
     } catch (err) {
       console.warn('Community thumbnail snapshot lookup failed:', err?.message || err);
@@ -19078,7 +19095,7 @@ function visibleViewportSpanDegrees() {
   function communityCardHtml(row) {
     const plan = String(row.owner_plan_snapshot || 'free').toLowerCase();
     const tags = Array.isArray(row.tags) && row.tags.length ? row.tags.slice(0, 3).map(t => `#${cEsc(t)}`).join(' ') : '';
-    return `<article class="community-card" data-id="${cEsc(row.id)}">
+    return `<article class="community-card ${row.is_featured ? 'community-featured' : ''}" data-id="${cEsc(row.id)}">
       ${communityCardPreviewHtml(row)}
       <div class="community-card-body">
         <div class="community-author">
@@ -19142,7 +19159,7 @@ function visibleViewportSpanDegrees() {
     const client = communityClient();
     if (!client) return;
     const search = document.getElementById('communitySearch')?.value || '';
-    const sort = document.getElementById('communitySort')?.value || 'recent';
+    const sort = document.getElementById('communitySort')?.value || 'trending';
     saveCommunityBrowserPrefs();
     communityLoading = true;
     updateCommunityBrowserControls();
