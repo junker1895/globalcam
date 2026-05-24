@@ -19389,7 +19389,7 @@ function visibleViewportSpanDegrees() {
           <button class="community-action primary community-open" type="button">Open</button>
           <button class="community-action community-copy" type="button">Copy</button>
           <button class="community-action community-share" type="button">Share</button>
-          <button class="community-action report community-report" type="button">Report</button>
+          <button class="community-action report community-report" type="button" data-community-id="${cEsc(row.id)}">Report</button>
           <button class="community-action community-bookmark ${row.is_bookmarked ? 'active' : ''}" type="button">${row.is_bookmarked ? 'Bookmarked' : 'Bookmark'}</button>
           <button class="community-action community-like ${row.is_liked ? 'active' : ''}" type="button">${row.is_liked ? 'Liked' : 'Like'}</button>
         </div>
@@ -19497,28 +19497,6 @@ function visibleViewportSpanDegrees() {
       if (ev.key === 'Escape' && document.getElementById('communityReportModal')?.classList.contains('open')) closeCommunityReportModal();
     });
   }
-
-  function installCommunityReportClickFallback() {
-    if (window.__communityReportClickFallbackInstalled) return;
-    window.__communityReportClickFallbackInstalled = true;
-    document.addEventListener('click', ev => {
-      const trigger = ev.target?.closest?.('.community-report, #communityReportOpenDashboard');
-      if (!trigger) return;
-      if (trigger.id === 'communityReportSubmit' || trigger.id === 'communityReportCancel' || trigger.id === 'communityReportClose') return;
-
-      const card = trigger.closest?.('.community-card');
-      const id = card?.dataset?.id
-        || trigger.getAttribute('data-community-id')
-        || (trigger.id === 'communityReportOpenDashboard' && (openCommunityDashboardRecord?.id || window.openCommunityDashboardRecord?.id))
-        || '';
-
-      if (!id) return;
-      ev.preventDefault();
-      ev.stopPropagation();
-      openCommunityReportModal(String(id));
-    }, true);
-  }
-
 
   function creatorProfileUrl(username) {
     const url = new URL(window.location.href);
@@ -19956,7 +19934,7 @@ function visibleViewportSpanDegrees() {
         <button class="community-action ${row.is_bookmarked ? 'active' : ''}" id="communityBookmarkOpenDashboard" type="button">${row.is_bookmarked ? 'Bookmarked' : 'Bookmark'}</button>
         <button class="community-action ${row.is_liked ? 'active' : ''}" id="communityLikeOpenDashboard" type="button">${row.is_liked ? 'Liked' : 'Like'}</button>
         <button class="community-action" id="communityShareOpenDashboard" type="button">Share</button>
-        <button class="community-action report" id="communityReportOpenDashboard" type="button">Report</button>
+        <button class="community-action report" id="communityReportOpenDashboard" type="button" data-community-id="${cEsc(row.id)}">Report</button>
         <button class="community-action primary" id="communityCopyOpenDashboard" type="button">Copy</button>
       </div>`;
     pane.insertBefore(banner, wall);
@@ -20112,8 +20090,39 @@ function visibleViewportSpanDegrees() {
   window.openCreatorProfile = openCreatorProfile;
   window.loadCreatorDashboards = loadCreatorDashboards;
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { wireCommunityBrowser(); wireCommunityReportModal(); installCommunityReportClickFallback(); installCommunityRouting(); bootCommunityDeepLink(); }, { once: true });
-  else { wireCommunityBrowser(); wireCommunityReportModal(); installCommunityReportClickFallback(); installCommunityRouting(); bootCommunityDeepLink(); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { wireCommunityBrowser(); wireCommunityReportModal(); installCommunityRouting(); bootCommunityDeepLink(); }, { once: true });
+  else { wireCommunityBrowser(); wireCommunityReportModal(); installCommunityRouting(); bootCommunityDeepLink(); }
+})();
+</script>
+
+<script>
+// Robust report-button wiring. This is intentionally isolated from the Community browser internals:
+// it catches card/detail Report clicks even if card-specific listeners were not rebound after a render.
+(function installCommunityReportButtonFallback(){
+  if (window.__viewportCommunityReportFallbackV2) return;
+  window.__viewportCommunityReportFallbackV2 = true;
+  document.addEventListener('click', function(ev){
+    const target = ev.target;
+    if (!target || !target.closest) return;
+    const trigger = target.closest('.community-report, #communityReportOpenDashboard');
+    if (!trigger) return;
+    const modal = document.getElementById('communityReportModal');
+    if (modal && modal.contains(trigger)) return;
+    const card = trigger.closest('.community-card');
+    const fromCard = card && card.dataset ? card.dataset.id : '';
+    const fromButton = trigger.getAttribute('data-community-id') || '';
+    const fromOpenRecord = window.openCommunityDashboardRecord && window.openCommunityDashboardRecord.id ? window.openCommunityDashboardRecord.id : '';
+    const id = fromButton || fromCard || fromOpenRecord;
+    if (!id) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+    if (typeof window.openCommunityReportModal === 'function') {
+      window.openCommunityReportModal(String(id));
+    } else {
+      console.warn('Community report modal is not available yet.');
+    }
+  }, true);
 })();
 </script>
 
