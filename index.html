@@ -1905,8 +1905,42 @@ body.community-active #dashboardView {
 .community-plan.pro { color:var(--c-accent); background:var(--c-accent-bg); border-color:rgba(37,99,235,.25); }
 .community-meta { display:flex; flex-wrap:wrap; gap:6px; font-family:var(--mono); font-size:10px; color:var(--c-text3); }
 .community-pill { display:inline-flex; align-items:center; gap:4px; height:20px; padding:0 7px; border-radius:999px; background:var(--c-surface2); border:1px solid var(--c-border); }
-.community-card-actions { margin-top:auto; display:flex; gap:7px; align-items:center; }
-.community-action { height:30px; padding:0 10px; border-radius:7px; border:1px solid var(--c-border); background:var(--c-surface); color:var(--c-text2); font-family:var(--font); font-size:12px; font-weight:800; cursor:pointer; }
+.community-card-actions {
+  margin-top:auto;
+  display:flex;
+  gap:7px;
+  row-gap:7px;
+  align-items:center;
+  flex-wrap:wrap;
+  overflow:visible;
+}
+.community-card-actions .community-action {
+  flex: 0 0 auto;
+}
+.community-action {
+  height:30px;
+  padding:0 10px;
+  border-radius:7px;
+  border:1px solid var(--c-border);
+  background:var(--c-surface);
+  color:var(--c-text2);
+  font-family:var(--font);
+  font-size:12px;
+  font-weight:800;
+  cursor:pointer;
+  white-space:nowrap;
+  max-width:100%;
+}
+.community-card-actions .community-action:not(.primary) {
+  padding:0 9px;
+  font-size:11px;
+}
+.community-card-actions .community-bookmark,
+.community-card-actions .community-like {
+  max-width:118px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
 .community-action:hover { background:var(--c-surface2); color:var(--c-text); }
 .community-action.primary { background:var(--c-accent); border-color:var(--c-accent); color:#fff; }
 .community-action.active { background:var(--c-accent-bg); border-color:rgba(37,99,235,.25); color:var(--c-accent); }
@@ -19064,6 +19098,7 @@ function visibleViewportSpanDegrees() {
         <div class="community-card-actions">
           <button class="community-action primary community-open" type="button">Open</button>
           <button class="community-action community-copy" type="button">Copy</button>
+          <button class="community-action community-share" type="button">Share</button>
           <button class="community-action community-bookmark ${row.is_bookmarked ? 'active' : ''}" type="button">${row.is_bookmarked ? 'Bookmarked' : 'Bookmark'}</button>
           <button class="community-action community-like ${row.is_liked ? 'active' : ''}" type="button">${row.is_liked ? 'Liked' : 'Like'}</button>
         </div>
@@ -19095,6 +19130,7 @@ function visibleViewportSpanDegrees() {
       const id = card.dataset.id;
       card.querySelector('.community-open')?.addEventListener('click', () => openCommunityDashboard(id));
       card.querySelector('.community-copy')?.addEventListener('click', () => copyCommunityDashboard(id));
+      card.querySelector('.community-share')?.addEventListener('click', () => shareCommunityDashboard(id));
       card.querySelector('.community-bookmark')?.addEventListener('click', () => toggleCommunityBookmark(id));
       card.querySelector('.community-like')?.addEventListener('click', () => toggleCommunityLike(id));
     });
@@ -19134,6 +19170,54 @@ function visibleViewportSpanDegrees() {
     }
     updateCommunityBrowserControls();
     renderCommunityDashboards();
+  }
+
+  function communityDashboardShareUrl(id) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('community', String(id));
+    return url.toString();
+  }
+
+  function setCommunityDashboardUrl(id, mode = 'push') {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('community', String(id));
+      const state = { ...(history.state || {}), communityDashboardId: String(id) };
+      if (mode === 'replace') history.replaceState(state, '', url.toString());
+      else history.pushState(state, '', url.toString());
+    } catch (_) {}
+  }
+
+  function clearCommunityDashboardUrl(mode = 'replace') {
+    try {
+      const url = new URL(window.location.href);
+      if (!url.searchParams.has('community')) return;
+      url.searchParams.delete('community');
+      const state = { ...(history.state || {}) };
+      delete state.communityDashboardId;
+      if (mode === 'push') history.pushState(state, '', url.toString());
+      else history.replaceState(state, '', url.toString());
+    } catch (_) {}
+  }
+
+  async function shareCommunityDashboard(id) {
+    const url = communityDashboardShareUrl(id);
+    try {
+      if (navigator.share) {
+        const row = communityRows.find(r => String(r.id) === String(id)) || openCommunityDashboardRecord;
+        await navigator.share({ title: row?.title || 'Community dashboard', text: 'Open this community dashboard in Viewport.', url });
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        if (typeof notifyApp === 'function') notifyApp('Share link copied', 'Community dashboard link copied to clipboard.', 'ok');
+      } else {
+        window.prompt('Copy community dashboard link', url);
+      }
+      if (typeof trackEvent === 'function') trackEvent('community_dashboard_shared', { community_dashboard_id: id });
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      console.warn('Community share failed:', err);
+      try { window.prompt('Copy community dashboard link', url); } catch (_) {}
+    }
   }
 
   async function toggleCommunityBookmark(id) {
@@ -19309,16 +19393,18 @@ function visibleViewportSpanDegrees() {
         <button class="community-action" id="communityBackToBrowser" type="button">Back to Community</button>
         <button class="community-action ${row.is_bookmarked ? 'active' : ''}" id="communityBookmarkOpenDashboard" type="button">${row.is_bookmarked ? 'Bookmarked' : 'Bookmark'}</button>
         <button class="community-action ${row.is_liked ? 'active' : ''}" id="communityLikeOpenDashboard" type="button">${row.is_liked ? 'Liked' : 'Like'}</button>
+        <button class="community-action" id="communityShareOpenDashboard" type="button">Share</button>
         <button class="community-action primary" id="communityCopyOpenDashboard" type="button">Copy</button>
       </div>`;
     pane.insertBefore(banner, wall);
-    document.getElementById('communityBackToBrowser')?.addEventListener('click', () => switchView('community'));
+    document.getElementById('communityBackToBrowser')?.addEventListener('click', () => { clearCommunityDashboardUrl('push'); switchView('community'); });
     document.getElementById('communityBookmarkOpenDashboard')?.addEventListener('click', () => toggleCommunityBookmark(row.id));
     document.getElementById('communityLikeOpenDashboard')?.addEventListener('click', () => toggleCommunityLike(row.id));
+    document.getElementById('communityShareOpenDashboard')?.addEventListener('click', () => shareCommunityDashboard(row.id));
     document.getElementById('communityCopyOpenDashboard')?.addEventListener('click', () => copyCommunityDashboard(row.id, { openAfterCopy: true }));
   }
 
-  async function openCommunityDashboard(id) {
+  async function openCommunityDashboard(id, opts = {}) {
     if (!requireCommunityAuth()) return;
     const client = communityClient();
     try {
@@ -19350,6 +19436,7 @@ function visibleViewportSpanDegrees() {
       renderCommunitySnapshotBanner(row);
       if (typeof renderDashboard === 'function') renderDashboard();
       if (typeof updateDashboardBadge === 'function') updateDashboardBadge();
+      if (opts.updateUrl !== false) setCommunityDashboardUrl(id, opts.replaceUrl ? 'replace' : 'push');
       if (typeof trackEvent === 'function') trackEvent('community_dashboard_opened', { community_dashboard_id: id, dashboard_camera_count: row.camera_count || 0 });
     } catch (err) {
       console.error('Open community dashboard failed:', err);
@@ -19384,13 +19471,58 @@ function visibleViewportSpanDegrees() {
     updateCommunityBrowserControls();
   }
 
+  function communityIdFromUrl() {
+    try { return new URL(window.location.href).searchParams.get('community') || ''; } catch (_) { return ''; }
+  }
+
+  function installCommunityRouting() {
+    if (window.__communityRoutingInstalled) return;
+    window.__communityRoutingInstalled = true;
+
+    const originalSwitchView = window.switchView;
+    if (typeof originalSwitchView === 'function') {
+      window.switchView = function communityRouteAwareSwitchView(view) {
+        const result = originalSwitchView.apply(this, arguments);
+        if (view !== 'dashboard' && communityIdFromUrl()) clearCommunityDashboardUrl('replace');
+        return result;
+      };
+      try { switchView = window.switchView; } catch (_) {}
+    }
+
+    window.addEventListener('popstate', () => {
+      const id = communityIdFromUrl();
+      if (id) openCommunityDashboard(id, { updateUrl: false });
+      else if (openCommunityDashboardRecord) {
+        removeCommunitySnapshotBanner();
+        openCommunityDashboardRecord = null;
+        window.openCommunityDashboardRecord = null;
+        if (typeof switchView === 'function') switchView('community');
+      }
+    });
+  }
+
+  function bootCommunityDeepLink() {
+    const id = communityIdFromUrl();
+    if (!id) return;
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      const ready = !!(typeof initSupabaseClient === 'function' && initSupabaseClient()) && !!document.body.classList.contains('app-ready');
+      if (ready || attempts > 40) {
+        window.clearInterval(timer);
+        if (ready) openCommunityDashboard(id, { replaceUrl: true });
+      }
+    }, 250);
+  }
+
   window.loadCommunityDashboards = loadCommunityDashboards;
   window.openCommunityDashboard = openCommunityDashboard;
   window.copyCommunityDashboard = copyCommunityDashboard;
+  window.shareCommunityDashboard = shareCommunityDashboard;
   window.renderCommunityDashboards = renderCommunityDashboards;
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wireCommunityBrowser, { once: true });
-  else wireCommunityBrowser();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { wireCommunityBrowser(); installCommunityRouting(); bootCommunityDeepLink(); }, { once: true });
+  else { wireCommunityBrowser(); installCommunityRouting(); bootCommunityDeepLink(); }
 })();
 </script>
 
@@ -19400,7 +19532,8 @@ function visibleViewportSpanDegrees() {
 (function installCommunityLockContextCleanup(){
   function clearCommunityDashboardContext(){
     try { window.openCommunityDashboardRecord = null; } catch (_) {}
-    try { document.getElementById('communitySnapshotBanner')?.remove(); } catch (_) {}
+    try { if (typeof clearCommunityDashboardUrl === 'function') clearCommunityDashboardUrl('replace'); } catch (_) {}
+    try { document.getElementById('communitySnapshotBanner')?.remove(); } catch (_){ }
   }
   const originalLoadSaved = window.loadSavedDashboardViewObject;
   if (typeof originalLoadSaved === 'function' && !window.__communityLockLoadSavedPatched) {
