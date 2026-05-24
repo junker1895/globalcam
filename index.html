@@ -2054,6 +2054,112 @@ body.community-active #dashboardView {
 .dashboard-community-locked .dash-feed-state-dot,
 .dashboard-community-locked .dash-resize { display:none !important; }
 
+
+
+/* ─── CREATOR PROFILE VIEW ─── */
+#creatorProfileView {
+  position: fixed;
+  top: var(--top-h);
+  left: 0;
+  right: 0;
+  bottom: var(--bar-h);
+  z-index: 44;
+  display: none;
+  flex-direction: column;
+  background: var(--c-bg);
+  overflow: hidden;
+}
+body.creator-profile-active #creatorProfileView { display: flex; }
+body.creator-profile-active #communityView { display: none !important; }
+.creator-profile-shell { display:flex; flex-direction:column; min-height:0; height:100%; }
+.creator-profile-head {
+  padding: 18px;
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface);
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.creator-profile-avatar {
+  width: 74px;
+  height: 74px;
+  border-radius: 18px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface2);
+  color: var(--c-accent);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+  font-family: var(--mono);
+  font-size: 24px;
+  font-weight: 900;
+  flex: 0 0 auto;
+}
+.creator-profile-avatar img { width:100%; height:100%; object-fit:cover; display:block; }
+.creator-profile-main { min-width:0; flex:1; }
+.creator-profile-top { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.creator-profile-name { font-size:22px; font-weight:850; letter-spacing:-.035em; color:var(--c-text); }
+.creator-profile-plan {
+  display:inline-flex; align-items:center; height:22px; padding:0 8px; border-radius:999px;
+  background:var(--c-accent-bg); color:var(--c-accent); font-family:var(--mono);
+  font-size:10px; font-weight:900; text-transform:uppercase;
+}
+.creator-profile-plan.pro { background:rgba(16,185,129,.12); color:var(--c-success); }
+.creator-profile-bio { margin-top:7px; max-width:820px; color:var(--c-text2); font-size:13px; line-height:1.55; }
+.creator-profile-stats { margin-top:13px; display:flex; flex-wrap:wrap; gap:8px; }
+.creator-profile-stat {
+  min-width:88px; padding:8px 10px; border-radius:10px; border:1px solid var(--c-border);
+  background:var(--c-surface2);
+}
+.creator-profile-stat strong { display:block; color:var(--c-text); font-size:15px; line-height:1.1; }
+.creator-profile-stat span { display:block; margin-top:3px; color:var(--c-text3); font-family:var(--mono); font-size:9px; font-weight:800; text-transform:uppercase; }
+.creator-profile-toolbar {
+  padding: 12px 18px;
+  border-bottom:1px solid var(--c-border);
+  background:var(--c-surface);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+.creator-profile-toolbar-left { display:flex; align-items:center; gap:8px; min-width:0; }
+.creator-profile-toolbar-title { color:var(--c-text2); font-size:12px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.creator-profile-grid {
+  flex:1;
+  min-height:0;
+  overflow:auto;
+  padding:18px;
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(320px, 1fr));
+  gap:16px;
+  align-content:start;
+}
+.creator-profile-empty {
+  grid-column:1 / -1;
+  min-height:180px;
+  border:1px dashed var(--c-border2);
+  border-radius:14px;
+  background:var(--c-surface);
+  color:var(--c-text3);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  padding:24px;
+  font-size:13px;
+  line-height:1.55;
+}
+.community-author-avatar.creator-link,
+.community-author-name.creator-link,
+.community-snapshot-avatar.creator-link,
+.community-snapshot-author.creator-link { cursor:pointer; }
+.community-author-avatar.creator-link:hover,
+.community-author-name.creator-link:hover,
+.community-snapshot-avatar.creator-link:hover,
+.community-snapshot-author.creator-link:hover { filter:brightness(.96); text-decoration:underline; }
+
+
 /* ─── DASHBOARD VIEW ─── */
 #dashboardView {
   position: fixed;
@@ -4665,6 +4771,43 @@ body.community-thumbnail-capture #dashboardFeedWall::-webkit-scrollbar {
     </div>
     <div id="communityBrowserStatus" class="community-browser-status"></div>
     <div id="communityGrid"></div>
+  </div>
+</div>
+
+
+<div id="creatorProfileView" aria-hidden="true">
+  <div class="creator-profile-shell">
+    <div class="creator-profile-head">
+      <div class="creator-profile-avatar" id="creatorProfileAvatar">?</div>
+      <div class="creator-profile-main">
+        <div class="creator-profile-top">
+          <div class="creator-profile-name" id="creatorProfileName">@creator</div>
+          <span class="creator-profile-plan" id="creatorProfilePlan">FREE</span>
+        </div>
+        <div class="creator-profile-bio" id="creatorProfileBio">Loading creator profile…</div>
+        <div class="creator-profile-stats">
+          <div class="creator-profile-stat"><strong id="creatorProfileDashboards">0</strong><span>Dashboards</span></div>
+          <div class="creator-profile-stat"><strong id="creatorProfileViews">0</strong><span>Views</span></div>
+          <div class="creator-profile-stat"><strong id="creatorProfileBookmarks">0</strong><span>Bookmarks</span></div>
+          <div class="creator-profile-stat"><strong id="creatorProfileLikes">0</strong><span>Likes</span></div>
+          <div class="creator-profile-stat"><strong id="creatorProfileCopies">0</strong><span>Copies</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="creator-profile-toolbar">
+      <div class="creator-profile-toolbar-left">
+        <button class="community-action" id="creatorProfileBack" type="button">← Back to Community</button>
+        <div class="creator-profile-toolbar-title" id="creatorProfileToolbarTitle">Published dashboards</div>
+      </div>
+      <select id="creatorProfileSort" class="community-sort" aria-label="Creator dashboard sort">
+        <option value="recent">Recent</option>
+        <option value="most_viewed">Most viewed</option>
+        <option value="most_bookmarked">Most bookmarked</option>
+        <option value="most_liked">Most liked</option>
+        <option value="most_copied">Most copied</option>
+      </select>
+    </div>
+    <div class="creator-profile-grid" id="creatorProfileGrid"></div>
   </div>
 </div>
 
@@ -16488,7 +16631,7 @@ function hideClusterLoadingStatusNow() {
 
 
   function postgrestTextInFilter(ids) {
-    return `in.(${ids.map(id => `"${String(id).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`).join(',')})`;
+    return `in.(${ids.map(id => `"${String(id).replace(/\\/g, '\\\\').replace(/"/g, '\"')}"`).join(',')})`;
   }
 
   async function fetchCameraAltitudeRowsByIds(ids) {
@@ -18922,6 +19065,9 @@ function visibleViewportSpanDegrees() {
   let openCommunityDashboardRecord = null;
   window.openCommunityDashboardRecord = null;
   let privateDashboardStateBeforeCommunity = null;
+  let activeCreatorProfileUsername = '';
+  let creatorProfileRows = [];
+  let creatorProfileLoading = false;
 
   function cEsc(value) {
     return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
@@ -19099,8 +19245,8 @@ function visibleViewportSpanDegrees() {
       ${communityCardPreviewHtml(row)}
       <div class="community-card-body">
         <div class="community-author">
-          ${communityAuthorAvatar(row)}
-          <span class="community-author-name">@${cEsc(row.owner_username_snapshot || 'unknown')}</span>
+          <span class="creator-link" data-community-creator="${cEsc(row.owner_username_snapshot || '')}" title="View @${cEsc(row.owner_username_snapshot || 'unknown')}">${communityAuthorAvatar(row)}</span>
+          <span class="community-author-name creator-link" data-community-creator="${cEsc(row.owner_username_snapshot || '')}">@${cEsc(row.owner_username_snapshot || 'unknown')}</span>
           <span class="community-plan ${plan === 'pro' ? 'pro' : ''}">${cEsc(plan)}</span>
         </div>
         <div class="community-card-title">${cEsc(row.title || 'Untitled dashboard')}</div>
@@ -19123,6 +19269,181 @@ function visibleViewportSpanDegrees() {
     </article>`;
   }
 
+  function bindCommunityCardActions(root) {
+    if (!root) return;
+    root.querySelectorAll('.community-card').forEach(card => {
+      const id = card.dataset.id;
+      card.querySelector('.community-open')?.addEventListener('click', () => openCommunityDashboard(id));
+      card.querySelector('.community-copy')?.addEventListener('click', () => copyCommunityDashboard(id));
+      card.querySelector('.community-share')?.addEventListener('click', () => shareCommunityDashboard(id));
+      card.querySelector('.community-bookmark')?.addEventListener('click', () => toggleCommunityBookmark(id));
+      card.querySelector('.community-like')?.addEventListener('click', () => toggleCommunityLike(id));
+    });
+    root.querySelectorAll('[data-community-creator]').forEach(el => {
+      el.addEventListener('click', ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const username = el.getAttribute('data-community-creator') || '';
+        if (username) openCreatorProfile(username);
+      });
+    });
+  }
+
+  function creatorProfileUrl(username) {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('community');
+    url.searchParams.set('profile', String(username || '').toLowerCase());
+    return url;
+  }
+
+  function setCreatorProfileUrl(username, mode = 'push') {
+    try {
+      const url = creatorProfileUrl(username);
+      const state = { ...(history.state || {}), creatorProfile: String(username || '').toLowerCase() };
+      if (mode === 'replace') history.replaceState(state, '', url.toString());
+      else history.pushState(state, '', url.toString());
+    } catch (_) {}
+  }
+
+  function clearCreatorProfileUrl(mode = 'replace') {
+    try {
+      const url = new URL(window.location.href);
+      if (!url.searchParams.has('profile')) return;
+      url.searchParams.delete('profile');
+      const state = { ...(history.state || {}) };
+      delete state.creatorProfile;
+      if (mode === 'push') history.pushState(state, '', url.toString());
+      else history.replaceState(state, '', url.toString());
+    } catch (_) {}
+  }
+
+  function creatorProfileFromUrl() {
+    try { return new URL(window.location.href).searchParams.get('profile') || ''; } catch (_) { return ''; }
+  }
+
+  function showCommunityBrowserFromProfile(mode = 'replace') {
+    document.body.classList.remove('creator-profile-active');
+    const view = document.getElementById('creatorProfileView');
+    if (view) view.setAttribute('aria-hidden', 'true');
+    activeCreatorProfileUsername = '';
+    creatorProfileRows = [];
+    clearCreatorProfileUrl(mode);
+    if (typeof switchView === 'function') switchView('community');
+  }
+
+  function formatCommunityNumber(value) {
+    const n = Number(value || 0);
+    try { return new Intl.NumberFormat(undefined, { notation: n >= 10000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(n); }
+    catch (_) { return String(n); }
+  }
+
+  function renderCreatorProfileHeader(profile) {
+    const username = profile?.username || activeCreatorProfileUsername || 'creator';
+    const avatar = document.getElementById('creatorProfileAvatar');
+    const plan = String(profile?.plan || 'free').toLowerCase();
+    if (avatar) {
+      avatar.innerHTML = profile?.avatar_url
+        ? `<img alt="@${cEsc(username)}" src="${cEsc(profile.avatar_url)}">`
+        : cEsc(String(username).charAt(0).toUpperCase() || '?');
+    }
+    const name = document.getElementById('creatorProfileName');
+    if (name) name.textContent = '@' + username;
+    const planEl = document.getElementById('creatorProfilePlan');
+    if (planEl) {
+      planEl.textContent = plan.toUpperCase();
+      planEl.classList.toggle('pro', plan === 'pro');
+    }
+    const bio = document.getElementById('creatorProfileBio');
+    if (bio) bio.textContent = profile?.bio || 'No profile bio yet.';
+    const dash = document.getElementById('creatorProfileDashboards');
+    if (dash) dash.textContent = formatCommunityNumber(profile?.published_dashboard_count || 0);
+    const views = document.getElementById('creatorProfileViews');
+    if (views) views.textContent = formatCommunityNumber(profile?.total_view_count || 0);
+    const bookmarks = document.getElementById('creatorProfileBookmarks');
+    if (bookmarks) bookmarks.textContent = formatCommunityNumber(profile?.total_bookmark_count || 0);
+    const likes = document.getElementById('creatorProfileLikes');
+    if (likes) likes.textContent = formatCommunityNumber(profile?.total_like_count || 0);
+    const copies = document.getElementById('creatorProfileCopies');
+    if (copies) copies.textContent = formatCommunityNumber(profile?.total_copy_count || 0);
+    const toolbarTitle = document.getElementById('creatorProfileToolbarTitle');
+    if (toolbarTitle) toolbarTitle.textContent = `Published dashboards by @${username}`;
+  }
+
+  function renderCreatorProfileDashboards() {
+    const grid = document.getElementById('creatorProfileGrid');
+    if (!grid) return;
+    if (creatorProfileLoading) {
+      grid.innerHTML = communityLoadingSkeletonHtml(6);
+      return;
+    }
+    if (!creatorProfileRows.length) {
+      grid.innerHTML = '<div class="creator-profile-empty"><div><strong>No published dashboards yet.</strong><br>This creator does not currently have any published community dashboards.</div></div>';
+      return;
+    }
+    grid.innerHTML = creatorProfileRows.map(communityCardHtml).join('');
+    bindCommunityCardActions(grid);
+  }
+
+  async function loadCreatorDashboards(username) {
+    const client = communityClient();
+    const sort = document.getElementById('creatorProfileSort')?.value || 'recent';
+    if (!client || !username) return;
+    creatorProfileLoading = true;
+    renderCreatorProfileDashboards();
+    try {
+      const { data, error } = await client.rpc('browse_creator_dashboards', {
+        p_username: username,
+        p_sort: sort,
+        p_limit: 40,
+        p_offset: 0
+      });
+      if (error) throw error;
+      creatorProfileRows = await hydrateCommunityRowsWithSnapshots(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('Creator dashboards failed:', err);
+      creatorProfileRows = [];
+      const grid = document.getElementById('creatorProfileGrid');
+      if (grid) grid.innerHTML = `<div class="creator-profile-empty"><div><strong>Could not load creator dashboards.</strong><br>${cEsc(err?.message || 'Unknown error')}</div></div>`;
+      return;
+    } finally {
+      creatorProfileLoading = false;
+    }
+    renderCreatorProfileDashboards();
+  }
+
+  async function openCreatorProfile(username, opts = {}) {
+    if (!requireCommunityAuth()) return;
+    username = String(username || '').trim().toLowerCase();
+    if (!username) return;
+    const client = communityClient();
+    if (!client) return;
+    activeCreatorProfileUsername = username;
+    if (typeof switchView === 'function') switchView('community');
+    document.body.classList.add('creator-profile-active');
+    const view = document.getElementById('creatorProfileView');
+    if (view) view.setAttribute('aria-hidden', 'false');
+    renderCreatorProfileHeader({ username, plan: 'free', bio: 'Loading creator profile…' });
+    creatorProfileRows = [];
+    creatorProfileLoading = true;
+    renderCreatorProfileDashboards();
+    if (opts.updateUrl !== false) setCreatorProfileUrl(username, opts.replaceUrl ? 'replace' : 'push');
+    try {
+      const { data, error } = await client.rpc('get_public_profile', { p_username: username });
+      if (error) throw error;
+      const profile = Array.isArray(data) ? data[0] : data;
+      if (!profile) throw new Error('Creator profile not found.');
+      renderCreatorProfileHeader(profile);
+      await loadCreatorDashboards(username);
+      if (typeof trackEvent === 'function') trackEvent('community_creator_profile_opened', { username });
+    } catch (err) {
+      console.error('Open creator profile failed:', err);
+      creatorProfileLoading = false;
+      const grid = document.getElementById('creatorProfileGrid');
+      if (grid) grid.innerHTML = `<div class="creator-profile-empty"><div><strong>Could not open this creator profile.</strong><br>${cEsc(err?.message || 'Unknown error')}</div></div>`;
+      if (typeof notifyApp === 'function') notifyApp('Could not open creator profile', err?.message || String(err), 'err');
+    }
+  }
+
   function renderCommunityDashboards() {
     const grid = document.getElementById('communityGrid');
     if (!grid) return;
@@ -19143,14 +19464,7 @@ function visibleViewportSpanDegrees() {
       return;
     }
     grid.innerHTML = communityRows.map(communityCardHtml).join('');
-    grid.querySelectorAll('.community-card').forEach(card => {
-      const id = card.dataset.id;
-      card.querySelector('.community-open')?.addEventListener('click', () => openCommunityDashboard(id));
-      card.querySelector('.community-copy')?.addEventListener('click', () => copyCommunityDashboard(id));
-      card.querySelector('.community-share')?.addEventListener('click', () => shareCommunityDashboard(id));
-      card.querySelector('.community-bookmark')?.addEventListener('click', () => toggleCommunityBookmark(id));
-      card.querySelector('.community-like')?.addEventListener('click', () => toggleCommunityLike(id));
-    });
+    bindCommunityCardActions(grid);
   }
 
   async function loadCommunityDashboards() {
@@ -19397,8 +19711,8 @@ function visibleViewportSpanDegrees() {
           ${location}
         </div>
         <div class="community-snapshot-author-row">
-          ${communitySnapshotAvatar(row)}
-          <span class="community-snapshot-author">@${cEsc(row.owner_username_snapshot || 'unknown')}</span>
+          <span class="creator-link" data-community-creator="${cEsc(row.owner_username_snapshot || '')}" title="View @${cEsc(row.owner_username_snapshot || 'unknown')}">${communitySnapshotAvatar(row)}</span>
+          <span class="community-snapshot-author creator-link" data-community-creator="${cEsc(row.owner_username_snapshot || '')}">@${cEsc(row.owner_username_snapshot || 'unknown')}</span>
           <span class="community-snapshot-plan ${plan === 'pro' ? 'pro' : ''}">${cEsc(plan)}</span>
           <span class="community-snapshot-stat">📷 ${Number(row.camera_count || 0)}</span>
           <span class="community-snapshot-stat">👁 ${Number(row.view_count || 0)}</span>
@@ -19415,6 +19729,11 @@ function visibleViewportSpanDegrees() {
       </div>`;
     pane.insertBefore(banner, wall);
     document.getElementById('communityBackToBrowser')?.addEventListener('click', () => { clearCommunityDashboardUrl('push'); switchView('community'); });
+    banner.querySelectorAll('[data-community-creator]').forEach(el => el.addEventListener('click', ev => {
+      ev.preventDefault();
+      const username = el.getAttribute('data-community-creator') || '';
+      if (username) openCreatorProfile(username);
+    }));
     document.getElementById('communityBookmarkOpenDashboard')?.addEventListener('click', () => toggleCommunityBookmark(row.id));
     document.getElementById('communityLikeOpenDashboard')?.addEventListener('click', () => toggleCommunityLike(row.id));
     document.getElementById('communityShareOpenDashboard')?.addEventListener('click', () => shareCommunityDashboard(row.id));
@@ -19485,11 +19804,17 @@ function visibleViewportSpanDegrees() {
     });
     sort?.addEventListener('change', () => { saveCommunityBrowserPrefs(); updateCommunityBrowserControls(); loadCommunityDashboards(); });
     refresh?.addEventListener('click', loadCommunityDashboards);
+    document.getElementById('creatorProfileBack')?.addEventListener('click', () => showCommunityBrowserFromProfile('push'));
+    document.getElementById('creatorProfileSort')?.addEventListener('change', () => { if (activeCreatorProfileUsername) loadCreatorDashboards(activeCreatorProfileUsername); });
     updateCommunityBrowserControls();
   }
 
   function communityIdFromUrl() {
     try { return new URL(window.location.href).searchParams.get('community') || ''; } catch (_) { return ''; }
+  }
+
+  function profileUsernameFromUrl() {
+    return creatorProfileFromUrl();
   }
 
   function installCommunityRouting() {
@@ -19501,15 +19826,26 @@ function visibleViewportSpanDegrees() {
       window.switchView = function communityRouteAwareSwitchView(view) {
         const result = originalSwitchView.apply(this, arguments);
         if (view !== 'dashboard' && communityIdFromUrl()) clearCommunityDashboardUrl('replace');
+        if (view !== 'community') {
+          document.body.classList.remove('creator-profile-active');
+          activeCreatorProfileUsername = '';
+          clearCreatorProfileUrl('replace');
+        }
         return result;
       };
       try { switchView = window.switchView; } catch (_) {}
     }
 
     window.addEventListener('popstate', () => {
+      const profile = profileUsernameFromUrl();
       const id = communityIdFromUrl();
-      if (id) openCommunityDashboard(id, { updateUrl: false });
-      else if (openCommunityDashboardRecord) {
+      if (profile) { openCreatorProfile(profile, { updateUrl: false }); return; }
+      if (id) { openCommunityDashboard(id, { updateUrl: false }); return; }
+      if (document.body.classList.contains('creator-profile-active')) {
+        showCommunityBrowserFromProfile('replace');
+        return;
+      }
+      if (openCommunityDashboardRecord) {
         removeCommunitySnapshotBanner();
         openCommunityDashboardRecord = null;
         window.openCommunityDashboardRecord = null;
@@ -19519,15 +19855,17 @@ function visibleViewportSpanDegrees() {
   }
 
   function bootCommunityDeepLink() {
+    const profile = profileUsernameFromUrl();
     const id = communityIdFromUrl();
-    if (!id) return;
+    if (!id && !profile) return;
     let attempts = 0;
     const timer = window.setInterval(() => {
       attempts += 1;
       const ready = !!(typeof initSupabaseClient === 'function' && initSupabaseClient()) && !!document.body.classList.contains('app-ready');
       if (ready || attempts > 40) {
         window.clearInterval(timer);
-        if (ready) openCommunityDashboard(id, { replaceUrl: true });
+        if (ready && profile) openCreatorProfile(profile, { replaceUrl: true });
+        else if (ready && id) openCommunityDashboard(id, { replaceUrl: true });
       }
     }, 250);
   }
@@ -19537,6 +19875,8 @@ function visibleViewportSpanDegrees() {
   window.copyCommunityDashboard = copyCommunityDashboard;
   window.shareCommunityDashboard = shareCommunityDashboard;
   window.renderCommunityDashboards = renderCommunityDashboards;
+  window.openCreatorProfile = openCreatorProfile;
+  window.loadCreatorDashboards = loadCreatorDashboards;
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { wireCommunityBrowser(); installCommunityRouting(); bootCommunityDeepLink(); }, { once: true });
   else { wireCommunityBrowser(); installCommunityRouting(); bootCommunityDeepLink(); }
