@@ -15159,7 +15159,7 @@ body.dashboard-active #dashboardFeedWall {
       return `
         <div class="saved-dash-row2" data-id="${escapeHtml(v.id)}">
           <div style="min-width:0;">
-            <div class="saved-dash-name" title="${escapeHtml(v.name)}">${escapeHtml(v.name)}</div>
+            <div class="saved-dash-name" title="${escapeHtml(v.name)}">${escapeHtml(v.name)} ${v.communityPublished ? '<span class="saved-dash-publish-badge">Published</span>' : '<span class="saved-dash-publish-badge unpublished">Not published</span>'}</div>
             <div class="saved-dash-meta">${stateCams} camera${stateCams === 1 ? '' : 's'} · ${escapeHtml(layout)}${escapeHtml(grid)}<br>Updated ${escapeHtml(updated)} · Created ${escapeHtml(created)}</div>
           </div>
           <div class="saved-dash-actions2">
@@ -17369,6 +17369,26 @@ function visibleViewportSpanDegrees() {
     const { data, error } = await sdWithTimeout(query, PANEL_TIMEOUT_MS, 'Saved dashboard request timed out. Try Refresh again.');
     if (error) throw error;
     const rows = Array.isArray(data) ? data.map(normaliseCloudDashboardRow) : [];
+    try {
+      const client2 = typeof initSupabaseClient === 'function' ? initSupabaseClient() : null;
+      const ids = rows.map(v => String(v.id || '')).filter(Boolean);
+      if (client2 && currentUser && ids.length) {
+        const { data: pubs, error: pubsError } = await client2
+          .from('community_dashboards')
+          .select('id,source_dashboard_id,title,is_published,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
+          .eq('owner_user_id', currentUser.id)
+          .eq('is_published', true)
+          .in('source_dashboard_id', ids);
+        if (!pubsError) {
+          const pubMap = new Map((Array.isArray(pubs) ? pubs : []).map(p => [String(p.source_dashboard_id), p]));
+          rows.forEach(v => {
+            const pub = pubMap.get(String(v.id));
+            v.communityPublished = !!pub;
+            v.communityPublish = pub || null;
+          });
+        }
+      }
+    } catch (err) { console.warn('Could not enrich saved dashboard publish status:', err); }
     savedDashboardViewsCache = rows;
     return rows.slice();
   }
@@ -17424,7 +17444,7 @@ function visibleViewportSpanDegrees() {
       return `
         <div class="saved-dash-row2" data-id="${sdEscape(v.id)}">
           <div style="min-width:0;">
-            <div class="saved-dash-name" title="${sdEscape(v.name)}">${sdEscape(v.name)}</div>
+            <div class="saved-dash-name" title="${sdEscape(v.name)}">${sdEscape(v.name)} ${v.communityPublished ? '<span class="saved-dash-publish-badge">Published</span>' : '<span class="saved-dash-publish-badge unpublished">Not published</span>'}</div>
             <div class="saved-dash-meta">${stateCams} camera${stateCams === 1 ? '' : 's'} · ${sdEscape(layout)}${sdEscape(grid)}<br>Updated ${sdEscape(sdFormatDate(v.updatedAt))} · Created ${sdEscape(sdFormatDate(v.createdAt))}</div>
           </div>
           <div class="saved-dash-actions2">
@@ -17633,6 +17653,57 @@ function visibleViewportSpanDegrees() {
       .slice(0, 8))];
   }
 
+
+  function communityStableStringify(value) {
+    try { return JSON.stringify(value || {}); } catch (_) { return ''; }
+  }
+
+  async function fetchPublishedCommunityMapForSources(sourceIds) {
+    const client = typeof initSupabaseClient === 'function' ? initSupabaseClient() : null;
+    const ids = [...new Set((sourceIds || []).map(id => String(id || '').trim()).filter(Boolean))];
+    if (!client || !currentUser || !ids.length) return new Map();
+    const { data, error } = await client
+      .from('community_dashboards')
+      .select('id,source_dashboard_id,title,is_published,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
+      .eq('owner_user_id', currentUser.id)
+      .eq('is_published', true)
+      .in('source_dashboard_id', ids);
+    if (error) {
+      console.warn('Community publish map lookup failed:', error.message);
+      return new Map();
+    }
+    const map = new Map();
+    (Array.isArray(data) ? data : []).forEach(row => {
+      if (row && row.source_dashboard_id) map.set(String(row.source_dashboard_id), row);
+    });
+    return map;
+  }
+
+  async function ensureCommunitySourceDashboard(snap) {
+    let sourceId = getCommunitySourceDashboardId();
+    if (sourceId) return sourceId;
+
+    if (typeof saveCurrentDashboardView !== 'function') {
+      throw new Error('Save this dashboard before publishing it.');
+    }
+
+    setCommunityPublishMessage('Saving this dashboard privately before publishing…');
+    const beforeRows = typeof getSavedDashboardViews === 'function' ? await getSavedDashboardViews(true).catch(() => []) : [];
+    const beforeIds = new Set((Array.isArray(beforeRows) ? beforeRows : []).map(v => String(v.id)));
+    await saveCurrentDashboardView();
+    const afterRows = typeof getSavedDashboardViews === 'function' ? await getSavedDashboardViews(true).catch(() => []) : [];
+    const rows = Array.isArray(afterRows) ? afterRows : [];
+    const snapSig = communityStableStringify(snap && snap.state);
+    let match = rows.find(v => v && v.id && !beforeIds.has(String(v.id))) || null;
+    if (!match && snapSig) {
+      match = rows.find(v => communityStableStringify(v && v.state) === snapSig) || null;
+    }
+    if (!match && rows.length) match = rows[0];
+    if (!match || !match.id) throw new Error('Publish cancelled because the dashboard was not saved.');
+    setCommunityActiveDashboard(match);
+    return String(match.id);
+  }
+
   function canUseCommunityPublishing({ promptProfile = true } = {}) {
     if (!currentUser) {
       if (typeof notifyApp === 'function') notifyApp('Login required', 'You need to be signed in to publish community dashboards.', 'warn');
@@ -17648,12 +17719,12 @@ function visibleViewportSpanDegrees() {
   }
 
   function getCommunitySourceDashboardId() {
-    const id = window.__communityActiveDashboardId || window.activeDashboardId || window.currentDashboardId || null;
+    const id = window.__communityActiveDashboardId || null;
     return id ? String(id) : null;
   }
 
   function getCommunitySourceDashboardName() {
-    const name = window.__communityActiveDashboardName || window.activeDashboardName || window.currentDashboardName || '';
+    const name = window.__communityActiveDashboardName || '';
     return String(name || '').trim();
   }
 
@@ -17764,9 +17835,16 @@ function visibleViewportSpanDegrees() {
       setCommunityPublishMessage('Add at least one camera before publishing.', true);
       return;
     }
+    let sourceDashboardId;
+    try {
+      sourceDashboardId = await ensureCommunitySourceDashboard(snap);
+    } catch (err) {
+      setCommunityPublishMessage(err?.message || 'Save this dashboard before publishing.', true);
+      return;
+    }
     const payload = {
       owner_user_id: currentUser.id,
-      source_dashboard_id: getCommunitySourceDashboardId(),
+      source_dashboard_id: sourceDashboardId,
       title,
       description: description || null,
       location_label: location || null,
@@ -17794,13 +17872,13 @@ function visibleViewportSpanDegrees() {
           .update(payload)
           .eq('id', communityPublishedRecord.id)
           .eq('owner_user_id', currentUser.id)
-          .select('id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
+          .select('id,source_dashboard_id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
           .maybeSingle();
       } else {
         result = await client
           .from('community_dashboards')
           .insert(payload)
-          .select('id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
+          .select('id,source_dashboard_id,title,description,location_label,tags,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
           .maybeSingle();
       }
       if (result.error) throw result.error;
@@ -17936,5 +18014,84 @@ function visibleViewportSpanDegrees() {
   }
 })();
 </script>
+
+
+<script>
+// ==========================================================
+//  COMMUNITY DASHBOARD SOURCE-OF-TRUTH FOLLOW-UP PATCH
+//  Saved dashboard publish status is tied to dashboards.id -> community_dashboards.source_dashboard_id.
+// ==========================================================
+(function installCommunitySourceOfTruthFollowup(){
+  'use strict';
+
+  function escapeMini(value) {
+    return String(value == null ? '' : value).replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+  }
+
+  async function enrichPublishStatus(rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length || !window.currentUser && typeof currentUser === 'undefined') return list;
+    const user = (typeof currentUser !== 'undefined') ? currentUser : null;
+    if (!user) return list;
+    const client = typeof initSupabaseClient === 'function' ? initSupabaseClient() : null;
+    if (!client) return list;
+    const ids = list.map(v => String(v && v.id || '')).filter(Boolean);
+    if (!ids.length) return list;
+    const { data, error } = await client
+      .from('community_dashboards')
+      .select('id,source_dashboard_id,title,is_published,updated_at,published_at,view_count,bookmark_count,like_count,copy_count')
+      .eq('owner_user_id', user.id)
+      .eq('is_published', true)
+      .in('source_dashboard_id', ids);
+    if (error) {
+      console.warn('Saved dashboard publish-status lookup failed:', error.message);
+      return list;
+    }
+    const map = new Map((Array.isArray(data) ? data : []).map(row => [String(row.source_dashboard_id), row]));
+    list.forEach(v => {
+      const pub = map.get(String(v.id));
+      v.communityPublished = !!pub;
+      v.communityPublish = pub || null;
+    });
+    return list;
+  }
+
+  const originalGet = window.getSavedDashboardViews;
+  if (typeof originalGet === 'function' && !window.__communityGetSavedEnriched) {
+    window.__communityGetSavedEnriched = true;
+    window.getSavedDashboardViews = async function getSavedDashboardViewsWithCommunityStatus(forceRefresh = false) {
+      const rows = await originalGet.apply(this, arguments);
+      return await enrichPublishStatus(rows);
+    };
+    try { getSavedDashboardViews = window.getSavedDashboardViews; } catch (_) {}
+  }
+
+  const originalRender = window.renderSavedDashboardsPanel;
+  if (typeof originalRender === 'function' && !window.__communityRenderSavedStatusPatched) {
+    window.__communityRenderSavedStatusPatched = true;
+    window.renderSavedDashboardsPanel = async function renderSavedDashboardsPanelWithPublishStatus(forceRefresh = false) {
+      const result = await originalRender.apply(this, arguments);
+      const panel = document.getElementById('savedDashboardsPanel');
+      const list = panel ? panel.querySelector('#savedDashboardsList') : null;
+      const rows = Array.isArray(savedDashboardViewsCache) ? await enrichPublishStatus(savedDashboardViewsCache.slice()) : [];
+      if (!list || !rows.length) return result;
+      list.querySelectorAll('.saved-dash-row2').forEach(row => {
+        const id = row.dataset.id;
+        const view = rows.find(v => String(v.id) === String(id));
+        const nameEl = row.querySelector('.saved-dash-name');
+        if (!nameEl || !view || nameEl.querySelector('.saved-dash-publish-badge')) return;
+        const badge = document.createElement('span');
+        badge.className = 'saved-dash-publish-badge' + (view.communityPublished ? '' : ' unpublished');
+        badge.textContent = view.communityPublished ? 'Published' : 'Not published';
+        nameEl.appendChild(document.createTextNode(' '));
+        nameEl.appendChild(badge);
+      });
+      return result;
+    };
+    try { renderSavedDashboardsPanel = window.renderSavedDashboardsPanel; } catch (_) {}
+  }
+})();
+</script>
+
 </body>
 </html>
