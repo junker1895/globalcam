@@ -13,6 +13,7 @@ window.addEventListener('load', () => setTimeout(applyInitialPro3DModeIfNeeded, 
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link href="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -4069,6 +4070,25 @@ body.dashboard-active #dashPublishCommunity.community-unsynced {
   background: rgba(245,158,11,0.12) !important;
   color: var(--c-warn) !important;
   border-color: rgba(245,158,11,0.35) !important;
+}
+
+
+/* Dashboard thumbnail capture: hide editor chrome but keep the dashboard content/layout. */
+body.community-thumbnail-capture .dash-menu,
+body.community-thumbnail-capture .dash-card-menu,
+body.community-thumbnail-capture .tile-menu,
+body.community-thumbnail-capture .dash-resize-handle,
+body.community-thumbnail-capture .resize-handle,
+body.community-thumbnail-capture .dashboard-map-available-note,
+body.community-thumbnail-capture .leaflet-control,
+body.community-thumbnail-capture .community-detail-bar {
+  display: none !important;
+}
+body.community-thumbnail-capture #dashboardFeedWall {
+  scrollbar-width: none;
+}
+body.community-thumbnail-capture #dashboardFeedWall::-webkit-scrollbar {
+  display: none;
 }
 </style>
 
@@ -18338,7 +18358,96 @@ function visibleViewportSpanDegrees() {
     ctx.strokeRect(18, 18, width - 36, height - 36);
   }
 
+  function communityThumbnailCanvasToBlob(sourceCanvas, meta = {}) {
+    return new Promise(resolve => {
+      try {
+        const width = 640;
+        const height = 360;
+        const out = document.createElement('canvas');
+        out.width = width;
+        out.height = height;
+        const ctx = out.getContext('2d');
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillRect(0, 0, width, height);
+        const sw = sourceCanvas.width || 1;
+        const sh = sourceCanvas.height || 1;
+        // Preserve the actual dashboard page instead of cropping important layout.
+        const scale = Math.min(width / sw, height / sh);
+        const dw = Math.max(1, sw * scale);
+        const dh = Math.max(1, sh * scale);
+        const dx = (width - dw) / 2;
+        const dy = (height - dh) / 2;
+        ctx.drawImage(sourceCanvas, dx, dy, dw, dh);
+        // Subtle border so letterboxed captures still look intentional in cards.
+        ctx.strokeStyle = 'rgba(15,23,42,0.10)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(1, 1, width - 2, height - 2);
+        out.toBlob(resolve, 'image/webp', 0.84);
+      } catch (err) {
+        console.warn('Dashboard thumbnail canvas export failed:', err?.message || err);
+        resolve(null);
+      }
+    });
+  }
+
+  function communityThumbnailCaptureTarget() {
+    // Capture the actual dashboard content area: feed layout plus side map if visible.
+    return document.getElementById('dashboardShell')
+      || document.getElementById('dashboardFeedPane')
+      || document.getElementById('dashboardFeedWall');
+  }
+
+  async function renderActualDashboardThumbnailBlob(meta = {}) {
+    if (!window.html2canvas || typeof window.html2canvas !== 'function') return null;
+    const target = communityThumbnailCaptureTarget();
+    if (!target) return null;
+    const rect = target.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+
+    document.body.classList.add('community-thumbnail-capture');
+    try {
+      // Let any recent layout/image changes settle before capture.
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const canvas = await window.html2canvas(target, {
+        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--c-bg').trim() || '#f8fafc',
+        useCORS: true,
+        allowTaint: false,
+        logging: false,
+        imageTimeout: 4500,
+        scale: Math.min(1.25, Math.max(0.65, window.devicePixelRatio || 1)),
+        width: Math.floor(rect.width),
+        height: Math.floor(rect.height),
+        windowWidth: document.documentElement.clientWidth,
+        windowHeight: document.documentElement.clientHeight,
+        scrollX: 0,
+        scrollY: 0,
+        ignoreElements: el => {
+          if (!el || !el.classList) return false;
+          return el.classList.contains('dash-menu')
+            || el.classList.contains('dash-card-menu')
+            || el.classList.contains('tile-menu')
+            || el.classList.contains('dash-resize-handle')
+            || el.classList.contains('resize-handle')
+            || el.classList.contains('dashboard-map-available-note')
+            || el.classList.contains('community-detail-bar')
+            || el.classList.contains('leaflet-control');
+        }
+      });
+      return await communityThumbnailCanvasToBlob(canvas, meta);
+    } catch (err) {
+      console.warn('Actual dashboard thumbnail capture failed; falling back to feed-derived thumbnail:', err?.message || err);
+      return null;
+    } finally {
+      document.body.classList.remove('community-thumbnail-capture');
+    }
+  }
+
   async function renderCommunityThumbnailBlob(snapshot, meta = {}) {
+    // Preferred: screenshot/render of the actual dashboard page at publish/update time.
+    const actualBlob = await renderActualDashboardThumbnailBlob(meta);
+    if (actualBlob) return actualBlob;
+
+    // Fallback: first available camera image, then designed placeholder.
     const width = 640;
     const height = 360;
     const canvas = document.createElement('canvas');
@@ -18387,6 +18496,7 @@ function visibleViewportSpanDegrees() {
     }
     return blob;
   }
+
 
   async function uploadCommunityDashboardThumbnail(client, dashboardId, snapshot, meta = {}) {
     if (!client || !currentUser || !dashboardId) return null;
