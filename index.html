@@ -304,6 +304,88 @@ body.app-ready #authDock { top: 8px; }
 #authSubmit { width:100%; height:36px; margin-top:4px; }
 #authMessage { margin-top:10px; font-family:var(--mono); font-size:11px; color:var(--c-text2); line-height:1.5; min-height:16px; }
 .auth-note { margin-top:12px; padding-top:12px; border-top:1px solid var(--c-border); color:var(--c-text3); font-size:11px; line-height:1.5; }
+
+
+/* ─── PROFILE UI ─── */
+.auth-signup-profile {
+  display: none;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--c-border);
+}
+.auth-signup-profile.open { display: block; }
+.auth-profile-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
+}
+.profile-image-uploader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: var(--c-surface2);
+  margin-bottom: 12px;
+}
+.profile-image-preview {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  border: 1px solid var(--c-border2);
+  background: var(--c-surface);
+  color: var(--c-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 18px;
+  font-weight: 800;
+  flex: 0 0 auto;
+}
+.profile-image-preview img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.profile-image-actions { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
+.profile-image-action-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.profile-image-help { font-size: 10px; color: var(--c-text3); line-height: 1.35; }
+.profile-image-input { display: none; }
+.account-avatar img { width: 100%; height: 100%; object-fit: cover; display:block; border-radius:999px; }
+#profileModal {
+  position: fixed;
+  inset: 0;
+  z-index: 1225;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15,23,42,0.42);
+  backdrop-filter: blur(4px);
+}
+#profileModal.open { display: flex; }
+.profile-card {
+  width: 430px;
+  max-width: calc(100vw - 28px);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  box-shadow: 0 22px 70px rgba(15,23,42,0.32);
+  overflow: hidden;
+}
+.profile-card-head {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--c-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.profile-card-title { font-size: 15px; font-weight: 800; color: var(--c-text); }
+.profile-close { background:none; border:none; color:var(--c-text3); font-size:22px; cursor:pointer; line-height:1; }
+.profile-card-body { padding: 16px; }
+.profile-help { font-size: 11px; color: var(--c-text3); line-height: 1.45; margin: -2px 0 12px; }
+.profile-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
+.profile-message { min-height: 16px; margin-top: 8px; font-family: var(--mono); font-size: 11px; color: var(--c-text2); line-height: 1.45; }
+.profile-username-hint { margin-top:-5px; margin-bottom:10px; font-size:10px; color:var(--c-text3); font-family:var(--mono); }
 body.dashboard-active #authDock { display: flex; }
 
 /* ─── RESET ─── */
@@ -3618,6 +3700,7 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
   <div class="account-menu-actions">
     <button class="account-menu-btn primary" id="btnAccountUpgrade" type="button" onclick="startProCheckout()">Upgrade to Pro</button>
     <button class="account-menu-btn" id="btnManageBilling" type="button" style="display:none">Manage billing</button>
+    <button class="account-menu-btn" id="btnEditProfile" type="button">Edit profile</button>
     <button class="account-menu-btn" id="btnAccountDashboards" type="button">My dashboards</button>
     <button class="account-menu-btn danger" id="btnAccountLogout" type="button">Log out</button>
   </div>
@@ -3654,10 +3737,58 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
         <label for="authPassword">Password</label>
         <input id="authPassword" type="password" autocomplete="current-password" placeholder="Minimum 6 characters">
       </div>
+      <div class="auth-signup-profile" id="authSignupProfileFields">
+        <div class="auth-field">
+          <label for="signupUsername">Username</label>
+          <input id="signupUsername" type="text" maxlength="30" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="lowercase_username">
+        </div>
+        <div class="profile-username-hint">Required for community dashboards. 3–30 chars. Lowercase letters, numbers, and underscores only.</div>
+      </div>
       <button class="auth-btn primary" id="authSubmit" type="button">Log in</button>
       <div id="authMessage"></div>
       <div class="auth-note">
         Guest mode still works without logging in. A free account unlocks saved dashboard views; Pro gates will be connected to Lemon Squeezy later.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── PROFILE MODAL ─── -->
+<div id="profileModal" aria-hidden="true">
+  <div class="profile-card" role="dialog" aria-modal="true" aria-labelledby="profileModalTitle">
+    <div class="profile-card-head">
+      <div class="profile-card-title" id="profileModalTitle">Complete your profile</div>
+      <button class="profile-close" id="profileModalClose" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="profile-card-body">
+      <div class="profile-help">Your username and profile image will be shown on community dashboards you publish.</div>
+      <div class="auth-field">
+        <label>Profile image</label>
+        <div class="profile-image-uploader">
+          <div class="profile-image-preview" id="profileImagePreview">?</div>
+          <div class="profile-image-actions">
+            <div class="profile-image-action-row">
+              <button class="auth-btn" id="profileImageChoose" type="button">Choose image</button>
+              <button class="auth-btn" id="profileImageRemove" type="button">Remove</button>
+            </div>
+            <div class="profile-image-help">Small square image. PNG, JPG, or WebP. The app resizes it before upload.</div>
+          </div>
+          <input class="profile-image-input" id="profileImageFile" type="file" accept="image/png,image/jpeg,image/webp">
+        </div>
+      </div>
+      <div class="auth-field">
+        <label for="profileUsername">Username</label>
+        <input id="profileUsername" type="text" maxlength="30" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="lowercase_username">
+      </div>
+      <div class="profile-username-hint">Required before publishing. 3–30 chars. Lowercase letters, numbers, and underscores only.</div>
+      <div class="auth-field">
+        <label for="profileBio">Bio</label>
+        <input id="profileBio" type="text" maxlength="160" autocomplete="off" placeholder="Optional short bio">
+      </div>
+      <div class="profile-message" id="profileMessage"></div>
+      <div class="profile-actions">
+        <button class="auth-btn" id="profileCancel" type="button">Later</button>
+        <button class="auth-btn primary" id="profileSave" type="button">Save profile</button>
       </div>
     </div>
   </div>
@@ -5115,6 +5246,8 @@ const PLAN_LIMITS = {
 let currentUser = null;
 let currentPlan = 'guest';
 let currentProfile = null;
+let profilePromptedThisSession = false;
+let profileModalForce = false;
 let authMode = 'login';
 let supabaseClient = null;
 let authInitialised = false;
@@ -5124,6 +5257,8 @@ let viewSelectedCameraIn3DBusy = false;
 
 const SUPABASE_URL = 'https://xqppficzlzhhtoaetuma.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_uZgctoeLTYIz0dmfmhwc_A_NEuFki3c';
+const PROFILE_SELECT_COLUMNS = 'user_id,email,plan,subscription_status,current_period_end,lemon_customer_id,lemon_subscription_id,username,avatar_url,bio,is_public_profile';
+const PROFILE_AVATAR_BUCKET = 'profile-avatars';
 
 
 function trackEvent(name, props = {}) {
@@ -5239,6 +5374,7 @@ async function applyAuthSession(session) {
   updateDashboardBadge();
   if (typeof updateDashboardSavedViewButtons === 'function') updateDashboardSavedViewButtons();
   if (typeof renderDashboard === 'function') renderDashboard();
+  maybePromptForProfileCompletion();
 }
 
 async function loadUserProfile() {
@@ -5252,7 +5388,7 @@ async function loadUserProfile() {
   const email = currentUser.email || null;
   let { data: profile, error } = await client
     .from('profiles')
-    .select('user_id,email,plan,subscription_status,current_period_end,lemon_customer_id,lemon_subscription_id')
+    .select(PROFILE_SELECT_COLUMNS)
     .eq('user_id', currentUser.id)
     .maybeSingle();
 
@@ -5263,8 +5399,14 @@ async function loadUserProfile() {
   if (!profile) {
     const insertResult = await client
       .from('profiles')
-      .insert({ user_id: currentUser.id, email, plan: 'free', subscription_status: 'none' })
-      .select('user_id,email,plan,subscription_status,current_period_end,lemon_customer_id,lemon_subscription_id')
+      .insert({
+        user_id: currentUser.id,
+        email,
+        plan: 'free',
+        subscription_status: 'none',
+        username: normaliseUsername(currentUser.user_metadata?.username || '' ) || null
+      })
+      .select(PROFILE_SELECT_COLUMNS)
       .maybeSingle();
     profile = insertResult.data || null;
     if (insertResult.error) console.warn('Profile create error:', insertResult.error.message);
@@ -5274,7 +5416,229 @@ async function loadUserProfile() {
   const status = profile && profile.subscription_status ? String(profile.subscription_status).toLowerCase() : 'none';
   currentProfile = profile || null;
   currentPlan = rawPlan === 'pro' && ['active', 'trialing'].includes(status) ? 'pro' : 'free';
+  identifyAnalyticsUser({ username: currentProfile?.username || null });
   return profile;
+}
+
+
+function normaliseUsername(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function validateUsernameValue(value, required = true) {
+  const username = normaliseUsername(value);
+  if (!username) return required ? 'Username is required.' : '';
+  if (username.length < 3 || username.length > 30) return 'Username must be 3–30 characters.';
+  if (!/^[a-z0-9_]+$/.test(username)) return 'Use only lowercase letters, numbers, and underscores.';
+  return '';
+}
+
+function getProfilePublicName() {
+  if (!currentUser) return 'Guest';
+  return currentProfile?.username ? '@' + currentProfile.username : (currentUser.email || 'Account');
+}
+
+function getProfileInitial() {
+  const username = currentProfile?.username ? String(currentProfile.username) : '';
+  const email = currentUser?.email || '';
+  return (username || email || '?')[0].toUpperCase();
+}
+
+function renderProfileImagePreview(url = null) {
+  const preview = document.getElementById('profileImagePreview');
+  if (!preview) return;
+  const src = url || currentProfile?.avatar_url || '';
+  if (src) {
+    preview.innerHTML = '<img alt="Profile image" src="' + escapeHtml(String(src)) + '">';
+  } else {
+    preview.textContent = getProfileInitial();
+  }
+}
+
+function renderAccountAvatar() {
+  const avatar = document.getElementById('accountAvatar');
+  if (!avatar) return;
+  if (currentUser && currentProfile?.avatar_url) {
+    avatar.innerHTML = '<img alt="Profile image" src="' + escapeHtml(String(currentProfile.avatar_url)) + '">';
+  } else {
+    avatar.textContent = currentUser ? getProfileInitial() : '?';
+  }
+}
+
+function setProfileMessage(text, isError = false) {
+  const msg = document.getElementById('profileMessage');
+  if (!msg) return;
+  msg.style.color = isError ? 'var(--c-danger)' : 'var(--c-text2)';
+  msg.textContent = text || '';
+}
+
+function openProfileModal(opts = {}) {
+  if (!currentUser) {
+    openAuthModal('login');
+    return;
+  }
+  profileModalForce = !!opts.force;
+  const modal = document.getElementById('profileModal');
+  const title = document.getElementById('profileModalTitle');
+  const cancel = document.getElementById('profileCancel');
+  if (title) title.textContent = opts.force ? 'Complete your profile' : 'Edit profile';
+  if (cancel) cancel.textContent = opts.force ? 'Later' : 'Cancel';
+  const username = document.getElementById('profileUsername');
+  const bio = document.getElementById('profileBio');
+  const file = document.getElementById('profileImageFile');
+  if (username) username.value = currentProfile?.username || '';
+  if (bio) bio.value = currentProfile?.bio || '';
+  if (file) file.value = '';
+  profileAvatarRemoveRequested = false;
+  pendingProfileAvatarBlob = null;
+  pendingProfileAvatarPreviewUrl = '';
+  setProfileMessage('');
+  renderProfileImagePreview();
+  if (modal) {
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+  }
+  setTimeout(() => username?.focus(), 50);
+}
+
+function closeProfileModal() {
+  const modal = document.getElementById('profileModal');
+  if (modal) {
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+  profileModalForce = false;
+}
+
+let pendingProfileAvatarBlob = null;
+let pendingProfileAvatarPreviewUrl = '';
+let profileAvatarRemoveRequested = false;
+
+async function resizeProfileAvatarFile(file) {
+  if (!file) return null;
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+    throw new Error('Choose a PNG, JPG, or WebP image.');
+  }
+  const bitmap = await createImageBitmap(file);
+  const size = Math.min(bitmap.width, bitmap.height);
+  const sx = Math.floor((bitmap.width - size) / 2);
+  const sy = Math.floor((bitmap.height - size) / 2);
+  const canvas = document.createElement('canvas');
+  canvas.width = 96;
+  canvas.height = 96;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, sx, sy, size, size, 0, 0, 96, 96);
+  bitmap.close?.();
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', 0.82));
+  if (!blob) throw new Error('Could not process that image.');
+  if (blob.size > 300 * 1024) throw new Error('Profile image is still too large after resizing. Try a smaller image.');
+  return blob;
+}
+
+async function handleProfileImageSelected(file) {
+  try {
+    setProfileMessage('Preparing image…');
+    pendingProfileAvatarBlob = await resizeProfileAvatarFile(file);
+    profileAvatarRemoveRequested = false;
+    if (pendingProfileAvatarPreviewUrl) URL.revokeObjectURL(pendingProfileAvatarPreviewUrl);
+    pendingProfileAvatarPreviewUrl = URL.createObjectURL(pendingProfileAvatarBlob);
+    renderProfileImagePreview(pendingProfileAvatarPreviewUrl);
+    setProfileMessage('Image ready. Save profile to upload it.');
+  } catch (err) {
+    pendingProfileAvatarBlob = null;
+    setProfileMessage(err?.message || 'Could not prepare that image.', true);
+  }
+}
+
+async function uploadPendingProfileAvatar(client) {
+  if (!pendingProfileAvatarBlob || !currentUser) return currentProfile?.avatar_url || null;
+  const path = `${currentUser.id}/avatar.webp`;
+  const { error } = await client.storage
+    .from(PROFILE_AVATAR_BUCKET)
+    .upload(path, pendingProfileAvatarBlob, { contentType: 'image/webp', upsert: true, cacheControl: '3600' });
+  if (error) throw error;
+  const { data } = client.storage.from(PROFILE_AVATAR_BUCKET).getPublicUrl(path);
+  return data?.publicUrl ? `${data.publicUrl}?v=${Date.now()}` : null;
+}
+
+async function deleteCurrentProfileAvatar(client) {
+  if (!currentUser) return;
+  await client.storage.from(PROFILE_AVATAR_BUCKET).remove([`${currentUser.id}/avatar.webp`]);
+}
+
+async function saveCurrentProfileFromModal() {
+  const client = initSupabaseClient();
+  if (!client || !currentUser) return;
+  const usernameInput = document.getElementById('profileUsername');
+  const bioInput = document.getElementById('profileBio');
+  const username = normaliseUsername(usernameInput?.value || '');
+  const validation = validateUsernameValue(username, true);
+  if (validation) {
+    setProfileMessage(validation, true);
+    usernameInput?.focus();
+    return;
+  }
+  const payload = {
+    user_id: currentUser.id,
+    email: currentUser.email || null,
+    username,
+    bio: String(bioInput?.value || '').trim() || null,
+    updated_at: new Date().toISOString()
+  };
+  const saveBtn = document.getElementById('profileSave');
+  if (saveBtn) saveBtn.disabled = true;
+  setProfileMessage('Saving profile…');
+  try {
+    if (profileAvatarRemoveRequested) {
+      await deleteCurrentProfileAvatar(client);
+      payload.avatar_url = null;
+    } else if (pendingProfileAvatarBlob) {
+      setProfileMessage('Uploading image…');
+      payload.avatar_url = await uploadPendingProfileAvatar(client);
+    }
+    const { data, error } = await client
+      .from('profiles')
+      .upsert(payload, { onConflict: 'user_id' })
+      .select(PROFILE_SELECT_COLUMNS)
+      .maybeSingle();
+    if (error) {
+      const duplicate = String(error.message || '').toLowerCase().includes('duplicate') || String(error.code || '') === '23505';
+      setProfileMessage(duplicate ? 'That username is already taken.' : error.message, true);
+      return;
+    }
+    currentProfile = data || { ...(currentProfile || {}), ...payload };
+    await loadUserProfile();
+    updateAuthUI();
+    identifyAnalyticsUser({ username: currentProfile?.username || null });
+    pendingProfileAvatarBlob = null;
+    profileAvatarRemoveRequested = false;
+    if (pendingProfileAvatarPreviewUrl) { URL.revokeObjectURL(pendingProfileAvatarPreviewUrl); pendingProfileAvatarPreviewUrl = ''; }
+    closeProfileModal();
+    notifyApp('Profile saved', 'Your public profile details have been updated.', 'ok');
+  } catch (err) {
+    console.error('Profile save failed:', err);
+    setProfileMessage(err && err.message ? err.message : 'Profile save failed.', true);
+  } finally {
+    if (saveBtn) saveBtn.disabled = false;
+  }
+}
+
+async function maybePromptForProfileCompletion() {
+  if (!currentUser || profilePromptedThisSession) return;
+  if (currentProfile && currentProfile.username) return;
+  profilePromptedThisSession = true;
+  setTimeout(() => { if (currentUser && !(currentProfile && currentProfile.username)) openProfileModal({ force: true }); }, 900);
+}
+
+function collectSignupProfileFields() {
+  return {
+    username: normaliseUsername(document.getElementById('signupUsername')?.value || '')
+  };
+}
+
+function applySignupProfileMode() {
+  const wrap = document.getElementById('authSignupProfileFields');
+  if (wrap) wrap.classList.toggle('open', authMode === 'signup');
 }
 
 
@@ -5435,10 +5799,12 @@ function updateAuthUI() {
   if (signupBtn) signupBtn.style.display = currentUser ? 'none' : 'inline-flex';
   if (logoutBtn) logoutBtn.style.display = 'none';
   if (accountBtn) accountBtn.style.display = currentUser ? 'inline-flex' : 'none';
-  if (accountLabel) accountLabel.textContent = email || 'Account';
-  if (avatar) avatar.textContent = email ? email[0].toUpperCase() : '?';
-  if (menuEmail) menuEmail.textContent = email || 'Guest';
-  if (menuSub) menuSub.textContent = currentUser ? 'Signed in with Supabase Auth' : 'Not signed in';
+  const publicName = getProfilePublicName();
+  const usernameLabel = currentProfile?.username ? '@' + currentProfile.username : 'Username not set';
+  if (accountLabel) accountLabel.textContent = currentUser ? publicName : 'Account';
+  renderAccountAvatar();
+  if (menuEmail) menuEmail.textContent = currentUser ? publicName : 'Guest';
+  if (menuSub) menuSub.textContent = currentUser ? usernameLabel + ' · ' + email : 'Not signed in';
   if (planBadge) planBadge.textContent = planName;
       setTimeout(applyInitialPro3DModeIfNeeded, 0);
   if (planNote) {
@@ -5471,6 +5837,7 @@ function openAuthModal(mode) {
   if (title) title.textContent = authMode === 'signup' ? 'Create free account' : 'Log in';
   if (submit) submit.textContent = authMode === 'signup' ? 'Create account' : 'Log in';
   if (msg) msg.textContent = '';
+  applySignupProfileMode();
   if (modal) {
     modal.classList.add('open');
     modal.setAttribute('aria-hidden', 'false');
@@ -5510,13 +5877,23 @@ async function submitAuthForm() {
     return;
   }
 
+  let signupProfile = null;
+  if (authMode === 'signup') {
+    signupProfile = collectSignupProfileFields();
+    const usernameError = validateUsernameValue(signupProfile.username, true);
+    if (usernameError) {
+      setAuthMessage(usernameError, true);
+      return;
+    }
+  }
+
   const submit = document.getElementById('authSubmit');
   if (submit) submit.disabled = true;
   setAuthMessage(authMode === 'signup' ? 'Creating account…' : 'Logging in…');
 
   try {
     const result = authMode === 'signup'
-      ? await client.auth.signUp({ email, password })
+      ? await client.auth.signUp({ email, password, options: { data: signupProfile || {} } })
       : await client.auth.signInWithPassword({ email, password });
 
     if (result.error) {
@@ -5530,6 +5907,18 @@ async function submitAuthForm() {
     }
 
     await applyAuthSession(result.data.session || null);
+    if (authMode === 'signup' && result.data.session && signupProfile && signupProfile.username) {
+      const payload = {
+        user_id: result.data.session.user.id,
+        email,
+        username: signupProfile.username,
+        updated_at: new Date().toISOString()
+      };
+      const { error: profileError } = await client.from('profiles').upsert(payload, { onConflict: 'user_id' });
+      if (profileError) console.warn('Signup profile save error:', profileError.message);
+      await loadUserProfile();
+      updateAuthUI();
+    }
     closeAuthModal();
   } finally {
     if (submit) submit.disabled = false;
@@ -13773,6 +14162,15 @@ window.startBillingPortal = startBillingPortal;
   const btnAccountUpgrade = document.getElementById('btnAccountUpgrade');
   const btnManageBilling = document.getElementById('btnManageBilling');
   const btnAccountDashboards = document.getElementById('btnAccountDashboards');
+  const btnEditProfile = document.getElementById('btnEditProfile');
+  const profileModal = document.getElementById('profileModal');
+  const profileModalClose = document.getElementById('profileModalClose');
+  const profileCancel = document.getElementById('profileCancel');
+  const profileSave = document.getElementById('profileSave');
+  const profileImageChoose = document.getElementById('profileImageChoose');
+  const profileImageRemove = document.getElementById('profileImageRemove');
+  const profileImageFile = document.getElementById('profileImageFile');
+  const profileUsername = document.getElementById('profileUsername');
   const authModalClose = document.getElementById('authModalClose');
   const authSubmit = document.getElementById('authSubmit');
   const authModal = document.getElementById('authModal');
@@ -13784,17 +14182,38 @@ window.startBillingPortal = startBillingPortal;
   if (btnAccountUpgrade) btnAccountUpgrade.onclick = () => { toggleAccountMenu(false); startProCheckout(); };
   if (btnManageBilling) btnManageBilling.onclick = () => { toggleAccountMenu(false); startBillingPortal(); };
   if (btnAccountDashboards) btnAccountDashboards.onclick = () => { toggleAccountMenu(false); if (typeof openSavedDashboardsPanel === 'function') openSavedDashboardsPanel(); };
+  if (btnEditProfile) btnEditProfile.onclick = () => { toggleAccountMenu(false); openProfileModal({ force: false }); };
+  if (profileModalClose) profileModalClose.onclick = closeProfileModal;
+  if (profileCancel) profileCancel.onclick = closeProfileModal;
+  if (profileSave) profileSave.onclick = saveCurrentProfileFromModal;
+  if (profileUsername) profileUsername.addEventListener('input', e => { e.target.value = normaliseUsername(e.target.value); });
+  if (profileImageChoose) profileImageChoose.onclick = () => profileImageFile?.click();
+  if (profileImageFile) profileImageFile.addEventListener('change', e => { const file = e.target.files && e.target.files[0]; if (file) handleProfileImageSelected(file); });
+  if (profileImageRemove) profileImageRemove.onclick = () => {
+    pendingProfileAvatarBlob = null;
+    profileAvatarRemoveRequested = true;
+    if (pendingProfileAvatarPreviewUrl) { URL.revokeObjectURL(pendingProfileAvatarPreviewUrl); pendingProfileAvatarPreviewUrl = ''; }
+    const input = document.getElementById('profileImageFile');
+    if (input) input.value = '';
+    renderProfileImagePreview('');
+    const preview = document.getElementById('profileImagePreview');
+    if (preview) preview.textContent = getProfileInitial();
+    setProfileMessage('Image removed. Save profile to confirm.');
+  };
+  if (profileModal) profileModal.addEventListener('click', e => { if (e.target === profileModal) closeProfileModal(); });
   if (authModalClose) authModalClose.onclick = closeAuthModal;
   if (authSubmit) authSubmit.onclick = submitAuthForm;
   if (authModal) authModal.addEventListener('click', e => { if (e.target === authModal) closeAuthModal(); });
+  document.getElementById('signupUsername')?.addEventListener('input', e => { e.target.value = normaliseUsername(e.target.value); });
   document.addEventListener('click', e => {
     const menu = document.getElementById('accountMenu');
     const btn = document.getElementById('btnAccountMenu');
     if (menu && menu.classList.contains('open') && !menu.contains(e.target) && !btn?.contains(e.target)) toggleAccountMenu(false);
   });
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { closeAuthModal(); toggleAccountMenu(false); }
+    if (e.key === 'Escape') { closeAuthModal(); closeProfileModal(); toggleAccountMenu(false); }
     if (e.key === 'Enter' && document.getElementById('authModal')?.classList.contains('open')) submitAuthForm();
+    if (e.key === 'Enter' && document.getElementById('profileModal')?.classList.contains('open')) saveCurrentProfileFromModal();
   });
 
   const dropZone  = document.getElementById('dropZone');
