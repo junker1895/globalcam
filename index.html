@@ -18531,7 +18531,9 @@ function visibleViewportSpanDegrees() {
         ? serialiseDashboardStateForStorage()
         : JSON.parse(JSON.stringify(dashboardState || {}));
       openCommunityDashboardRecord = row;
-      await client.rpc('increment_community_dashboard_view', { p_dashboard_id: id }).catch(() => {});
+      try {
+        await client.rpc('increment_community_dashboard_view', { p_dashboard_id: id });
+      } catch (_) {}
       const snapshot = row.dashboard_json_snapshot || {};
       await hydrateCommunitySnapshotCameras(snapshot);
       dashboardState = typeof normaliseDashboardState === 'function' ? normaliseDashboardState(snapshot) : snapshot;
