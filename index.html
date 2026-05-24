@@ -4242,100 +4242,6 @@ body.community-thumbnail-capture #dashboardFeedWall {
 body.community-thumbnail-capture #dashboardFeedWall::-webkit-scrollbar {
   display: none;
 }
-
-
-/* ─── COMMUNITY REPORT MODAL ─── */
-#communityReportModal {
-  position: fixed;
-  inset: 0;
-  z-index: 1480;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  background: rgba(15,23,42,0.42);
-  backdrop-filter: blur(4px);
-}
-#communityReportModal.open { display:flex; }
-.community-report-card {
-  width: 430px;
-  max-width: calc(100vw - 28px);
-  background: var(--c-surface);
-  border: 1px solid var(--c-border);
-  border-radius: 12px;
-  box-shadow: 0 24px 80px rgba(15,23,42,0.34);
-  overflow: hidden;
-}
-.community-report-head {
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--c-border);
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-}
-.community-report-title { font-size:15px; font-weight:850; color:var(--c-text); }
-.community-report-close {
-  width:28px; height:28px; border:0; border-radius:7px;
-  background:transparent; color:var(--c-text3); font-size:20px; line-height:1;
-  cursor:pointer; display:inline-flex; align-items:center; justify-content:center;
-}
-.community-report-close:hover { background:var(--c-surface2); color:var(--c-text); }
-.community-report-body { padding:14px 16px 16px; }
-.community-report-note {
-  padding:10px;
-  border:1px solid var(--c-border);
-  border-radius:9px;
-  background:var(--c-surface2);
-  color:var(--c-text2);
-  font-size:12px;
-  line-height:1.45;
-  margin-bottom:12px;
-}
-.community-report-field { margin-bottom:10px; }
-.community-report-field label {
-  display:block;
-  font-size:11px;
-  font-weight:700;
-  color:var(--c-text2);
-  margin-bottom:5px;
-}
-.community-report-field select,
-.community-report-field textarea {
-  width:100%;
-  border:1px solid var(--c-border);
-  border-radius:8px;
-  background:var(--c-surface2);
-  color:var(--c-text);
-  outline:none;
-  font-family:var(--font);
-  font-size:13px;
-}
-.community-report-field select { height:36px; padding:0 10px; }
-.community-report-field textarea { min-height:92px; padding:9px 10px; resize:vertical; }
-.community-report-field select:focus,
-.community-report-field textarea:focus {
-  border-color:var(--c-accent);
-  box-shadow:0 0 0 3px rgba(37,99,235,0.12);
-  background:var(--c-surface);
-}
-.community-report-message {
-  min-height:16px;
-  margin-top:4px;
-  font-family:var(--mono);
-  font-size:11px;
-  color:var(--c-text2);
-  line-height:1.45;
-}
-.community-report-message.error { color:var(--c-danger); }
-.community-report-actions {
-  margin-top:12px;
-  display:flex;
-  justify-content:flex-end;
-  gap:8px;
-}
-.community-action.report { color:var(--c-danger); border-color:rgba(220,38,38,.22); }
-.community-action.report:hover { background:rgba(220,38,38,.08); color:var(--c-danger); }
-
 </style>
 
 
@@ -10071,39 +9977,6 @@ function openImageFullscreen() {
       <div id="lbl">${title}</div>
       <button id="fs" onclick="document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen()">⛶ Fullscreen</button>
     
-
-
-<div id="communityReportModal" aria-hidden="true">
-  <div class="community-report-card" role="dialog" aria-modal="true" aria-labelledby="communityReportTitle">
-    <div class="community-report-head">
-      <div class="community-report-title" id="communityReportTitle">Report dashboard</div>
-      <button class="community-report-close" id="communityReportClose" type="button" aria-label="Close">×</button>
-    </div>
-    <div class="community-report-body">
-      <div class="community-report-note" id="communityReportNote">Reports are reviewed manually. Reporting will not immediately remove a dashboard.</div>
-      <div class="community-report-field">
-        <label for="communityReportReason">Reason</label>
-        <select id="communityReportReason">
-          <option value="spam">Spam</option>
-          <option value="inappropriate">Inappropriate / unsafe</option>
-          <option value="broken">Broken dashboard or bad feeds</option>
-          <option value="copyright">Copyright or source issue</option>
-          <option value="misleading">Misleading title or description</option>
-          <option value="other">Other</option>
-        </select>
-      </div>
-      <div class="community-report-field">
-        <label for="communityReportDetails">Details optional</label>
-        <textarea id="communityReportDetails" maxlength="700" placeholder="Add any detail that would help review this dashboard."></textarea>
-      </div>
-      <div class="community-report-message" id="communityReportMessage"></div>
-      <div class="community-report-actions">
-        <button class="community-action" id="communityReportCancel" type="button">Cancel</button>
-        <button class="community-action report" id="communityReportSubmit" type="button">Submit report</button>
-      </div>
-    </div>
-  </div>
-</div>
 
 </body></html>`
   );
@@ -16758,7 +16631,7 @@ function hideClusterLoadingStatusNow() {
 
 
   function postgrestTextInFilter(ids) {
-    return `in.(${ids.map(id => `"${String(id).replace(/\\/g, '\\\\').replace(/"/g, '"')}"`).join(',')})`;
+    return `in.(${ids.map(id => `"${String(id).replace(/\\/g, '\\\\').replace(/"/g, '\"')}"`).join(',')})`;
   }
 
   async function fetchCameraAltitudeRowsByIds(ids) {
@@ -19389,7 +19262,6 @@ function visibleViewportSpanDegrees() {
           <button class="community-action primary community-open" type="button">Open</button>
           <button class="community-action community-copy" type="button">Copy</button>
           <button class="community-action community-share" type="button">Share</button>
-          <button class="community-action report community-report" type="button">Report</button>
           <button class="community-action community-bookmark ${row.is_bookmarked ? 'active' : ''}" type="button">${row.is_bookmarked ? 'Bookmarked' : 'Bookmark'}</button>
           <button class="community-action community-like ${row.is_liked ? 'active' : ''}" type="button">${row.is_liked ? 'Liked' : 'Like'}</button>
         </div>
@@ -19404,7 +19276,6 @@ function visibleViewportSpanDegrees() {
       card.querySelector('.community-open')?.addEventListener('click', () => openCommunityDashboard(id));
       card.querySelector('.community-copy')?.addEventListener('click', () => copyCommunityDashboard(id));
       card.querySelector('.community-share')?.addEventListener('click', () => shareCommunityDashboard(id));
-      card.querySelector('.community-report')?.addEventListener('click', () => openCommunityReportModal(id));
       card.querySelector('.community-bookmark')?.addEventListener('click', () => toggleCommunityBookmark(id));
       card.querySelector('.community-like')?.addEventListener('click', () => toggleCommunityLike(id));
     });
@@ -19415,86 +19286,6 @@ function visibleViewportSpanDegrees() {
         const username = el.getAttribute('data-community-creator') || '';
         if (username) openCreatorProfile(username);
       });
-    });
-  }
-
-  let activeCommunityReportDashboardId = null;
-  let communityReportBusy = false;
-
-  function setCommunityReportMessage(text, isError = false) {
-    const el = document.getElementById('communityReportMessage');
-    if (!el) return;
-    el.textContent = text || '';
-    el.classList.toggle('error', !!isError);
-  }
-
-  function openCommunityReportModal(id) {
-    if (!requireCommunityAuth()) return;
-    activeCommunityReportDashboardId = id;
-    const modal = document.getElementById('communityReportModal');
-    const reason = document.getElementById('communityReportReason');
-    const details = document.getElementById('communityReportDetails');
-    if (reason) reason.value = 'spam';
-    if (details) details.value = '';
-    setCommunityReportMessage('');
-    if (modal) {
-      modal.classList.add('open');
-      modal.setAttribute('aria-hidden', 'false');
-    }
-    setTimeout(() => reason?.focus(), 40);
-  }
-
-  function closeCommunityReportModal() {
-    const modal = document.getElementById('communityReportModal');
-    if (!modal) return;
-    modal.classList.remove('open');
-    modal.setAttribute('aria-hidden', 'true');
-    activeCommunityReportDashboardId = null;
-    communityReportBusy = false;
-  }
-
-  async function submitCommunityReport() {
-    if (communityReportBusy || !activeCommunityReportDashboardId) return;
-    const client = communityClient();
-    if (!client) return;
-    const reason = document.getElementById('communityReportReason')?.value || 'other';
-    const details = document.getElementById('communityReportDetails')?.value || '';
-    const btn = document.getElementById('communityReportSubmit');
-    communityReportBusy = true;
-    if (btn) btn.disabled = true;
-    setCommunityReportMessage('Submitting report…');
-    try {
-      const { error } = await client.rpc('report_community_dashboard', {
-        p_dashboard_id: activeCommunityReportDashboardId,
-        p_reason: reason,
-        p_details: details
-      });
-      if (error) throw error;
-      const reportedId = activeCommunityReportDashboardId;
-      closeCommunityReportModal();
-      if (typeof showVigilToast === 'function') showVigilToast('Report submitted', 'Thanks — this dashboard has been flagged for review.', 'ok');
-      else if (typeof notifyApp === 'function') notifyApp('Report submitted', 'Thanks — this dashboard has been flagged for review.', 'ok');
-      if (typeof trackEvent === 'function') trackEvent('community_dashboard_reported', { community_dashboard_id: reportedId, reason });
-    } catch (err) {
-      console.error('Community report failed:', err);
-      setCommunityReportMessage(err?.message || 'Could not submit report.', true);
-    } finally {
-      communityReportBusy = false;
-      if (btn) btn.disabled = false;
-    }
-  }
-
-  function wireCommunityReportModal() {
-    if (window.__communityReportModalWired) return;
-    window.__communityReportModalWired = true;
-    document.getElementById('communityReportClose')?.addEventListener('click', closeCommunityReportModal);
-    document.getElementById('communityReportCancel')?.addEventListener('click', closeCommunityReportModal);
-    document.getElementById('communityReportSubmit')?.addEventListener('click', submitCommunityReport);
-    document.getElementById('communityReportModal')?.addEventListener('click', ev => {
-      if (ev.target && ev.target.id === 'communityReportModal') closeCommunityReportModal();
-    });
-    document.addEventListener('keydown', ev => {
-      if (ev.key === 'Escape' && document.getElementById('communityReportModal')?.classList.contains('open')) closeCommunityReportModal();
     });
   }
 
@@ -19934,7 +19725,6 @@ function visibleViewportSpanDegrees() {
         <button class="community-action ${row.is_bookmarked ? 'active' : ''}" id="communityBookmarkOpenDashboard" type="button">${row.is_bookmarked ? 'Bookmarked' : 'Bookmark'}</button>
         <button class="community-action ${row.is_liked ? 'active' : ''}" id="communityLikeOpenDashboard" type="button">${row.is_liked ? 'Liked' : 'Like'}</button>
         <button class="community-action" id="communityShareOpenDashboard" type="button">Share</button>
-        <button class="community-action report" id="communityReportOpenDashboard" type="button">Report</button>
         <button class="community-action primary" id="communityCopyOpenDashboard" type="button">Copy</button>
       </div>`;
     pane.insertBefore(banner, wall);
@@ -19947,7 +19737,6 @@ function visibleViewportSpanDegrees() {
     document.getElementById('communityBookmarkOpenDashboard')?.addEventListener('click', () => toggleCommunityBookmark(row.id));
     document.getElementById('communityLikeOpenDashboard')?.addEventListener('click', () => toggleCommunityLike(row.id));
     document.getElementById('communityShareOpenDashboard')?.addEventListener('click', () => shareCommunityDashboard(row.id));
-    document.getElementById('communityReportOpenDashboard')?.addEventListener('click', () => openCommunityReportModal(row.id));
     document.getElementById('communityCopyOpenDashboard')?.addEventListener('click', () => copyCommunityDashboard(row.id, { openAfterCopy: true }));
   }
 
@@ -20085,13 +19874,12 @@ function visibleViewportSpanDegrees() {
   window.openCommunityDashboard = openCommunityDashboard;
   window.copyCommunityDashboard = copyCommunityDashboard;
   window.shareCommunityDashboard = shareCommunityDashboard;
-  window.openCommunityReportModal = openCommunityReportModal;
   window.renderCommunityDashboards = renderCommunityDashboards;
   window.openCreatorProfile = openCreatorProfile;
   window.loadCreatorDashboards = loadCreatorDashboards;
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { wireCommunityBrowser(); wireCommunityReportModal(); installCommunityRouting(); bootCommunityDeepLink(); }, { once: true });
-  else { wireCommunityBrowser(); wireCommunityReportModal(); installCommunityRouting(); bootCommunityDeepLink(); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { wireCommunityBrowser(); installCommunityRouting(); bootCommunityDeepLink(); }, { once: true });
+  else { wireCommunityBrowser(); installCommunityRouting(); bootCommunityDeepLink(); }
 })();
 </script>
 
