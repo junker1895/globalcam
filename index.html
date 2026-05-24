@@ -19498,6 +19498,28 @@ function visibleViewportSpanDegrees() {
     });
   }
 
+  function installCommunityReportClickFallback() {
+    if (window.__communityReportClickFallbackInstalled) return;
+    window.__communityReportClickFallbackInstalled = true;
+    document.addEventListener('click', ev => {
+      const trigger = ev.target?.closest?.('.community-report, #communityReportOpenDashboard');
+      if (!trigger) return;
+      if (trigger.id === 'communityReportSubmit' || trigger.id === 'communityReportCancel' || trigger.id === 'communityReportClose') return;
+
+      const card = trigger.closest?.('.community-card');
+      const id = card?.dataset?.id
+        || trigger.getAttribute('data-community-id')
+        || (trigger.id === 'communityReportOpenDashboard' && (openCommunityDashboardRecord?.id || window.openCommunityDashboardRecord?.id))
+        || '';
+
+      if (!id) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      openCommunityReportModal(String(id));
+    }, true);
+  }
+
+
   function creatorProfileUrl(username) {
     const url = new URL(window.location.href);
     url.searchParams.delete('community');
@@ -20090,8 +20112,8 @@ function visibleViewportSpanDegrees() {
   window.openCreatorProfile = openCreatorProfile;
   window.loadCreatorDashboards = loadCreatorDashboards;
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { wireCommunityBrowser(); wireCommunityReportModal(); installCommunityRouting(); bootCommunityDeepLink(); }, { once: true });
-  else { wireCommunityBrowser(); wireCommunityReportModal(); installCommunityRouting(); bootCommunityDeepLink(); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { wireCommunityBrowser(); wireCommunityReportModal(); installCommunityReportClickFallback(); installCommunityRouting(); bootCommunityDeepLink(); }, { once: true });
+  else { wireCommunityBrowser(); wireCommunityReportModal(); installCommunityReportClickFallback(); installCommunityRouting(); bootCommunityDeepLink(); }
 })();
 </script>
 
