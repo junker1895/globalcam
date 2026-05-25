@@ -4,8 +4,30 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Viewport — Global Camera Intelligence</title>
+<!--
+  VIEWPORT SINGLE-FILE STRUCTURE MAP
+  ---------------------------------------------------------------------------
+  This app intentionally remains a single deployable HTML file for fast testing
+  and low-friction GitHub Pages/Cloudflare Pages hosting. To keep that workable,
+  future changes should respect these internal boundaries:
+
+  1. External libraries and analytics
+  2. Design tokens, shared UI CSS, and feature CSS blocks
+  3. Main application state/startup/globe/dashboard logic
+  4. Dashboard manager/autosave/community publishing patches
+  5. Cluster lifecycle and view-resume stability patches
+  6. Community browser/profile/report logic
+  7. Last-resort compatibility guards and actual modal DOM
+
+  Change rule: preserve public IDs, classes, function names, and Supabase table/RPC
+  contracts unless the matching call sites are updated in the same pass.
+-->
 <!-- Patch: professional selected-FOV resolver. Normal 3D cameras are fixed-height symbols with persistent locator beams; selected beacon/frustum appears only after rendered 3D tile height is validated. -->
-<script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js">window.addEventListener('load', () => setTimeout(applyInitialPro3DModeIfNeeded, 250));
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
+<script>
+// Initial Pro/3D preference application. Kept separate from the external Cesium script
+// because browsers ignore inline code placed inside a <script src="..."> tag.
+window.addEventListener('load', () => setTimeout(applyInitialPro3DModeIfNeeded, 250));
 window.addEventListener('DOMContentLoaded', () => setTimeout(applyInitialPro3DModeIfNeeded, 300));
 window.addEventListener('load', () => setTimeout(applyInitialPro3DModeIfNeeded, 900));
 </script>
@@ -20363,6 +20385,12 @@ function visibleViewportSpanDegrees() {
 </script>
 
 <script>
+// ==========================================================
+// FINAL COMPATIBILITY GUARDS
+// These are intentionally small, defensive wrappers installed after the
+// main feature scripts. They should not contain new product logic.
+// ==========================================================
+
 // Robust report-button wiring. This is intentionally isolated from the Community browser internals:
 // it catches card/detail Report clicks even if card-specific listeners were not rebound after a render.
 
@@ -20448,6 +20476,11 @@ function visibleViewportSpanDegrees() {
 
 
 <script>
+// ==========================================================
+// COMMUNITY CONTEXT CLEANUP GUARD
+// Prevents read-only public-dashboard state from leaking into private
+// dashboard editing/loading flows.
+// ==========================================================
 // Community dashboard camera gating: clear the read-only community context whenever a private dashboard is loaded/cleared.
 (function installCommunityLockContextCleanup(){
   function clearCommunityDashboardContext(){
@@ -20473,6 +20506,31 @@ function visibleViewportSpanDegrees() {
     };
     try { clearDashboard = window.clearDashboard; } catch (_) {}
   }
+})();
+</script>
+
+<script>
+// ==========================================================
+// INTERNAL DIAGNOSTICS (non-invasive)
+// Exposes a tiny read-only status snapshot in DevTools as
+// window.__viewportDiagnostics.status(). This helps future debugging
+// without changing UI behaviour.
+// ==========================================================
+(function installViewportDiagnostics(){
+  if (window.__viewportDiagnostics) return;
+  window.__viewportDiagnostics = {
+    status() {
+      return {
+        appReady: document.body.classList.contains('app-ready'),
+        dashboardActive: document.body.classList.contains('dashboard-active'),
+        communityActive: document.body.classList.contains('community-active'),
+        creatorProfileActive: document.body.classList.contains('creator-profile-active'),
+        clusterLoadingVisible: document.getElementById('clusterLoadingStatus')?.classList.contains('loading') || false,
+        openCommunityDashboardId: window.openCommunityDashboardRecord?.id || null,
+        selectedDashboardCount: Array.isArray(window.dashboardCameras) ? window.dashboardCameras.length : null
+      };
+    }
+  };
 })();
 </script>
 
