@@ -19844,6 +19844,79 @@ function visibleViewportSpanDegrees() {
     return typeof initSupabaseClient === 'function' ? initSupabaseClient() : null;
   }
 
+  // Community topic helpers are intentionally duplicated inside the browser
+  // module instead of relying on the publish-modal module scope. The previous
+  // version referenced installCommunityTopicControls/communityRowTopic from
+  // another IIFE, which caused the Community grid load to abort silently.
+  const COMMUNITY_BROWSER_TOPICS = [
+    { id: 'floods', label: 'Floods' },
+    { id: 'storm-chasing', label: 'Storm chasing' },
+    { id: 'traffic', label: 'Traffic' },
+    { id: 'ports', label: 'Ports' },
+    { id: 'rail', label: 'Rail' },
+    { id: 'ski-fields', label: 'Ski fields' },
+    { id: 'aviation', label: 'Aviation' }
+  ];
+  const COMMUNITY_BROWSER_TOPIC_PREFIX = 'topic:';
+
+  function communityTopicById(topicId) {
+    const id = String(topicId || '').replace(/^topic:/i, '').trim().toLowerCase();
+    return COMMUNITY_BROWSER_TOPICS.find(t => t.id === id) || null;
+  }
+
+  function communityTopicFromValue(value) {
+    const raw = String(value || '').replace(/^topic:/i, '').trim();
+    if (!raw) return null;
+    const lower = raw.toLowerCase();
+    const known = COMMUNITY_BROWSER_TOPICS.find(t => t.id === lower || t.label.toLowerCase() === lower);
+    if (known) return known;
+    return { id: lower, label: raw };
+  }
+
+  function communityTagArray(tags) {
+    if (Array.isArray(tags)) return tags.map(t => String(t || '').trim()).filter(Boolean);
+    if (tags && typeof tags === 'object') {
+      try {
+        if (Array.isArray(tags.tags)) return tags.tags.map(t => String(t || '').trim()).filter(Boolean);
+      } catch (_) {}
+    }
+    return String(tags || '')
+      .split(',')
+      .map(t => t.trim())
+      .filter(Boolean);
+  }
+
+  function communityTopicFromTags(tags) {
+    const arr = communityTagArray(tags);
+    for (const tag of arr) {
+      const raw = String(tag || '').trim().toLowerCase();
+      if (raw.startsWith(COMMUNITY_BROWSER_TOPIC_PREFIX)) return communityTopicById(raw.slice(COMMUNITY_BROWSER_TOPIC_PREFIX.length));
+    }
+    return null;
+  }
+
+  function communityRowTopic(row) {
+    return communityTopicFromValue(row?.topic) || communityTopicFromTags(row?.tags);
+  }
+
+  function communityVisibleTags(tags) {
+    return communityTagArray(tags)
+      .map(t => String(t || '').trim())
+      .filter(t => t && !t.toLowerCase().startsWith(COMMUNITY_BROWSER_TOPIC_PREFIX));
+  }
+
+  function installCommunityTopicControls() {
+    const select = document.getElementById('communityTopicFilter');
+    if (select && !select.dataset.topicsInstalled) {
+      const current = select.value || '';
+      select.innerHTML = '<option value="">All topics</option>' + COMMUNITY_BROWSER_TOPICS
+        .map(t => `<option value="${cEsc(t.id)}">${cEsc(t.label)}</option>`)
+        .join('');
+      if ([...select.options].some(o => o.value === current)) select.value = current;
+      select.dataset.topicsInstalled = '1';
+    }
+  }
+
   function requireCommunityAuth() {
     if (currentUser) return true;
     if (typeof notifyApp === 'function') notifyApp('Login required', 'Community dashboards are available to signed-in users.', 'warn');
