@@ -16562,6 +16562,8 @@ function hideClusterLoadingStatusNow() {
   const API_URL = 'https://xqppficzlzhhtoaetuma.supabase.co/rest/v1/rpc/';
   const API_KEY = 'sb_publishable_uZgctoeLTYIz0dmfmhwc_A_NEuFki3c';
   const CAMERA_TOTAL_ESTIMATE = 140601;
+  const API_RPC_TIMEOUT_MS = 16000;
+  const API_STARTUP_WATCHDOG_MS = 14000;
 
   const apiState = {
     mode: 'idle',
@@ -16581,6 +16583,12 @@ function hideClusterLoadingStatusNow() {
     recoveryTimer: null,
     recoverySeq: 0,
     lastRecoveryAt: 0,
+    lastRenderItemCount: 0,
+    startupWatchdogTimer: null,
+    startupWatchdogStartedAt: 0,
+    firstClusterRenderAt: 0,
+    inflightMode: 'idle',
+    inflightStartedAt: 0,
   };
 
   window.VIGIL_CAMERA_API_MODE = API_MODE;
@@ -16596,18 +16604,35 @@ function hideClusterLoadingStatusNow() {
     };
   }
 
-  async function rpc(name, body) {
-    const res = await fetch(API_URL + name, {
-      method: 'POST',
-      headers: apiHeaders(),
-      body: JSON.stringify(body || {}),
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`${name} failed ${res.status}: ${text.slice(0, 300)}`);
+  async function rpc(name, body, timeoutMs = API_RPC_TIMEOUT_MS) {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    let timer = null;
+    if (controller) {
+      timer = window.setTimeout(() => {
+        try { controller.abort(); } catch (_) {}
+      }, timeoutMs);
     }
-    const data = await res.json();
-    return Array.isArray(data) ? data : [];
+    try {
+      const res = await fetch(API_URL + name, {
+        method: 'POST',
+        headers: apiHeaders(),
+        body: JSON.stringify(body || {}),
+        signal: controller ? controller.signal : undefined,
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`${name} failed ${res.status}: ${text.slice(0, 300)}`);
+      }
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch (err) {
+      if (err && err.name === 'AbortError') {
+        throw new Error(`${name} timed out after ${Math.round(timeoutMs / 1000)}s`);
+      }
+      throw err;
+    } finally {
+      if (timer) window.clearTimeout(timer);
+    }
   }
 
   function parseJsonMaybe(value, fallback) {
@@ -17163,6 +17188,20 @@ function visibleViewportSpanDegrees() {
         accepted.push(Object.assign({}, c.raw, { _visibilityFactor: visibility }));
       });
 
+    // On initial page load, Cesium can report a valid camera while the first
+    // frame/window coordinate transform is not ready yet. Previously that meant
+    // every server cluster was filtered out, leaving the loader visible until the
+    // user nudged the globe and triggered another camera event. For globe-scale
+    // cluster views, fall back to a deterministic top-density subset instead of
+    // rendering nothing.
+    if (!accepted.length && clusters.length && height > 3500000) {
+      return clusters
+        .map(c => Object.assign({}, c, { _visibilityFactor: 1 }))
+        .filter(c => Number.isFinite(Number(c.latitude)) && Number.isFinite(Number(c.longitude)) && Number(c.camera_count || c.count || 0) > 0)
+        .sort((a, b) => Number(b.camera_count || b.count || 0) - Number(a.camera_count || a.count || 0))
+        .slice(0, maxClustersForHeight(height));
+    }
+
     return accepted;
   }
 
@@ -17311,6 +17350,8 @@ function visibleViewportSpanDegrees() {
     apiState.mode = mode;
     apiState.lastRenderedMode = mode;
     apiState.pendingMode = 'idle';
+    apiState.lastRenderItemCount = Array.isArray(items) ? items.length : 0;
+    if (mode === 'clusters' && apiState.lastRenderItemCount > 0) apiState.firstClusterRenderAt = Date.now();
     if (mode === 'clusters') {
       items = filterClustersForDisplay(items);
       items.forEach(addServerClusterEntity);
@@ -17324,7 +17365,18 @@ function visibleViewportSpanDegrees() {
     }
     try { dataSource.clustering.enabled = false; } catch (_) {}
     try { updateMapContextLayers(); } catch (_) {}
-    if (viewer) viewer.scene.requestRender();
+    if (viewer) {
+      try { updateClusterVisibilityForCurrentCamera(); } catch (_) {}
+      requestCesiumRenderRecovery();
+      // Force several draw passes after entity insertion. This fixes the startup
+      // case where data has loaded but Cesium has not yet repainted entity
+      // primitives until the first user camera movement.
+      [0, 50, 150, 350, 800].forEach(delay => {
+        window.setTimeout(() => {
+          try { if (viewer && viewer.scene) viewer.scene.requestRender(); } catch (_) {}
+        }, delay);
+      });
+    }
   }
 
   async function fetchClustersForView(seq) {
@@ -17344,7 +17396,13 @@ function visibleViewportSpanDegrees() {
         grid_degrees: grid,
         max_clusters: maxClustersForHeight(cameraHeight()),
       })));
-      if (seq !== apiState.requestSeq) return;
+      const mayAcceptStartupClusterResult = (
+        apiState.booted &&
+        chooseApiLayerMode() === 'clusters' &&
+        apiState.lastRenderedMode !== 'clusters' &&
+        countApiEntities() === 0
+      );
+      if (seq !== apiState.requestSeq && !mayAcceptStartupClusterResult) return;
       const seen = new Set();
       const clusters = [];
       parts.flat().forEach(c => {
@@ -17395,6 +17453,19 @@ function visibleViewportSpanDegrees() {
     const now = Date.now();
     const modeChanged = desiredMode !== apiState.lastDesiredMode || desiredMode !== apiState.lastRenderedMode;
 
+    // Do not keep starting fresh cluster requests during startup/render recovery.
+    // The old behaviour allowed watchdog/postRender/startup timers to increment
+    // requestSeq repeatedly, so legitimate cluster responses could be discarded
+    // as stale. A manual globe nudge then started one more request and made the
+    // clusters appear, which looked like movement was required. Keep one same-
+    // mode request alive unless it is genuinely stale.
+    const pendingSameMode = apiState.pendingMode === desiredMode && apiState.inflightMode === desiredMode;
+    const inflightAge = now - (apiState.inflightStartedAt || 0);
+    if (pendingSameMode && inflightAge < API_RPC_TIMEOUT_MS + 2500) {
+      requestCesiumRenderRecovery();
+      return;
+    }
+
     // Movement should not suppress a real zoom/mode transition. The old version
     // could return early while Cesium was moving, then never recover cleanly if a
     // moveEnd/focus event was missed.
@@ -17404,6 +17475,8 @@ function visibleViewportSpanDegrees() {
     apiState.lastKey = key;
     apiState.lastRefreshAt = now;
     apiState.pendingMode = desiredMode;
+    apiState.inflightMode = desiredMode;
+    apiState.inflightStartedAt = now;
     const seq = ++apiState.requestSeq;
     const status = document.getElementById('statusCameras');
 
@@ -17415,8 +17488,18 @@ function visibleViewportSpanDegrees() {
     } catch (err) {
       if (seq === apiState.requestSeq) {
         console.error('Camera API viewport refresh failed:', err);
+        apiState.pendingMode = 'idle';
+        apiState.lastKey = '';
         hideClusterLoadingStatusNow();
         if (status) status.textContent = '';
+      }
+    } finally {
+      if (seq === apiState.requestSeq && apiState.pendingMode === desiredMode) {
+        apiState.pendingMode = 'idle';
+      }
+      if (seq === apiState.requestSeq && apiState.inflightMode === desiredMode) {
+        apiState.inflightMode = 'idle';
+        apiState.inflightStartedAt = 0;
       }
     }
   }
@@ -17845,6 +17928,45 @@ function visibleViewportSpanDegrees() {
     }, 650);
   }
 
+  function countApiEntities() {
+    try { return dataSource && dataSource.entities && dataSource.entities.values ? dataSource.entities.values.length : 0; }
+    catch (_) { return 0; }
+  }
+
+  function startStartupClusterWatchdog() {
+    if (apiState.startupWatchdogTimer) window.clearInterval(apiState.startupWatchdogTimer);
+    apiState.startupWatchdogStartedAt = Date.now();
+    apiState.startupWatchdogTimer = window.setInterval(() => {
+      if (!API_MODE || !apiState.booted || !viewer || activeView === 'dashboard') return;
+      const elapsed = Date.now() - apiState.startupWatchdogStartedAt;
+      const entityCount = countApiEntities();
+      const hasClusters = apiState.lastRenderedMode === 'clusters' && entityCount > 0;
+      if (hasClusters || elapsed > API_STARTUP_WATCHDOG_MS) {
+        window.clearInterval(apiState.startupWatchdogTimer);
+        apiState.startupWatchdogTimer = null;
+        if (hasClusters) hideClusterLoadingStatusNow();
+        return;
+      }
+
+      // If the loader is up but no entities have arrived, do the same recovery a
+      // manual globe nudge would have caused: clear the request key, request a
+      // render, and force a fresh cluster request without moving the camera.
+      if (elapsed > 1200 && chooseApiLayerMode() === 'clusters' && entityCount === 0) {
+        requestCesiumRenderRecovery();
+        const pendingHealthy = apiState.pendingMode === 'clusters' && (Date.now() - (apiState.inflightStartedAt || 0)) < API_RPC_TIMEOUT_MS + 2500;
+        if (!pendingHealthy) {
+          apiState.lastKey = '';
+          apiState.lastRefreshAt = 0;
+          apiState.lastDesiredMode = 'idle';
+          scheduleApiViewportRefresh(true, 1);
+        }
+      } else if (elapsed > 1200 && chooseApiLayerMode() === 'clusters' && entityCount > 0) {
+        requestCesiumRenderRecovery();
+        hideClusterLoadingStatusNow();
+      }
+    }, 900);
+  }
+
   async function startApiMode() {
     if (!API_MODE) return;
     if (apiState.booted) return;
@@ -17862,6 +17984,15 @@ function visibleViewportSpanDegrees() {
     document.getElementById('cameraCount').textContent = 'Indexed';
     document.getElementById('statusCameras').textContent = 'Loading camera layer…';
     hydrateSavedDashboardCameras();
+    startStartupClusterWatchdog();
+    // Kick the initial cluster request from the first rendered frame as well as
+    // timers. This removes the dependency on the user slightly moving the globe.
+    try {
+      viewer.scene.postRender.addEventListener(function firstApiPostRenderKick() {
+        try { viewer.scene.postRender.removeEventListener(firstApiPostRenderKick); } catch (_) {}
+        runViewportRecoverySequence('startup-first-render');
+      });
+    } catch (_) {}
     setTimeout(() => runViewportRecoverySequence('startup'), 80);
     setTimeout(() => runViewportRecoverySequence('startup-warm'), 700);
     setTimeout(() => runViewportRecoverySequence('startup-final'), 1700);
