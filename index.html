@@ -254,7 +254,9 @@ body.app-ready #authDock { top: 8px; }
 #appMessageModal {
   position: fixed;
   inset: 0;
-  z-index: 1250;
+  /* Must sit above feature modals such as Community Publish/Report.
+     Unpublish confirmations are launched while the publish modal is still open. */
+  z-index: 1700;
   display: none;
   align-items: center;
   justify-content: center;
@@ -19062,7 +19064,7 @@ function visibleViewportSpanDegrees() {
     if (!client || !currentUser || !sourceId) return null;
     const { data, error } = await client
       .from('community_dashboards')
-      .select('id,source_dashboard_id,title,description,location_label,tags,topic,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot,thumbnail_url')
+      .select('id,source_dashboard_id,title,description,location_label,tags,topic,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot,thumbnail_url,moderation_status,moderation_reason')
       .eq('owner_user_id', currentUser.id)
       .eq('source_dashboard_id', sourceId)
       .eq('is_published', true)
@@ -19413,17 +19415,250 @@ function visibleViewportSpanDegrees() {
     return data?.publicUrl ? `${data.publicUrl}?v=${Date.now()}` : null;
   }
 
+  // Professional publish-time moderation / anti-spam guard.
+  // Rules are intentionally local and deterministic for now. They are designed to
+  // let normal users publish immediately while blocking only clearly abusive content
+  // and routing genuinely suspicious submissions to review.
+  const COMMUNITY_MODERATION_VERSION = 'rules-v1';
+  const COMMUNITY_PUBLISH_RATE_KEY_PREFIX = 'viewport:community-publish-attempts:';
+  const COMMUNITY_ALLOWED_TOPIC_IDS = new Set(COMMUNITY_TOPICS.map(t => t.id));
+  const COMMUNITY_BLOCKED_TERMS = [
+    'porn', 'porno', 'xxx', 'onlyfans', 'nude', 'nudes', 'naked', 'sex', 'sexting',
+    'hardcore', 'camgirl', 'escort', 'hookup', 'viagra', 'casino', 'gambling',
+    'crypto giveaway', 'free crypto', 'airdrop', 'loan shark', 'make money fast',
+    'shit', 'fuck', 'fucking', 'cunt', 'bitch', 'asshole'
+  ];
+  const COMMUNITY_SUSPICIOUS_TERMS = [
+    'click here', 'limited time', 'act now', 'guaranteed profit', 'work from home',
+    'followers', 'subscribers', 'promo code', 'discount code', 'giveaway', 'telegram',
+    'whatsapp', 'dm me', 'visit my site', 'free money'
+  ];
+
+  function communityModerationCollapseRepeats(value, maxRun = 2) {
+    return String(value || '').replace(/(.)\1{2,}/gi, match => match.slice(0, maxRun));
+  }
+
+  function communityModerationNormaliseText(value) {
+    return communityModerationCollapseRepeats(String(value || '')
+      .normalize('NFKC')
+      .toLowerCase()
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim());
+  }
+
+  function communityModerationCleanDisplayText(value, maxLen) {
+    const cleaned = String(value || '')
+      .normalize('NFKC')
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return maxLen ? cleaned.slice(0, maxLen) : cleaned;
+  }
+
+  function communityModerationTokenise(value) {
+    return communityModerationNormaliseText(value).split(/[^a-z0-9]+/).filter(Boolean);
+  }
+
+  function communityModerationUrlCount(value) {
+    const text = String(value || '');
+    const matches = text.match(/(?:https?:\/\/|www\.|\b[a-z0-9-]+\.(?:com|net|org|io|xyz|info|biz|ru|cn|top|click)\b)/gi);
+    return matches ? matches.length : 0;
+  }
+
+  function communityModerationLooksGibberish(value) {
+    const compact = communityModerationNormaliseText(value).replace(/[^a-z0-9]/g, '');
+    if (compact.length < 10) return false;
+    const vowels = (compact.match(/[aeiou]/g) || []).length;
+    const digits = (compact.match(/[0-9]/g) || []).length;
+    const consonantRuns = compact.match(/[bcdfghjklmnpqrstvwxyz]{7,}/g) || [];
+    return consonantRuns.length > 0 || digits / Math.max(compact.length, 1) > 0.45 || vowels / Math.max(compact.length, 1) < 0.12;
+  }
+
+  function communityModerationFingerprint({ title, location, tags, topic, snapshot }) {
+    const cameraIds = [];
+    const visit = value => {
+      if (!value || cameraIds.length >= 80) return;
+      if (Array.isArray(value)) { value.forEach(visit); return; }
+      if (typeof value !== 'object') return;
+      const id = value.id || value.camera_id || value.cameraId || value.cam_id;
+      if (id && (value.imageUrl || value.image_url || value.videoUrl || value.video_url || value.lat || value.latitude || value.lng || value.longitude || value.name)) {
+        cameraIds.push(String(id));
+      }
+      Object.keys(value).slice(0, 80).forEach(k => visit(value[k]));
+    };
+    visit(snapshot);
+    const uniqueIds = [...new Set(cameraIds)].sort().slice(0, 50).join('|');
+    return communityModerationNormaliseText([
+      title,
+      location,
+      topic,
+      (tags || []).join(','),
+      uniqueIds
+    ].join(' '));
+  }
+
+  function communityModerationReadLocalAttempts(userId) {
+    try {
+      const key = COMMUNITY_PUBLISH_RATE_KEY_PREFIX + String(userId || 'anon');
+      const rows = JSON.parse(localStorage.getItem(key) || '[]');
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      return Array.isArray(rows) ? rows.filter(ts => Number(ts) > cutoff) : [];
+    } catch (_) { return []; }
+  }
+
+  function communityModerationRecordLocalAttempt(userId) {
+    try {
+      const key = COMMUNITY_PUBLISH_RATE_KEY_PREFIX + String(userId || 'anon');
+      const rows = communityModerationReadLocalAttempts(userId);
+      rows.push(Date.now());
+      localStorage.setItem(key, JSON.stringify(rows.slice(-40)));
+    } catch (_) {}
+  }
+
+  async function communityModerationFetchRecentRows(client) {
+    if (!client || !currentUser?.id) return [];
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    try {
+      const { data, error } = await communityTimeout(client
+        .from('community_dashboards')
+        .select('id,source_dashboard_id,title,description,location_label,tags,topic,created_at,updated_at,published_at,is_published,moderation_status,dashboard_json_snapshot')
+        .eq('owner_user_id', currentUser.id)
+        .gte('updated_at', since)
+        .order('updated_at', { ascending: false })
+        .limit(30), 'Check recent publishes', COMMUNITY_TIMEOUT_MS);
+      if (error) throw error;
+      return Array.isArray(data) ? data : [];
+    } catch (err) {
+      console.warn('Community moderation recent-row lookup failed:', err?.message || err);
+      return [];
+    }
+  }
+
+  function communityModerationScoreContent(meta) {
+    const reasons = [];
+    const blockReasons = [];
+    let score = 0;
+    const titleNorm = communityModerationNormaliseText(meta.title);
+    const descNorm = communityModerationNormaliseText(meta.description);
+    const locNorm = communityModerationNormaliseText(meta.location);
+    const tagNorm = (meta.tags || []).map(communityModerationNormaliseText).filter(Boolean);
+    const topicNorm = communityModerationNormaliseText(meta.topic);
+    const combined = [titleNorm, descNorm, locNorm, tagNorm.join(' '), topicNorm].join(' ');
+    const tokenCount = communityModerationTokenise([meta.title, meta.description, meta.location].join(' ')).length;
+    const urlCount = communityModerationUrlCount([meta.title, meta.description, meta.location, (meta.tags || []).join(' ')].join(' '));
+
+    const blockedHit = COMMUNITY_BLOCKED_TERMS.find(term => combined.includes(term));
+    if (blockedHit) blockReasons.push('contains blocked profanity, spam, or adult terms');
+
+    const suspiciousHits = COMMUNITY_SUSPICIOUS_TERMS.filter(term => combined.includes(term));
+    if (suspiciousHits.length) { score += Math.min(45, suspiciousHits.length * 15); reasons.push('contains promotional spam wording'); }
+
+    if (urlCount >= 5) blockReasons.push('contains too many links');
+    else if (urlCount >= 2) { score += 30; reasons.push('contains multiple links'); }
+
+    if (/(.)\1{7,}/i.test([meta.title, meta.description, meta.location].join(' '))) { score += 20; reasons.push('contains excessive repeated characters'); }
+    if (/[!?$]{5,}/.test([meta.title, meta.description].join(' '))) { score += 12; reasons.push('contains excessive punctuation'); }
+    if (communityModerationLooksGibberish(meta.title) || communityModerationLooksGibberish(meta.description)) { score += 28; reasons.push('looks nonsensical or machine-generated'); }
+    if (tokenCount < 3 && String(meta.title || '').trim().length < 10) { score += 22; reasons.push('publish metadata is extremely low effort'); }
+    if (String(meta.title || '').trim().length > 90) { score += 10; reasons.push('title is unusually long'); }
+    if ((meta.tags || []).length > 8) { score += 12; reasons.push('too many tags'); }
+
+    const badTags = (meta.tags || []).filter(tag => {
+      const t = String(tag || '').trim();
+      if (!t) return false;
+      if (t.length > 28) return true;
+      if (/^\d+$/.test(t)) return true;
+      if (communityModerationLooksGibberish(t)) return true;
+      return false;
+    });
+    if (badTags.length) { score += 18; reasons.push('tags look misleading or nonsensical'); }
+    if (meta.topic && !COMMUNITY_ALLOWED_TOPIC_IDS.has(meta.topic)) { score += 16; reasons.push('topic is not recognised'); }
+
+    return { score, reasons, blockReasons };
+  }
+
+  async function validateCommunityPublishForModeration(client, meta) {
+    const content = communityModerationScoreContent(meta);
+    const reasons = [...content.reasons];
+    const blockReasons = [...content.blockReasons];
+    let score = content.score;
+    const now = Date.now();
+    const localAttempts = communityModerationReadLocalAttempts(currentUser?.id);
+    const localFiveMin = localAttempts.filter(ts => now - ts < 5 * 60 * 1000).length;
+    const localHour = localAttempts.filter(ts => now - ts < 60 * 60 * 1000).length;
+    if (localFiveMin >= 3) { score += 30; reasons.push('publishing too quickly'); }
+    if (localHour >= 8) blockReasons.push('publish rate limit reached');
+
+    const recentRows = await communityModerationFetchRecentRows(client);
+    const recentFiveMin = recentRows.filter(row => new Date(row.updated_at || row.published_at || row.created_at || 0).getTime() > now - 5 * 60 * 1000).length;
+    const recentHour = recentRows.filter(row => new Date(row.updated_at || row.published_at || row.created_at || 0).getTime() > now - 60 * 60 * 1000).length;
+    if (recentFiveMin >= 3) { score += 35; reasons.push('rapid repeated publishing'); }
+    if (recentHour >= 10) blockReasons.push('publish rate limit reached');
+
+    const fingerprint = communityModerationFingerprint(meta);
+    const duplicate = recentRows.find(row => {
+      if (meta.existingCommunityId && String(row.id) === String(meta.existingCommunityId)) return false;
+      const sameSource = meta.sourceDashboardId && row.source_dashboard_id && String(row.source_dashboard_id) === String(meta.sourceDashboardId);
+      const rowFingerprint = communityModerationFingerprint({
+        title: row.title,
+        description: row.description,
+        location: row.location_label,
+        tags: communityVisibleTags(row.tags),
+        topic: normaliseCommunityPublishTopic(row.topic),
+        snapshot: row.dashboard_json_snapshot
+      });
+      return sameSource || (fingerprint && rowFingerprint && fingerprint === rowFingerprint);
+    });
+    if (duplicate) { score += 35; reasons.push('duplicate-looking publish attempt'); }
+
+    if (blockReasons.length) {
+      return {
+        action: 'block',
+        score: 100,
+        reasons: [...new Set(blockReasons)],
+        message: `This dashboard cannot be published because it ${blockReasons[0]}. Please edit the title, description, location, tags, or topic and try again.`
+      };
+    }
+    if (score >= 55) {
+      return {
+        action: 'pending',
+        score,
+        reasons: [...new Set(reasons)].slice(0, 4),
+        message: 'Submitted for review. Your dashboard was saved, but it will not appear publicly until it is approved.'
+      };
+    }
+    return { action: 'active', score, reasons: [], message: 'Community dashboard published' };
+  }
+
+  function communityModerationPayloadFields(result) {
+    if (result?.action === 'pending') {
+      return {
+        moderation_status: 'pending',
+        moderation_reason: [COMMUNITY_MODERATION_VERSION, ...(result.reasons || [])].join(': '),
+        moderated_at: null,
+        moderated_by: null
+      };
+    }
+    return {
+      moderation_status: 'active',
+      moderation_reason: null,
+      moderated_at: null,
+      moderated_by: null
+    };
+  }
+
   async function saveCommunityPublish() {
     if (communityPublishBusy) return;
     if (!canUseCommunityPublishing()) return;
     const client = typeof initSupabaseClient === 'function' ? initSupabaseClient() : null;
     if (!client) return;
     commitCommunityPublishTagInput();
-    const title = String(document.getElementById('communityPublishName')?.value || '').trim();
-    const location = String(document.getElementById('communityPublishLocation')?.value || '').trim();
+    const title = communityModerationCleanDisplayText(document.getElementById('communityPublishName')?.value || '', 100);
+    const location = communityModerationCleanDisplayText(document.getElementById('communityPublishLocation')?.value || '', 120);
     const tags = communityVisibleTags(parseCommunityTags(document.getElementById('communityPublishTags')?.value || communityPublishTagValues.join(', ')));
     const topic = getCommunityPublishTopic();
-    const description = String(document.getElementById('communityPublishDescription')?.value || '').trim();
+    const description = communityModerationCleanDisplayText(document.getElementById('communityPublishDescription')?.value || '', 600);
     if (!title) {
       setCommunityPublishMessage('Add a title before publishing.', true);
       document.getElementById('communityPublishName')?.focus();
@@ -19441,6 +19676,28 @@ function visibleViewportSpanDegrees() {
       setCommunityPublishMessage(err?.message || 'Save this dashboard before publishing.', true);
       return;
     }
+    let moderationResult;
+    try {
+      setCommunityPublishMessage('Checking publish metadata…');
+      moderationResult = await validateCommunityPublishForModeration(client, {
+        title,
+        description,
+        location,
+        tags,
+        topic,
+        snapshot: snap.state,
+        sourceDashboardId,
+        existingCommunityId: communityPublishedRecord?.id || null
+      });
+    } catch (err) {
+      console.warn('Community moderation failed open:', err?.message || err);
+      moderationResult = { action: 'pending', score: 60, reasons: ['moderation check could not complete'], message: 'Submitted for review. Your dashboard was saved, but it will not appear publicly until it is approved.' };
+    }
+    if (moderationResult.action === 'block') {
+      setCommunityPublishMessage(moderationResult.message || 'This dashboard cannot be published. Please edit the publish details and try again.', true);
+      return;
+    }
+    const moderationFields = communityModerationPayloadFields(moderationResult);
     const payload = {
       owner_user_id: currentUser.id,
       source_dashboard_id: sourceDashboardId,
@@ -19454,6 +19711,7 @@ function visibleViewportSpanDegrees() {
       owner_username_snapshot: currentProfile.username,
       owner_plan_snapshot: String(currentPlan || currentProfile?.plan || 'free').toLowerCase(),
       owner_avatar_url_snapshot: currentProfile.avatar_url || null,
+      ...moderationFields,
       is_published: true,
       updated_at: new Date().toISOString(),
       published_at: new Date().toISOString()
@@ -19472,13 +19730,13 @@ function visibleViewportSpanDegrees() {
           .update(payload)
           .eq('id', communityPublishedRecord.id)
           .eq('owner_user_id', currentUser.id)
-          .select('id,source_dashboard_id,title,description,location_label,tags,topic,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot,thumbnail_url')
+          .select('id,source_dashboard_id,title,description,location_label,tags,topic,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot,thumbnail_url,moderation_status,moderation_reason,moderated_at,moderated_by')
           .maybeSingle();
       } else {
         result = await client
           .from('community_dashboards')
           .insert(payload)
-          .select('id,source_dashboard_id,title,description,location_label,tags,topic,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot,thumbnail_url')
+          .select('id,source_dashboard_id,title,description,location_label,tags,topic,is_published,created_at,updated_at,published_at,view_count,bookmark_count,like_count,copy_count,dashboard_json_snapshot,thumbnail_url,moderation_status,moderation_reason,moderated_at,moderated_by')
           .maybeSingle();
       }
       if (result.error) throw result.error;
@@ -19495,6 +19753,10 @@ function visibleViewportSpanDegrees() {
         communityPublishedRecord.tags = tags;
         communityPublishedRecord.topic = topic || null;
         communityPublishedRecord.is_published = true;
+        communityPublishedRecord.moderation_status = moderationFields.moderation_status;
+        communityPublishedRecord.moderation_reason = moderationFields.moderation_reason;
+        communityPublishedRecord.moderated_at = moderationFields.moderated_at;
+        communityPublishedRecord.moderated_by = moderationFields.moderated_by;
         communityPublishedRecord.updated_at = payload.updated_at;
         communityPublishedRecord.published_at = payload.published_at;
         communityPublishedRecord.thumbnail_url = communityPublishedRecord.thumbnail_url || result.data?.thumbnail_url || null;
@@ -19525,10 +19787,16 @@ function visibleViewportSpanDegrees() {
       if (typeof window.refreshSavedDashboardsPublishStatus === 'function') {
         setTimeout(() => window.refreshSavedDashboardsPublishStatus(), 100);
       }
+      communityModerationRecordLocalAttempt(currentUser.id);
       closeCommunityPublishModal();
-      if (typeof showVigilToast === 'function') showVigilToast('Community dashboard published', title, 'ok');
-      else if (typeof notifyApp === 'function') notifyApp('Community dashboard published', title, 'ok');
-      if (typeof trackEvent === 'function') trackEvent('community_dashboard_published', { community_dashboard_id: communityPublishedRecord?.id || null, dashboard_camera_count: snap.count });
+      if (moderationResult.action === 'pending') {
+        if (typeof showVigilToast === 'function') showVigilToast('Submitted for review', 'Your dashboard is saved but hidden from Community until approved.', 'warn');
+        else if (typeof notifyApp === 'function') notifyApp('Submitted for review', 'Your dashboard is saved but hidden from Community until approved.', 'warn');
+      } else {
+        if (typeof showVigilToast === 'function') showVigilToast('Community dashboard published', title, 'ok');
+        else if (typeof notifyApp === 'function') notifyApp('Community dashboard published', title, 'ok');
+      }
+      if (typeof trackEvent === 'function') trackEvent('community_dashboard_published', { community_dashboard_id: communityPublishedRecord?.id || null, dashboard_camera_count: snap.count, moderation_status: moderationFields.moderation_status, moderation_score: moderationResult.score || 0 });
     } catch (err) {
       console.error('Community publish failed:', err);
       setCommunityPublishMessage(err?.message || 'Could not publish dashboard.', true);
@@ -20424,7 +20692,7 @@ function visibleViewportSpanDegrees() {
       .from('community_dashboards')
       .select('id,owner_user_id,source_dashboard_id,title,description,location_label,tags,topic,dashboard_json_snapshot,camera_count,owner_username_snapshot,owner_plan_snapshot,owner_avatar_url_snapshot,view_count,bookmark_count,like_count,copy_count,is_published,is_featured,created_at,updated_at,published_at,thumbnail_url,moderation_status')
       .eq('is_published', true)
-      .eq('moderation_status', 'active');
+      .or('moderation_status.eq.active,moderation_status.is.null');
 
     const term = String(search || '').trim();
     if (term) {
@@ -20501,6 +20769,7 @@ function visibleViewportSpanDegrees() {
         rawRows = await fetchCommunityDashboardsDirect(client, search, sort, topicFilter);
       }
 
+      rawRows = (Array.isArray(rawRows) ? rawRows : []).filter(row => !row?.moderation_status || row.moderation_status === 'active');
       if (requestSeq !== communityLoadRequestSeq) return;
       const hydrated = await communityTimeout(hydrateCommunityRowsWithSnapshots(rawRows), 'Load Community previews', COMMUNITY_TIMEOUT_MS);
       if (requestSeq !== communityLoadRequestSeq) return;
