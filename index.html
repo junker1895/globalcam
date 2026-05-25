@@ -4191,6 +4191,80 @@ body.tiles-view-loading #globeZoomControl { opacity: 0.55; }
   box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
   background: var(--c-surface);
 }
+.community-tag-input-wrap {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--c-border);
+  border-radius: 7px;
+  background: var(--c-surface2);
+  color: var(--c-text);
+  padding: 5px 7px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  cursor: text;
+}
+.community-tag-input-wrap:focus-within {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
+  background: var(--c-surface);
+}
+.community-tag-chips {
+  display: contents;
+}
+.community-tag-chip {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+  border: 1px solid rgba(37,99,235,0.24);
+  background: var(--c-accent-bg);
+  color: var(--c-accent);
+  padding: 0 7px 0 9px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 800;
+  max-width: 180px;
+}
+.community-tag-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.community-tag-chip button {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(37,99,235,0.12);
+  color: var(--c-accent);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.community-tag-chip button:hover {
+  background: rgba(37,99,235,0.22);
+}
+#communityPublishTagInput {
+  width: 120px !important;
+  min-width: 120px;
+  flex: 1 1 120px;
+  height: 26px !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 3px !important;
+}
+#communityPublishTagInput:focus {
+  box-shadow: none !important;
+}
 .community-publish-summary {
   margin-top: 10px;
   font-family: var(--mono);
@@ -4852,11 +4926,16 @@ body.community-thumbnail-capture #dashboardFeedWall::-webkit-scrollbar {
       </div>
       <div class="auth-field">
         <label for="communityPublishLocation">Location</label>
-        <input id="communityPublishLocation" type="text" maxlength="120" placeholder="e.g. Brisbane, Queensland">
+        <input id="communityPublishLocation" type="text" maxlength="120" list="communityPublishLocationSuggestions" autocomplete="off" placeholder="e.g. Brisbane, Queensland">
+        <datalist id="communityPublishLocationSuggestions"></datalist>
       </div>
       <div class="auth-field">
         <label for="communityPublishTags">Tags</label>
-        <input id="communityPublishTags" type="text" maxlength="160" placeholder="flood, traffic, city">
+        <div class="community-tag-input-wrap" id="communityPublishTagWrap">
+          <div class="community-tag-chips" id="communityPublishTagChips" aria-live="polite"></div>
+          <input id="communityPublishTagInput" type="text" maxlength="48" placeholder="Type a tag, then comma">
+        </div>
+        <input id="communityPublishTags" type="hidden" value="">
       </div>
       <div class="auth-field">
         <label for="communityPublishDescription">Description</label>
@@ -18633,6 +18712,125 @@ function visibleViewportSpanDegrees() {
       .slice(0, 8))];
   }
 
+  const COMMUNITY_LOCATION_SUGGESTIONS = [
+    'Australia', 'Australian Capital Territory, Australia', 'New South Wales, Australia', 'Northern Territory, Australia', 'Queensland, Australia', 'South Australia, Australia', 'Tasmania, Australia', 'Victoria, Australia', 'Western Australia, Australia',
+    'Austria', 'New Zealand', 'Auckland, New Zealand', 'Bay of Plenty, New Zealand', 'Canterbury, New Zealand', 'Gisborne, New Zealand', 'Hawke’s Bay, New Zealand', 'Manawatū-Whanganui, New Zealand', 'Marlborough, New Zealand', 'Nelson, New Zealand', 'Northland, New Zealand', 'Otago, New Zealand', 'Southland, New Zealand', 'Taranaki, New Zealand', 'Tasman, New Zealand', 'Waikato, New Zealand', 'Wellington, New Zealand', 'West Coast, New Zealand',
+    'United States', 'Alabama, United States', 'Alaska, United States', 'Arizona, United States', 'Arkansas, United States', 'California, United States', 'Colorado, United States', 'Connecticut, United States', 'Delaware, United States', 'Florida, United States', 'Georgia, United States', 'Hawaii, United States', 'Idaho, United States', 'Illinois, United States', 'Indiana, United States', 'Iowa, United States', 'Kansas, United States', 'Kentucky, United States', 'Louisiana, United States', 'Maine, United States', 'Maryland, United States', 'Massachusetts, United States', 'Michigan, United States', 'Minnesota, United States', 'Mississippi, United States', 'Missouri, United States', 'Montana, United States', 'Nebraska, United States', 'Nevada, United States', 'New Hampshire, United States', 'New Jersey, United States', 'New Mexico, United States', 'New York, United States', 'North Carolina, United States', 'North Dakota, United States', 'Ohio, United States', 'Oklahoma, United States', 'Oregon, United States', 'Pennsylvania, United States', 'Rhode Island, United States', 'South Carolina, United States', 'South Dakota, United States', 'Tennessee, United States', 'Texas, United States', 'Utah, United States', 'Vermont, United States', 'Virginia, United States', 'Washington, United States', 'West Virginia, United States', 'Wisconsin, United States', 'Wyoming, United States',
+    'Canada', 'Alberta, Canada', 'British Columbia, Canada', 'Manitoba, Canada', 'New Brunswick, Canada', 'Newfoundland and Labrador, Canada', 'Northwest Territories, Canada', 'Nova Scotia, Canada', 'Nunavut, Canada', 'Ontario, Canada', 'Prince Edward Island, Canada', 'Quebec, Canada', 'Saskatchewan, Canada', 'Yukon, Canada',
+    'United Kingdom', 'England, United Kingdom', 'Northern Ireland, United Kingdom', 'Scotland, United Kingdom', 'Wales, United Kingdom',
+    'Afghanistan', 'Albania', 'Algeria', 'Andorra', 'Angola', 'Antigua and Barbuda', 'Argentina', 'Armenia', 'Azerbaijan', 'Bahamas', 'Bahrain', 'Bangladesh', 'Barbados', 'Belgium', 'Belize', 'Benin', 'Bhutan', 'Bolivia', 'Bosnia and Herzegovina', 'Botswana', 'Brazil', 'Brunei', 'Bulgaria', 'Burkina Faso', 'Burundi', 'Cambodia', 'Cameroon', 'Cape Verde', 'Central African Republic', 'Chad', 'Chile', 'China', 'Colombia', 'Comoros', 'Costa Rica', 'Croatia', 'Cuba', 'Cyprus', 'Czechia', 'Democratic Republic of the Congo', 'Denmark', 'Djibouti', 'Dominica', 'Dominican Republic', 'Ecuador', 'Egypt', 'El Salvador', 'Equatorial Guinea', 'Estonia', 'Eswatini', 'Ethiopia', 'Fiji', 'Finland', 'France', 'Gabon', 'Gambia', 'Georgia', 'Germany', 'Ghana', 'Greece', 'Grenada', 'Guatemala', 'Guinea', 'Guyana', 'Haiti', 'Honduras', 'Hungary', 'Iceland', 'India', 'Indonesia', 'Ireland', 'Israel', 'Italy', 'Jamaica', 'Japan', 'Kenya', 'Kiribati', 'Kuwait', 'Laos', 'Latvia', 'Lebanon', 'Liberia', 'Lithuania', 'Luxembourg', 'Malaysia', 'Maldives', 'Malta', 'Mexico', 'Morocco', 'Myanmar', 'Nepal', 'Netherlands', 'Nigeria', 'Norway', 'Pakistan', 'Panama', 'Papua New Guinea', 'Peru', 'Philippines', 'Poland', 'Portugal', 'Singapore', 'South Africa', 'South Korea', 'Spain', 'Sri Lanka', 'Sweden', 'Switzerland', 'Thailand', 'Türkiye', 'United Arab Emirates', 'Vietnam'
+  ];
+
+  function installCommunityLocationSuggestions() {
+    const list = document.getElementById('communityPublishLocationSuggestions');
+    if (!list || list.dataset.ready === 'true') return;
+    const seen = new Set();
+    list.innerHTML = COMMUNITY_LOCATION_SUGGESTIONS
+      .map(v => String(v || '').trim())
+      .filter(v => v && !seen.has(v.toLowerCase()) && seen.add(v.toLowerCase()))
+      .sort((a, b) => a.localeCompare(b))
+      .map(v => `<option value="${communityEscape(v)}"></option>`)
+      .join('');
+    list.dataset.ready = 'true';
+  }
+
+  let communityPublishTagValues = [];
+
+  function normaliseCommunityTagToken(raw) {
+    return String(raw || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  function syncCommunityPublishTagsHidden() {
+    const hidden = document.getElementById('communityPublishTags');
+    if (hidden) hidden.value = communityPublishTagValues.join(', ');
+  }
+
+  function renderCommunityPublishTagChips() {
+    const chips = document.getElementById('communityPublishTagChips');
+    if (!chips) return;
+    chips.innerHTML = communityPublishTagValues.map(tag => `
+      <span class="community-tag-chip" data-community-tag="${communityEscape(tag)}">
+        <span>${communityEscape(tag)}</span>
+        <button type="button" aria-label="Remove ${communityEscape(tag)}" data-remove-community-tag="${communityEscape(tag)}">×</button>
+      </span>
+    `).join('');
+    syncCommunityPublishTagsHidden();
+  }
+
+  function setCommunityPublishTags(raw) {
+    const values = Array.isArray(raw) ? raw : String(raw || '').split(',');
+    const seen = new Set();
+    communityPublishTagValues = values
+      .map(normaliseCommunityTagToken)
+      .filter(tag => tag && !seen.has(tag) && seen.add(tag))
+      .slice(0, 8);
+    const input = document.getElementById('communityPublishTagInput');
+    if (input) input.value = '';
+    renderCommunityPublishTagChips();
+  }
+
+  function addCommunityPublishTags(raw) {
+    const incoming = String(raw || '').split(',').map(normaliseCommunityTagToken).filter(Boolean);
+    if (!incoming.length) return;
+    const seen = new Set(communityPublishTagValues);
+    for (const tag of incoming) {
+      if (communityPublishTagValues.length >= 8) break;
+      if (!seen.has(tag)) {
+        communityPublishTagValues.push(tag);
+        seen.add(tag);
+      }
+    }
+    renderCommunityPublishTagChips();
+  }
+
+  function commitCommunityPublishTagInput() {
+    const input = document.getElementById('communityPublishTagInput');
+    if (!input) return;
+    const raw = input.value;
+    if (!String(raw || '').trim()) return;
+    addCommunityPublishTags(raw);
+    input.value = '';
+  }
+
+  function installCommunityTagInput() {
+    const wrap = document.getElementById('communityPublishTagWrap');
+    const input = document.getElementById('communityPublishTagInput');
+    const chips = document.getElementById('communityPublishTagChips');
+    if (!wrap || !input || !chips || input.dataset.ready === 'true') return;
+    input.dataset.ready = 'true';
+    wrap.addEventListener('click', () => input.focus());
+    input.addEventListener('keydown', ev => {
+      if (ev.key === ',' || ev.key === 'Enter') {
+        ev.preventDefault();
+        commitCommunityPublishTagInput();
+      } else if (ev.key === 'Backspace' && !input.value && communityPublishTagValues.length) {
+        communityPublishTagValues.pop();
+        renderCommunityPublishTagChips();
+      }
+    });
+    input.addEventListener('blur', commitCommunityPublishTagInput);
+    input.addEventListener('paste', ev => {
+      const text = ev.clipboardData?.getData('text') || '';
+      if (text.includes(',')) {
+        ev.preventDefault();
+        addCommunityPublishTags(text);
+        input.value = '';
+      }
+    });
+    chips.addEventListener('click', ev => {
+      const btn = ev.target && ev.target.closest ? ev.target.closest('[data-remove-community-tag]') : null;
+      if (!btn) return;
+      const tag = btn.getAttribute('data-remove-community-tag');
+      communityPublishTagValues = communityPublishTagValues.filter(v => v !== tag);
+      renderCommunityPublishTagChips();
+      input.focus();
+    });
+  }
+
 
   function communityStableStringify(value) {
     try { return JSON.stringify(value || {}); } catch (_) { return ''; }
@@ -18796,6 +18994,8 @@ function visibleViewportSpanDegrees() {
     const title = document.getElementById('communityPublishName');
     const location = document.getElementById('communityPublishLocation');
     const tags = document.getElementById('communityPublishTags');
+    installCommunityLocationSuggestions();
+    installCommunityTagInput();
     const desc = document.getElementById('communityPublishDescription');
     const save = document.getElementById('communityPublishSave');
     const unpublish = document.getElementById('communityPublishUnpublish');
@@ -18808,6 +19008,7 @@ function visibleViewportSpanDegrees() {
     if (title) title.value = communityPublishedRecord?.title || suggestedCommunityTitle();
     if (location) location.value = communityPublishedRecord?.location_label || '';
     if (tags) tags.value = Array.isArray(communityPublishedRecord?.tags) ? communityPublishedRecord.tags.join(', ') : '';
+    setCommunityPublishTags(Array.isArray(communityPublishedRecord?.tags) ? communityPublishedRecord.tags : '');
     if (desc) desc.value = communityPublishedRecord?.description || '';
     if (save) save.textContent = communityPublishedRecord ? 'Update published version' : 'Publish';
     if (unpublish) unpublish.style.display = communityPublishedRecord ? '' : 'none';
@@ -19065,9 +19266,10 @@ function visibleViewportSpanDegrees() {
     if (!canUseCommunityPublishing()) return;
     const client = typeof initSupabaseClient === 'function' ? initSupabaseClient() : null;
     if (!client) return;
+    commitCommunityPublishTagInput();
     const title = String(document.getElementById('communityPublishName')?.value || '').trim();
     const location = String(document.getElementById('communityPublishLocation')?.value || '').trim();
-    const tags = parseCommunityTags(document.getElementById('communityPublishTags')?.value || '');
+    const tags = parseCommunityTags(document.getElementById('communityPublishTags')?.value || communityPublishTagValues.join(', '));
     const description = String(document.getElementById('communityPublishDescription')?.value || '').trim();
     if (!title) {
       setCommunityPublishMessage('Add a title before publishing.', true);
@@ -19291,6 +19493,8 @@ function visibleViewportSpanDegrees() {
   }
 
   function wireCommunityPublishing() {
+    installCommunityLocationSuggestions();
+    installCommunityTagInput();
     document.getElementById('dashPublishCommunity')?.addEventListener('click', openCommunityPublishModal);
     document.getElementById('communityPublishClose')?.addEventListener('click', closeCommunityPublishModal);
     document.getElementById('communityPublishCancel')?.addEventListener('click', closeCommunityPublishModal);
