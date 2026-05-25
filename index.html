@@ -1165,7 +1165,8 @@ body.dashboard-active #mapContextWrap { display: none !important; }
   white-space: nowrap;
 }
 
-body.dashboard-active #clusterLoadingStatus {
+body.dashboard-active #clusterLoadingStatus,
+body.community-active #clusterLoadingStatus {
   display: none !important;
 }
 
@@ -11159,6 +11160,7 @@ function updateDashboardBadge() {
 }
 
 function switchView(view) {
+  const previousView = activeView;
   activeView = view === 'dashboard' ? 'dashboard' : (view === 'community' ? 'community' : 'globe');
   document.body.classList.toggle('dashboard-active', activeView === 'dashboard');
   document.body.classList.toggle('community-active', activeView === 'community');
@@ -11206,6 +11208,23 @@ function switchView(view) {
     document.body.classList.remove('dashboard-map-full');
     document.getElementById('dashboardAddPanel').classList.remove('open');
     if (viewer) viewer.resize();
+  }
+
+  if (activeView === 'globe' && previousView !== 'globe') {
+    // The globe container is display:none while Community/Dashboard is active.
+    // When it is shown again, Cesium can keep stale canvas/screen-coordinate
+    // state until the first manual camera movement. That made only one cluster
+    // survive the screen-space de-overlap filter. Treat returning to the globe
+    // as a full viewport resume, not just a CSS tab switch.
+    if (typeof window.resumeGlobeAfterHiddenView === 'function') {
+      window.resumeGlobeAfterHiddenView(`switch-from-${previousView || 'unknown'}`);
+    } else if (viewer) {
+      try { viewer.resize(); } catch (_) {}
+      try { viewer.scene && viewer.scene.requestRender && viewer.scene.requestRender(); } catch (_) {}
+      setTimeout(() => {
+        try { window.refreshApiViewport && window.refreshApiViewport(true); } catch (_) {}
+      }, 80);
+    }
   }
 }
 
@@ -16501,7 +16520,9 @@ function setClusterLoadingStatus(isLoading, message = 'Loading clusters…', opt
 
   const api = window.VIGIL_CAMERA_API_STATE;
   const inClusterMode = !api || api.pendingMode === 'clusters' || api.lastDesiredMode === 'clusters' || api.lastRenderedMode === 'clusters';
-  const canShow = !!isLoading && inClusterMode && !document.body.classList.contains('dashboard-active');
+  const canShow = !!isLoading && inClusterMode
+    && !document.body.classList.contains('dashboard-active')
+    && !document.body.classList.contains('community-active');
 
   const showDelay = Number.isFinite(options.showDelay) ? options.showDelay : 220;
   const minVisible = Number.isFinite(options.minVisible) ? options.minVisible : 650;
@@ -16516,7 +16537,7 @@ function setClusterLoadingStatus(isLoading, message = 'Loading clusters…', opt
     clusterLoadingToken = token;
     clusterLoadingShowTimer = setTimeout(() => {
       if (token !== clusterLoadingToken) return;
-      if (document.body.classList.contains('dashboard-active')) return;
+      if (document.body.classList.contains('dashboard-active') || document.body.classList.contains('community-active')) return;
       if (text) text.textContent = message || 'Loading clusters…';
       clusterLoadingVisibleSince = Date.now();
       el.classList.add('loading');
@@ -17567,6 +17588,42 @@ function visibleViewportSpanDegrees() {
     });
   }
   window.runViewportRecoverySequence = runViewportRecoverySequence;
+
+  function resumeGlobeAfterHiddenView(reason = 'resume-globe') {
+    if (!API_MODE || !apiState.booted || !viewer) return;
+
+    // A hidden Cesium canvas often needs one resize on the next layout pass and
+    // another after the browser has actually painted the globe. Also clear the
+    // request key/mode cache so the cluster query cannot be suppressed as
+    // "already current" when the previous render was calculated against a
+    // hidden or stale canvas.
+    apiState.isMoving = false;
+    apiState.pendingMode = 'idle';
+    apiState.inflightMode = 'idle';
+    apiState.inflightStartedAt = 0;
+    apiState.lastKey = '';
+    apiState.lastRefreshAt = 0;
+    apiState.lastDesiredMode = 'idle';
+
+    try { if (dataSource) dataSource.show = true; } catch (_) {}
+    requestCesiumRenderRecovery();
+    try { updateClusterVisibilityForCurrentCamera(); } catch (_) {}
+
+    const delays = [0, 40, 120, 320, 760];
+    const seq = ++apiState.recoverySeq;
+    delays.forEach(delay => {
+      window.setTimeout(() => {
+        if (seq !== apiState.recoverySeq) return;
+        if (!viewer || activeView !== 'globe') return;
+        requestCesiumRenderRecovery();
+        try { updateClusterVisibilityForCurrentCamera(); } catch (_) {}
+        // Force at the first stable layout pass, then let later passes repair
+        // any stale screen transform without requiring a physical camera nudge.
+        recoverApiViewport(`${reason}:${delay}`, { force: true, delay: delay === 0 ? 1 : 20 });
+      }, delay);
+    });
+  }
+  window.resumeGlobeAfterHiddenView = resumeGlobeAfterHiddenView;
 
   function zoomToServerCluster(cluster) {
     if (!cluster || !viewer) return;
