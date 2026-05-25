@@ -1865,6 +1865,44 @@ body.community-active #dashboardView {
   height:34px; border:1px solid var(--c-border); border-radius:8px; background:var(--c-surface2);
   color:var(--c-text2); padding:0 9px; font-family:var(--font); font-size:12px; font-weight:700;
 }
+.community-topic-select {
+  min-width: 142px;
+}
+.community-topic-pill {
+  background: var(--c-accent-bg) !important;
+  border-color: rgba(37,99,235,.24) !important;
+  color: var(--c-accent) !important;
+  font-weight: 800;
+}
+.community-topic-filter-note {
+  color: var(--c-accent);
+}
+.community-publish-topic-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.community-topic-option {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface2);
+  color: var(--c-text2);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.community-topic-option:hover {
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+.community-topic-option.active {
+  background: var(--c-accent-bg);
+  border-color: rgba(37,99,235,.28);
+  color: var(--c-accent);
+}
 .community-refresh-btn {
   height:34px; padding:0 11px; border:1px solid var(--c-border); border-radius:8px;
   background:var(--c-surface); color:var(--c-text2); font-family:var(--font); font-size:12px; font-weight:800; cursor:pointer;
@@ -4930,6 +4968,11 @@ body.community-thumbnail-capture #dashboardFeedWall::-webkit-scrollbar {
         <datalist id="communityPublishLocationSuggestions"></datalist>
       </div>
       <div class="auth-field">
+        <label>Collection / Topic</label>
+        <div class="community-publish-topic-grid" id="communityPublishTopicGrid" role="radiogroup" aria-label="Community dashboard topic"></div>
+        <input id="communityPublishTopic" type="hidden" value="">
+      </div>
+      <div class="auth-field">
         <label for="communityPublishTags">Tags</label>
         <div class="community-tag-input-wrap" id="communityPublishTagWrap">
           <div class="community-tag-chips" id="communityPublishTagChips" aria-live="polite"></div>
@@ -4974,6 +5017,9 @@ body.community-thumbnail-capture #dashboardFeedWall::-webkit-scrollbar {
           <input id="communitySearch" class="community-search" type="text" placeholder="Search title, location, tags…">
           <button id="communityClearSearch" class="community-clear-search" type="button" title="Clear search" aria-label="Clear community search">×</button>
         </div>
+        <select id="communityTopicFilter" class="community-sort community-topic-select" aria-label="Community topic filter">
+          <option value="">All topics</option>
+        </select>
         <select id="communitySort" class="community-sort" aria-label="Community dashboard sort">
           <option value="trending">Trending</option>
           <option value="featured">Featured</option>
@@ -18712,6 +18758,97 @@ function visibleViewportSpanDegrees() {
       .slice(0, 8))];
   }
 
+  const COMMUNITY_TOPICS = [
+    { id: 'floods', label: 'Floods' },
+    { id: 'storm-chasing', label: 'Storm chasing' },
+    { id: 'traffic', label: 'Traffic' },
+    { id: 'ports', label: 'Ports' },
+    { id: 'rail', label: 'Rail' },
+    { id: 'ski-fields', label: 'Ski fields' },
+    { id: 'aviation', label: 'Aviation' }
+  ];
+  const COMMUNITY_TOPIC_PREFIX = 'topic:';
+
+  function communityTopicTag(topicId) {
+    const id = String(topicId || '').trim().toLowerCase();
+    return id ? COMMUNITY_TOPIC_PREFIX + id : '';
+  }
+
+  function communityTopicById(topicId) {
+    const id = String(topicId || '').replace(/^topic:/i, '').trim().toLowerCase();
+    return COMMUNITY_TOPICS.find(t => t.id === id) || null;
+  }
+
+  function communityTagArray(tags) {
+    if (Array.isArray(tags)) return tags.map(t => String(t || '').trim()).filter(Boolean);
+    if (tags && typeof tags === 'object') {
+      try {
+        if (Array.isArray(tags.tags)) return tags.tags.map(t => String(t || '').trim()).filter(Boolean);
+      } catch (_) {}
+    }
+    return parseCommunityTags(tags);
+  }
+
+  function communityTopicFromTags(tags) {
+    const arr = communityTagArray(tags);
+    for (const tag of arr) {
+      const raw = String(tag || '').trim().toLowerCase();
+      if (raw.startsWith(COMMUNITY_TOPIC_PREFIX)) return communityTopicById(raw.slice(COMMUNITY_TOPIC_PREFIX.length));
+    }
+    return null;
+  }
+
+  function communityVisibleTags(tags) {
+    return communityTagArray(tags)
+      .map(t => String(t || '').trim())
+      .filter(t => t && !t.toLowerCase().startsWith(COMMUNITY_TOPIC_PREFIX));
+  }
+
+  function normaliseCommunityPublishTopic(raw) {
+    const id = String(raw || '').replace(/^topic:/i, '').trim().toLowerCase();
+    return communityTopicById(id)?.id || '';
+  }
+
+  function setCommunityPublishTopic(topicId) {
+    const selected = normaliseCommunityPublishTopic(topicId);
+    const hidden = document.getElementById('communityPublishTopic');
+    if (hidden) hidden.value = selected;
+    document.querySelectorAll('#communityPublishTopicGrid .community-topic-option').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.topic === selected);
+      btn.setAttribute('aria-checked', btn.dataset.topic === selected ? 'true' : 'false');
+    });
+  }
+
+  function getCommunityPublishTopic() {
+    return normaliseCommunityPublishTopic(document.getElementById('communityPublishTopic')?.value || '');
+  }
+
+  function installCommunityTopicControls() {
+    const grid = document.getElementById('communityPublishTopicGrid');
+    if (grid && grid.dataset.ready !== 'true') {
+      grid.innerHTML = ['<button class="community-topic-option active" type="button" role="radio" aria-checked="true" data-topic="">None</button>']
+        .concat(COMMUNITY_TOPICS.map(t => `<button class="community-topic-option" type="button" role="radio" aria-checked="false" data-topic="${communityEscape(t.id)}">${communityEscape(t.label)}</button>`))
+        .join('');
+      grid.addEventListener('click', ev => {
+        const btn = ev.target && ev.target.closest ? ev.target.closest('[data-topic]') : null;
+        if (!btn) return;
+        setCommunityPublishTopic(btn.dataset.topic || '');
+      });
+      grid.dataset.ready = 'true';
+    }
+    const filter = document.getElementById('communityTopicFilter');
+    if (filter && filter.dataset.ready !== 'true') {
+      filter.innerHTML = '<option value="">All topics</option>' + COMMUNITY_TOPICS.map(t => `<option value="${communityEscape(t.id)}">${communityEscape(t.label)}</option>`).join('');
+      filter.dataset.ready = 'true';
+    }
+  }
+
+  function applyCommunityTopicToTags(tags, topicId) {
+    const visible = communityVisibleTags(tags);
+    const topicTag = communityTopicTag(topicId);
+    return topicTag ? [topicTag, ...visible].slice(0, 9) : visible.slice(0, 8);
+  }
+
   const COMMUNITY_LOCATION_SUGGESTIONS = [
     'Australia', 'Australian Capital Territory, Australia', 'New South Wales, Australia', 'Northern Territory, Australia', 'Queensland, Australia', 'South Australia, Australia', 'Tasmania, Australia', 'Victoria, Australia', 'Western Australia, Australia',
     'Austria', 'New Zealand', 'Auckland, New Zealand', 'Bay of Plenty, New Zealand', 'Canterbury, New Zealand', 'Gisborne, New Zealand', 'Hawke’s Bay, New Zealand', 'Manawatū-Whanganui, New Zealand', 'Marlborough, New Zealand', 'Nelson, New Zealand', 'Northland, New Zealand', 'Otago, New Zealand', 'Southland, New Zealand', 'Taranaki, New Zealand', 'Tasman, New Zealand', 'Waikato, New Zealand', 'Wellington, New Zealand', 'West Coast, New Zealand',
@@ -18766,7 +18903,7 @@ function visibleViewportSpanDegrees() {
     const seen = new Set();
     communityPublishTagValues = values
       .map(normaliseCommunityTagToken)
-      .filter(tag => tag && !seen.has(tag) && seen.add(tag))
+      .filter(tag => tag && !tag.startsWith(COMMUNITY_TOPIC_PREFIX) && !seen.has(tag) && seen.add(tag))
       .slice(0, 8);
     const input = document.getElementById('communityPublishTagInput');
     if (input) input.value = '';
@@ -18995,6 +19132,7 @@ function visibleViewportSpanDegrees() {
     const location = document.getElementById('communityPublishLocation');
     const tags = document.getElementById('communityPublishTags');
     installCommunityLocationSuggestions();
+    installCommunityTopicControls();
     installCommunityTagInput();
     const desc = document.getElementById('communityPublishDescription');
     const save = document.getElementById('communityPublishSave');
@@ -19007,7 +19145,8 @@ function visibleViewportSpanDegrees() {
     if (heading) heading.textContent = communityPublishedRecord ? 'Update Community Dashboard' : 'Publish to Community';
     if (title) title.value = communityPublishedRecord?.title || suggestedCommunityTitle();
     if (location) location.value = communityPublishedRecord?.location_label || '';
-    if (tags) tags.value = Array.isArray(communityPublishedRecord?.tags) ? communityPublishedRecord.tags.join(', ') : '';
+    if (tags) tags.value = Array.isArray(communityPublishedRecord?.tags) ? communityVisibleTags(communityPublishedRecord.tags).join(', ') : '';
+    setCommunityPublishTopic(communityTopicFromTags(communityPublishedRecord?.tags)?.id || '');
     setCommunityPublishTags(Array.isArray(communityPublishedRecord?.tags) ? communityPublishedRecord.tags : '');
     if (desc) desc.value = communityPublishedRecord?.description || '';
     if (save) save.textContent = communityPublishedRecord ? 'Update published version' : 'Publish';
@@ -19704,7 +19843,8 @@ function visibleViewportSpanDegrees() {
     try {
       localStorage.setItem(COMMUNITY_BROWSER_PREFS_KEY, JSON.stringify({
         search: document.getElementById('communitySearch')?.value || '',
-        sort: document.getElementById('communitySort')?.value || 'trending'
+        sort: document.getElementById('communitySort')?.value || 'trending',
+        topic: document.getElementById('communityTopicFilter')?.value || ''
       }));
     } catch (_) {}
   }
@@ -19712,9 +19852,12 @@ function visibleViewportSpanDegrees() {
   function restoreCommunityBrowserPrefs() {
     const prefs = readCommunityBrowserPrefs();
     const search = document.getElementById('communitySearch');
+    installCommunityTopicControls();
     const sort = document.getElementById('communitySort');
+    const topic = document.getElementById('communityTopicFilter');
     if (search && typeof prefs.search === 'string') search.value = prefs.search;
     if (sort && typeof prefs.sort === 'string' && [...sort.options].some(o => o.value === prefs.sort)) sort.value = prefs.sort;
+    if (topic && typeof prefs.topic === 'string' && [...topic.options].some(o => o.value === prefs.topic)) topic.value = prefs.topic;
     updateCommunityBrowserControls();
   }
 
@@ -19742,8 +19885,11 @@ function visibleViewportSpanDegrees() {
     const status = document.getElementById('communityBrowserStatus');
     if (status) {
       const sort = document.getElementById('communitySort')?.value || 'trending';
+      const topicId = document.getElementById('communityTopicFilter')?.value || '';
+      const topic = communityTopicById(topicId);
       const parts = [];
       if (currentUser) parts.push(`${communityRows.length} dashboard${communityRows.length === 1 ? '' : 's'}`);
+      if (topic) parts.push(`Topic: ${topic.label}`);
       if (searchValue.trim()) parts.push(`Search: “${searchValue.trim()}”`);
       parts.push(`Sort: ${communitySortLabel(sort)}`);
       if (communityLastLoadedAt && !communityLoading) parts.push(`Updated ${communityLastLoadedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
@@ -19852,7 +19998,9 @@ function visibleViewportSpanDegrees() {
 
   function communityCardHtml(row) {
     const plan = String(row.owner_plan_snapshot || 'free').toLowerCase();
-    const tags = Array.isArray(row.tags) && row.tags.length ? row.tags.slice(0, 3).map(t => `#${cEsc(t)}`).join(' ') : '';
+    const topic = communityTopicFromTags(row.tags);
+    const visibleTags = communityVisibleTags(row.tags);
+    const tags = visibleTags.length ? visibleTags.slice(0, 3).map(t => `#${cEsc(t)}`).join(' ') : '';
     return `<article class="community-card ${row.is_featured ? 'community-featured' : ''}" data-id="${cEsc(row.id)}">
       ${communityCardPreviewHtml(row)}
       <div class="community-card-body">
@@ -19864,6 +20012,7 @@ function visibleViewportSpanDegrees() {
         <div class="community-card-title">${cEsc(row.title || 'Untitled dashboard')}</div>
         <div class="community-card-desc">${cEsc(row.description || row.location_label || tags || 'Published camera dashboard')}</div>
         <div class="community-meta">
+          ${topic ? `<span class="community-pill community-topic-pill">${cEsc(topic.label)}</span>` : ''}
           ${row.location_label ? `<span class="community-pill">📍 ${cEsc(row.location_label)}</span>` : ''}
           <span class="community-pill">📷 ${Number(row.camera_count || 0)}</span>
           <span class="community-pill">👁 ${Number(row.view_count || 0)}</span>
@@ -20152,12 +20301,26 @@ function visibleViewportSpanDegrees() {
     }
     if (!communityRows.length) {
       const hasSearch = !!(document.getElementById('communitySearch')?.value || '').trim();
-      grid.innerHTML = `<div class="community-empty"><div><strong>${hasSearch ? 'No dashboards match that search.' : 'No community dashboards found.'}</strong><br>${hasSearch ? 'Clear the search or try a location, title, or tag.' : 'Publish one of your saved dashboards to get started.'}<div class="community-empty-actions">${hasSearch ? '<button class="community-action" id="communityEmptyClear" type="button">Clear search</button>' : ''}<button class="community-action" id="communityEmptyRefresh" type="button">Refresh</button></div></div></div>`;
-      grid.querySelector('#communityEmptyClear')?.addEventListener('click', () => { const input = document.getElementById('communitySearch'); if (input) input.value = ''; saveCommunityBrowserPrefs(); updateCommunityBrowserControls(); loadCommunityDashboards(); });
+      const hasTopic = !!(document.getElementById('communityTopicFilter')?.value || '').trim();
+      const isFiltered = hasSearch || hasTopic;
+      grid.innerHTML = `<div class="community-empty"><div><strong>${isFiltered ? 'No dashboards match those filters.' : 'No community dashboards found.'}</strong><br>${isFiltered ? 'Clear the search/topic filter or try a broader term.' : 'Publish one of your saved dashboards to get started.'}<div class="community-empty-actions">${isFiltered ? '<button class="community-action" id="communityEmptyClear" type="button">Clear filters</button>' : ''}<button class="community-action" id="communityEmptyRefresh" type="button">Refresh</button></div></div></div>`;
+      grid.querySelector('#communityEmptyClear')?.addEventListener('click', () => { const input = document.getElementById('communitySearch'); const topic = document.getElementById('communityTopicFilter'); if (input) input.value = ''; if (topic) topic.value = ''; saveCommunityBrowserPrefs(); updateCommunityBrowserControls(); loadCommunityDashboards(); });
       grid.querySelector('#communityEmptyRefresh')?.addEventListener('click', () => loadCommunityDashboards());
       return;
     }
-    grid.innerHTML = communityRows.map(communityCardHtml).join('');
+    const cards = communityRows.map(row => {
+      try {
+        return communityCardHtml(row);
+      } catch (err) {
+        console.warn('Skipping malformed community dashboard row:', err, row);
+        return '';
+      }
+    }).filter(Boolean).join('');
+    if (!cards) {
+      grid.innerHTML = '<div class="community-empty"><div><strong>Could not render Community dashboards.</strong><br>One or more published dashboard records are malformed. Try Refresh, or clear filters.</div></div>';
+      return;
+    }
+    grid.innerHTML = cards;
     bindCommunityCardActions(grid);
   }
 
@@ -20167,8 +20330,10 @@ function visibleViewportSpanDegrees() {
     const client = communityClient();
     if (!client) return;
     const requestSeq = ++communityLoadRequestSeq;
+    installCommunityTopicControls();
     const search = document.getElementById('communitySearch')?.value || '';
     const sort = document.getElementById('communitySort')?.value || 'trending';
+    const topicFilter = document.getElementById('communityTopicFilter')?.value || '';
     saveCommunityBrowserPrefs();
     communityLoading = true;
     updateCommunityBrowserControls();
@@ -20177,14 +20342,16 @@ function visibleViewportSpanDegrees() {
       const { data, error } = await communityTimeout(client.rpc('browse_community_dashboards', {
         p_search: search,
         p_sort: sort,
-        p_limit: 40,
+        p_limit: topicFilter ? 120 : 40,
         p_offset: 0
       }), 'Load Community', COMMUNITY_TIMEOUT_MS);
       if (requestSeq !== communityLoadRequestSeq) return;
       if (error) throw error;
       const hydrated = await communityTimeout(hydrateCommunityRowsWithSnapshots(Array.isArray(data) ? data : []), 'Load Community previews', COMMUNITY_TIMEOUT_MS);
       if (requestSeq !== communityLoadRequestSeq) return;
-      communityRows = hydrated;
+      communityRows = topicFilter
+        ? hydrated.filter(row => communityTopicFromTags(row.tags)?.id === topicFilter).slice(0, 40)
+        : hydrated;
       communityLastLoadedAt = new Date();
     } catch (err) {
       if (requestSeq !== communityLoadRequestSeq) return;
@@ -20486,7 +20653,9 @@ function visibleViewportSpanDegrees() {
 
   function wireCommunityBrowser() {
     const search = document.getElementById('communitySearch');
+    installCommunityTopicControls();
     const sort = document.getElementById('communitySort');
+    const topic = document.getElementById('communityTopicFilter');
     const refresh = document.getElementById('communityRefresh');
     const clear = document.getElementById('communityClearSearch');
     restoreCommunityBrowserPrefs();
@@ -20507,6 +20676,11 @@ function visibleViewportSpanDegrees() {
       search?.focus();
     });
     sort?.addEventListener('change', () => { saveCommunityBrowserPrefs(); updateCommunityBrowserControls(); loadCommunityDashboards(); });
+    topic?.addEventListener('change', () => {
+      saveCommunityBrowserPrefs();
+      updateCommunityBrowserControls();
+      loadCommunityDashboards();
+    });
     refresh?.addEventListener('click', loadCommunityDashboards);
     document.getElementById('creatorProfileBack')?.addEventListener('click', () => showCommunityBrowserFromProfile('push'));
     document.getElementById('creatorProfileSort')?.addEventListener('change', () => { if (activeCreatorProfileUsername) loadCreatorDashboards(activeCreatorProfileUsername); });
