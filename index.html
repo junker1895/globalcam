@@ -8201,6 +8201,8 @@ let lastCameraFloorSampleMs = 0;
 let lastCesiumSafeCameraPose = null;
 let lastCesiumSafeCameraPoseMs = 0;
 let cesiumRenderRecoveryInProgress = false;
+let lastCesiumRenderErrorRecoveryAt = 0;
+let cesiumDynamicLabelsDisabled = true; // stability: avoid Cesium LabelCollection crash during zoom
 
 function rememberSafeCesiumCameraPose(reason = 'render') {
   try {
@@ -8499,32 +8501,50 @@ function initCesium() {
     if (viewer.scene) viewer.scene.rethrowRenderErrors = false;
     if (viewer.scene && viewer.scene.renderError) {
       viewer.scene.renderError.addEventListener((scene, error) => {
-        console.warn('Cesium render error recovered:', error?.message || error);
+        const msg = String(error?.message || error || '');
+        console.warn('Cesium render error recovered:', msg);
+        const now = Date.now();
+        cesiumDynamicLabelsDisabled = true;
+
+        try { hideClusterLoadingStatusNow && hideClusterLoadingStatusNow(); } catch (_) {}
+
         try {
-          // If Cesium throws while building the visible command list, remove the
-          // non-essential dynamic scene decorations first. The app can reload
-          // cameras/clusters after the camera pose is restored, but a single bad
-          // label/polyline must not leave the render loop permanently stopped.
+          // Cesium 1.111 can get into a bad LabelCollection command-list state
+          // during close zooms. Text labels are useful but non-essential; turn
+          // off our dynamic text layers and keep only simple points/billboards.
           if (mapContextState) {
             mapContextState.placeNames = false;
             clearPlaceLabels();
             updateMapContextButtonState();
           }
         } catch (_) {}
+
         try {
-          if (dataSource && dataSource.entities && typeof dataSource.entities.removeAll === 'function') {
-            dataSource.entities.removeAll();
+          if (dataSource && dataSource.entities && Array.isArray(dataSource.entities.values)) {
+            dataSource.entities.values.forEach(e => {
+              try { if (e.label) e.label.show = false; } catch (_) {}
+              try { if (e.polyline) e.polyline.show = false; } catch (_) {}
+            });
           }
         } catch (_) {}
+
         try { removeFrustum(); } catch (_) {}
         restoreSafeCesiumCameraPose('renderError');
         try { viewer.useDefaultRenderLoop = true; } catch (_) {}
-        setTimeout(() => {
-          restoreSafeCesiumCameraPose('renderError-delayed');
-          try { viewer.useDefaultRenderLoop = true; } catch (_) {}
-          try { viewer.scene.requestRender(); } catch (_) {}
-          try { if (typeof runViewportRecoverySequence === 'function') runViewportRecoverySequence('render-error-recovery'); } catch (_) {}
-        }, 120);
+        try { viewer.scene.requestRender(); } catch (_) {}
+
+        // Do not start a fresh RPC/rebuild on every renderError frame. That was
+        // what left the app stuck on "Loading clusters…". At most, schedule one
+        // quiet viewport refresh after Cesium has had time to recover.
+        if (now - lastCesiumRenderErrorRecoveryAt > 2500) {
+          lastCesiumRenderErrorRecoveryAt = now;
+          setTimeout(() => {
+            restoreSafeCesiumCameraPose('renderError-delayed');
+            try { viewer.useDefaultRenderLoop = true; } catch (_) {}
+            try { viewer.scene.requestRender(); } catch (_) {}
+            try { if (typeof recoverApiViewport === 'function') recoverApiViewport('render-error-recovery', { force: true, delay: 500 }); } catch (_) {}
+          }, 500);
+        }
       });
     }
   } catch (_) {}
@@ -9921,17 +9941,7 @@ async function createCameraEntities(cams) {
     cluster.point.outlineWidth = 1.5;
     cluster.point.disableDepthTestDistance = 1000000000;
 
-    cluster.label.show              = true;
-    cluster.label.text              = n > 9999 ? '9K+' : n.toString();
-    cluster.label.font              = '600 11px Inter, system-ui, sans-serif';
-    cluster.label.fillColor         = Cesium.Color.WHITE;
-    cluster.label.outlineColor      = Cesium.Color.BLACK;
-    cluster.label.outlineWidth      = 2;
-    cluster.label.style             = Cesium.LabelStyle.FILL_AND_OUTLINE;
-    cluster.label.verticalOrigin    = Cesium.VerticalOrigin.CENTER;
-    cluster.label.horizontalOrigin  = Cesium.HorizontalOrigin.CENTER;
-    cluster.label.pixelOffset       = new Cesium.Cartesian2(0, 0);
-    cluster.label.disableDepthTestDistance = 1000000000;
+    cluster.label.show = false;
   });
 
   const CHUNK = 2000;
@@ -9992,21 +10002,7 @@ async function createCameraEntities(cams) {
 
       const entity = dataSource.entities.add({
         ...entityGraphics,
-        label: {
-          text: cam.location || cam.id,
-          font: '12px Inter, system-ui, sans-serif',
-          fillColor: Cesium.Color.WHITE,
-          outlineColor: Cesium.Color.fromCssColorString('#0f172a'),
-          outlineWidth: 3,
-          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-          pixelOffset: new Cesium.Cartesian2(0, -10),
-          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000),
-          disableDepthTestDistance: 1000000000,
-          eyeOffset: new Cesium.Cartesian3(0, 0, -80),
-          heightReference: google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND,
-          show: false,
-        },
+        // Camera name label intentionally omitted for render stability.
       });
       entity._bfp       = entity.position.getValue(Cesium.JulianDate.now());
       entity._searchOff = false;
@@ -17700,7 +17696,7 @@ function visibleViewportSpanDegrees() {
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180 || count <= 0) return;
     const id = `cluster:${cluster.cluster_id || `${lng.toFixed(3)},${lat.toFixed(3)}`}`;
     const visibility = Number.isFinite(Number(cluster._visibilityFactor)) ? Number(cluster._visibilityFactor) : 1;
-    const size = Math.max(12, Math.min(36, 11 + Math.log10(count + 1) * 7));
+    const size = Math.max(14, Math.min(42, 13 + Math.log10(count + 1) * 8));
     const color = Cesium.Color.fromCssColorString(clusterColor(count)).withAlpha(0.58 + visibility * 0.30);
     const entity = dataSource.entities.add({
       id,
@@ -17712,19 +17708,8 @@ function visibleViewportSpanDegrees() {
         outlineWidth: 1.5,
         disableDepthTestDistance: 1000000000,
       },
-      label: {
-        text: clusterLabel(count),
-        font: '700 11px Inter, system-ui, sans-serif',
-        fillColor: Cesium.Color.WHITE,
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 2,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        verticalOrigin: Cesium.VerticalOrigin.CENTER,
-        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
-        pixelOffset: new Cesium.Cartesian2(0, 0),
-        disableDepthTestDistance: 1000000000,
-        translucencyByDistance: new Cesium.NearFarScalar(0, 1, 18000000, 0.88),
-      },
+      // No Cesium label here. Dynamic LabelCollection text was the source
+      // of the zoom-only Invalid array length render crash on some views.
     });
     entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
     entity._searchOff = false;
@@ -17759,21 +17744,8 @@ function visibleViewportSpanDegrees() {
         eyeOffset: new Cesium.Cartesian3(0, 0, -80),
         heightReference: Cesium.HeightReference.NONE,
       },
-      label: {
-        text: cam.location || cam.name || cam.id,
-        font: '12px Inter, system-ui, sans-serif',
-        fillColor: Cesium.Color.WHITE,
-        outlineColor: Cesium.Color.fromCssColorString('#0f172a'),
-        outlineWidth: 3,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-        pixelOffset: new Cesium.Cartesian2(0, -10),
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000),
-        disableDepthTestDistance: 1000000000,
-        eyeOffset: new Cesium.Cartesian3(0, 0, -80),
-        heightReference: Cesium.HeightReference.NONE,
-        show: false,
-      },
+      // No default Cesium label for visible camera dots. The side panel/PiP
+      // provides names; labels are enabled only for selected/focused entities.
     };
     if (google3DEnabled && CAMERA_3D_LOCATOR_BEAMS_ENABLED && validLngLat(cam.lng, cam.lat)) {
       const beamBottom = safeCartesianFromDegrees(Number(cam.lng), Number(cam.lat), normalCameraBeamBaseHeight(cam));
@@ -18390,7 +18362,7 @@ function visibleViewportSpanDegrees() {
           entity.point.color = base.withAlpha(entity.show ? (0.50 + Math.min(1, v) * 0.35) : 0);
         }
         if (entity.label) {
-          entity.label.show = entity.show && v > 0.22;
+          entity.label.show = false;
         }
       }
       if (viewer) viewer.scene.requestRender();
