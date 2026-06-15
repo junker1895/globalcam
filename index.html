@@ -22,7 +22,7 @@
   Change rule: preserve public IDs, classes, function names, and Supabase table/RPC
   contracts unless the matching call sites are updated in the same pass.
 -->
-<!-- Patch: professional selected-FOV resolver. Normal 3D cameras are fixed-height symbols with persistent locator beams; selected beacon/frustum appears only after rendered 3D tile height is validated. -->
+<!-- Patch: hybrid preview-to-live media player + professional selected-FOV resolver. Normal 3D cameras are fixed-height symbols with persistent locator beams; selected beacon/frustum appears only after rendered 3D tile height is validated. -->
 <script src="https://cesium.com/downloads/cesiumjs/releases/1.111/Build/Cesium/Cesium.js"></script>
 <script>
 // Initial Pro/3D preference application. Kept separate from the external Cesium script
@@ -10164,17 +10164,55 @@ function resetPipMedia() {
   clearInterval(pipLiveWatchTimer);
   pipLiveWatchTimer = null;
   if (hlsInstance) { try { hlsInstance.destroy(); } catch (_) {} hlsInstance = null; }
+  const img = document.getElementById('pip-img');
+  if (img) {
+    img.onload = null;
+    img.onerror = null;
+    img.style.position = '';
+    img.style.inset = '';
+    img.style.opacity = '';
+    img.style.zIndex = '';
+  }
   const video = document.getElementById('pip-video');
   if (video) {
     try { video.pause(); } catch (_) {}
     video.removeAttribute('src');
     try { video.load(); } catch (_) {}
     video.onloadedmetadata = null;
+    video.onloadeddata = null;
+    video.oncanplay = null;
+    video.onplaying = null;
     video.onstalled = null;
     video.onerror = null;
+    video.style.position = '';
+    video.style.inset = '';
+    video.style.opacity = '';
+    video.style.zIndex = '';
   }
   const frame = document.getElementById('pip-iframe');
-  if (frame) frame.src = 'about:blank';
+  if (frame) {
+    frame.onload = null;
+    frame.src = 'about:blank';
+    frame.style.position = '';
+    frame.style.inset = '';
+    frame.style.opacity = '';
+    frame.style.zIndex = '';
+  }
+}
+
+function setPipImageSource(img, url, { refreshStill = false } = {}) {
+  const clean = normaliseFeedUrl(url);
+  if (!img || !clean) return;
+  const kind = pipFeedKind(clean);
+  img.onload = () => window.onPipImageLoad && window.onPipImageLoad(img);
+  if (kind === 'mjpeg') {
+    img.src = clean;
+  } else if (refreshStill) {
+    const sep = clean.includes('?') ? '&' : '?';
+    img.src = clean + sep + '_t=' + Date.now();
+  } else {
+    img.src = clean;
+  }
 }
 
 function setImage(url) {
@@ -10232,16 +10270,50 @@ function updatePipFeed() {
   if (frame) frame.style.display = 'none';
   noFeed.style.display = 'none';
 
+  const hasPreview = !!currentImageUrl;
+  const showPreviewBehindVideo = () => {
+    if (!hasPreview || !img) return false;
+    const previewUrl = normaliseFeedUrl(currentImageUrl);
+    img.style.display = 'block';
+    img.style.position = 'absolute';
+    img.style.inset = '0';
+    img.style.zIndex = '1';
+    img.style.opacity = '1';
+    setPipImageSource(img, previewUrl, { refreshStill: pipFeedKind(previewUrl) !== 'mjpeg' });
+    return true;
+  };
+  const revealVideo = () => {
+    if (img) img.style.display = 'none';
+    video.style.opacity = '1';
+    video.style.position = '';
+    video.style.inset = '';
+    video.style.zIndex = '';
+    if (status) status.textContent = pipFeedKind(currentVideoUrl) === 'hls' ? '● Live HLS stream' : '● Video';
+  };
+
   if (currentFeedType === 'video' && currentVideoUrl) {
     const url = normaliseFeedUrl(currentVideoUrl);
     const kind = pipFeedKind(url);
-    if (refreshBtn) refreshBtn.style.display = 'none';
+    if (refreshBtn) refreshBtn.style.display = hasPreview ? '' : 'none';
 
     if (kind === 'youtube') {
       if (frame) {
+        const previewShown = showPreviewBehindVideo();
         frame.style.display = 'block';
+        frame.style.position = previewShown ? 'absolute' : '';
+        frame.style.inset = previewShown ? '0' : '';
+        frame.style.zIndex = previewShown ? '2' : '';
+        frame.style.opacity = previewShown ? '0' : '';
+        frame.onload = () => {
+          if (img) img.style.display = 'none';
+          frame.style.opacity = '1';
+          frame.style.position = '';
+          frame.style.inset = '';
+          frame.style.zIndex = '';
+          if (status) status.textContent = '● YouTube live/video';
+        };
         frame.src = youtubeEmbedFromUrl(url);
-        if (status) status.textContent = '● YouTube live/video';
+        if (status) status.textContent = previewShown ? 'Loading YouTube…' : '● YouTube live/video';
         return;
       }
     }
@@ -10255,7 +10327,13 @@ function updatePipFeed() {
       return;
     }
 
+    const previewShown = showPreviewBehindVideo();
     video.style.display = 'block';
+    video.style.position = previewShown ? 'absolute' : '';
+    video.style.inset = previewShown ? '0' : '';
+    video.style.zIndex = previewShown ? '2' : '';
+    video.style.opacity = previewShown ? '0' : '1';
+    if (status && previewShown) status.textContent = 'Loading live stream…';
 
     if (kind === 'hls') {
       const startNativeHls = () => {
@@ -10302,6 +10380,9 @@ function updatePipFeed() {
         showNoFeed(); return;
       }
 
+      video.onloadeddata = revealVideo;
+      video.oncanplay = revealVideo;
+      video.onplaying = revealVideo;
       video.onstalled = () => {
         if (status) status.textContent = '● Live stream stalled — recovering…';
         setTimeout(() => {
@@ -10325,11 +10406,18 @@ function updatePipFeed() {
         } catch (_) {}
       }, 5000);
 
-      if (status) status.textContent = '● Live HLS stream';
+      if (status && !previewShown) status.textContent = '● Live HLS stream';
     } else {
       video.src = url;
+      video.onloadeddata = revealVideo;
+      video.oncanplay = revealVideo;
+      video.onplaying = revealVideo;
+      video.onerror = () => {
+        if (currentImageUrl) { currentFeedType = 'image'; updatePipFeed(); return; }
+        showNoFeed();
+      };
       video.play().catch(() => {});
-      if (status) status.textContent = '● Video';
+      if (status && !previewShown) status.textContent = '● Video';
     }
 
     video.onloadedmetadata = () => {
@@ -12532,33 +12620,102 @@ async function mountDashboardFeed(cam, idx, options = {}) {
   if (!resolved || media.dataset.feedRequest !== requestToken) return;
 
   const currentCam = resolved.cam || cam;
-  const { imageUrl, videoUrl } = resolved;
+  let { imageUrl, videoUrl } = resolved;
+  imageUrl = normaliseFeedUrl(imageUrl) || null;
+  videoUrl = normaliseFeedUrl(videoUrl) || null;
+
+  // MJPEG/still-image URLs sometimes land in video_url. Render them as <img>.
+  if (videoUrl && ['image', 'mjpeg'].includes(pipFeedKind(videoUrl))) {
+    if (!imageUrl) imageUrl = videoUrl;
+    videoUrl = null;
+  }
 
   if (videoUrl) {
+    if (dashboardHls.has(idKey)) { try { dashboardHls.get(idKey).destroy(); } catch (_) {} dashboardHls.delete(idKey); }
+
+    media.innerHTML = '';
+    media.style.position = media.style.position || 'relative';
+
+    let previewImg = null;
+    if (imageUrl) {
+      previewImg = document.createElement('img');
+      previewImg.alt = cameraTitle(currentCam);
+      previewImg.loading = 'eager';
+      previewImg.draggable = false;
+      previewImg.style.position = 'absolute';
+      previewImg.style.inset = '0';
+      previewImg.style.width = '100%';
+      previewImg.style.height = '100%';
+      previewImg.style.objectFit = 'cover';
+      previewImg.style.zIndex = '1';
+      const imgKind = pipFeedKind(imageUrl);
+      const sep = imageUrl.includes('?') ? '&' : '?';
+      previewImg.src = imgKind === 'mjpeg' ? imageUrl : imageUrl + sep + '_dash_preview=' + Date.now();
+      previewImg.onload = () => {
+        if (media.dataset.feedRequest !== requestToken) return;
+        applyDashboardMediaAspect(idKey, previewImg);
+        // Treat the preview as a successful first paint while video upgrades.
+        markDashboardRefresh(idKey, true);
+      };
+      previewImg.onerror = () => {};
+      media.appendChild(previewImg);
+    }
+
     const video = document.createElement('video');
     video.autoplay = true;
     video.muted = true;
     video.playsInline = true;
     video.controls = false;
-    media.innerHTML = '';
+    video.style.position = previewImg ? 'absolute' : '';
+    video.style.inset = previewImg ? '0' : '';
+    video.style.width = '100%';
+    video.style.height = '100%';
+    video.style.objectFit = 'cover';
+    video.style.zIndex = previewImg ? '2' : '';
+    video.style.opacity = previewImg ? '0' : '1';
     media.appendChild(video);
     ensureDashboardFeedChrome(media, idKey);
 
-    if (videoUrl.includes('.m3u8') && typeof Hls !== 'undefined' && Hls.isSupported()) {
-      if (dashboardHls.has(idKey)) { dashboardHls.get(idKey).destroy(); dashboardHls.delete(idKey); }
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+    const revealDashboardVideo = () => {
+      if (media.dataset.feedRequest !== requestToken) return;
+      if (previewImg && previewImg.parentNode) previewImg.remove();
+      video.style.opacity = '1';
+      video.style.position = '';
+      video.style.inset = '';
+      video.style.zIndex = '';
+      setTimeout(() => applyDashboardMediaAspect(idKey, video), 120);
+      markDashboardRefresh(idKey, true);
+    };
+
+    if (pipFeedKind(videoUrl) === 'hls' && typeof Hls !== 'undefined' && Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        liveSyncDuration: 3,
+        liveMaxLatencyDuration: 12,
+        backBufferLength: 30,
+      });
       hls.loadSource(videoUrl);
       hls.attachMedia(video);
       dashboardHls.set(idKey, hls);
-      hls.on(Hls.Events.ERROR, () => markDashboardRefresh(idKey, false));
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        setTimeout(() => applyDashboardMediaAspect(idKey, video), 250);
-        markDashboardRefresh(idKey, true);
-        video.play().catch(() => {});
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (!data || !data.fatal) return;
+        try {
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) { hls.startLoad(); return; }
+          if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { hls.recoverMediaError(); return; }
+        } catch (_) {}
+        if (imageUrl) renderDashboardImageFeed(currentCam, imageUrl, idx);
+        else markDashboardRefresh(idKey, false);
       });
+      hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+      video.onloadeddata = revealDashboardVideo;
+      video.oncanplay = revealDashboardVideo;
+      video.onplaying = revealDashboardVideo;
     } else {
       video.src = videoUrl;
-      video.onloadeddata = () => { applyDashboardMediaAspect(idKey, video); markDashboardRefresh(idKey, true); };
+      video.onloadeddata = revealDashboardVideo;
+      video.oncanplay = revealDashboardVideo;
+      video.onplaying = revealDashboardVideo;
       video.onerror = () => {
         if (imageUrl) renderDashboardImageFeed(currentCam, imageUrl, idx);
         else markDashboardRefresh(idKey, false);
@@ -12598,6 +12755,7 @@ function renderDashboardImageFeed(cam, imageUrl, idx, manual=false) {
   img.style.opacity = hasVisibleSuccess ? '0' : '';
   img.style.position = hasVisibleSuccess ? 'absolute' : '';
   img.style.inset = hasVisibleSuccess ? '0' : '';
+  const isMjpegFeed = pipFeedKind(imageUrl) === 'mjpeg';
   img.onload = () => {
     if (media.dataset.feedImageRequest !== img.dataset.feedImageRequest) return;
     media.querySelectorAll('img, video').forEach(el => { if (el !== img) el.remove(); });
@@ -12607,7 +12765,7 @@ function renderDashboardImageFeed(cam, imageUrl, idx, manual=false) {
     if (!img.parentNode) media.insertBefore(img, media.firstChild);
     applyDashboardMediaAspect(idKey, img);
     markDashboardRefresh(idKey, true);
-    scheduleDashboardImageRefresh(cam, idx);
+    if (!isMjpegFeed) scheduleDashboardImageRefresh(cam, idx);
   };
   img.onerror = () => {
     if (media.dataset.feedImageRequest !== img.dataset.feedImageRequest) return;
@@ -12619,7 +12777,7 @@ function renderDashboardImageFeed(cam, imageUrl, idx, manual=false) {
   img.dataset.feedImageRequest = req;
   media.dataset.feedImageRequest = req;
   const sep = imageUrl.includes('?') ? '&' : '?';
-  img.src = imageUrl + sep + '_dash=' + Date.now();
+  img.src = isMjpegFeed ? imageUrl : imageUrl + sep + '_dash=' + Date.now();
   if (!hasVisibleSuccess) {
     media.querySelectorAll('img, video').forEach(el => el.remove());
     media.insertBefore(img, media.firstChild);
