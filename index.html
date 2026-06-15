@@ -17621,8 +17621,22 @@ function visibleViewportSpanDegrees() {
         if (!cam || seen.has(cam.id)) return;
         seen.add(cam.id); rows.push(cam);
       });
-      await hydrateVisibleCameraAltitudes(rows);
+      // Render the returned camera rows immediately. Do not block visible
+      // camera display on altitude hydration, because terrain/altitude lookups
+      // can be slow or browser-throttled and make the loader appear stuck.
       renderApiEntities(rows, 'cameras');
+      try { if (viewer && viewer.scene) viewer.scene.requestRender(); } catch (_) {}
+
+      // Hydrate altitudes in the background and refresh positions only if this
+      // camera request is still the current request.
+      hydrateVisibleCameraAltitudes(rows)
+        .then(() => {
+          if (seq !== apiState.requestSeq) return;
+          if (apiState.lastRenderedMode !== 'cameras') return;
+          renderApiEntities(rows, 'cameras');
+          try { if (viewer && viewer.scene) viewer.scene.requestRender(); } catch (_) {}
+        })
+        .catch(err => console.warn('Background altitude hydration failed:', err));
     } finally {
       const elapsed = Date.now() - startedAt;
       setTimeout(() => {
