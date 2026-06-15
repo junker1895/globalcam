@@ -5678,7 +5678,7 @@ function renderUnselectedCameraEntity(entity, cam) {
       entity.point.outlineWidth = 1;
       entity.point.scaleByDistance = new Cesium.NearFarScalar(300, 1.8, 400000, 0.6);
       entity.point.heightReference = google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND;
-      entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+      entity.point.disableDepthTestDistance = 1000000000;
     }
     if (entity.billboard) {
       entity.billboard.show = heading !== null;
@@ -5688,14 +5688,14 @@ function renderUnselectedCameraEntity(entity, cam) {
       entity.billboard.scaleByDistance = new Cesium.NearFarScalar(300, 1.25, 400000, 0.5);
       entity.billboard.heightReference = google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND;
       applyCameraArrowOrientation(entity.billboard, cam, heading);
-      entity.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+      entity.billboard.disableDepthTestDistance = 1000000000;
     }
     if (entity.label) {
       entity.label.show = false;
       entity.label.pixelOffset = new Cesium.Cartesian2(0, -10);
       entity.label.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, 3000);
       entity.label.heightReference = google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND;
-      entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+      entity.label.disableDepthTestDistance = 1000000000;
     }
 
     // The locator beam is a base-marker feature. It is visible for both normal
@@ -5731,7 +5731,7 @@ function renderResolvedSelectedCameraEntity(entity, cam, groundH) {
       entity.point.outlineWidth = 3;
       entity.point.scaleByDistance = new Cesium.NearFarScalar(50, 1.35, 5000, 0.85);
       entity.point.heightReference = Cesium.HeightReference.NONE;
-      entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+      entity.point.disableDepthTestDistance = 1000000000;
     }
     if (entity.billboard) entity.billboard.show = false;
     if (entity.label) {
@@ -5740,7 +5740,7 @@ function renderResolvedSelectedCameraEntity(entity, cam, groundH) {
       entity.label.pixelOffset = new Cesium.Cartesian2(0, -18);
       entity.label.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, 8000);
       entity.label.heightReference = Cesium.HeightReference.NONE;
-      entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+      entity.label.disableDepthTestDistance = 1000000000;
     }
   } catch (_) {}
 }
@@ -6138,12 +6138,12 @@ async function applySelectedCameraEntityStyle(cam) {
       entity.point.outlineWidth = 3;
       entity.point.scaleByDistance = new Cesium.NearFarScalar(50, 1.35, 5000, 0.85);
       entity.point.heightReference = Cesium.HeightReference.NONE;
-      entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+      entity.point.disableDepthTestDistance = 1000000000;
     }
     if (entity.billboard) {
       entity.billboard.show = false;
       entity.billboard.heightReference = Cesium.HeightReference.NONE;
-      entity.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+      entity.billboard.disableDepthTestDistance = 1000000000;
     }
     if (entity.label) {
       entity.label.show = true;
@@ -6151,7 +6151,7 @@ async function applySelectedCameraEntityStyle(cam) {
       entity.label.pixelOffset = new Cesium.Cartesian2(0, -18);
       entity.label.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, 250000);
       entity.label.heightReference = Cesium.HeightReference.NONE;
-      entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+      entity.label.disableDepthTestDistance = 1000000000;
     }
   } catch (_) {}
 
@@ -6161,7 +6161,7 @@ async function applySelectedCameraEntityStyle(cam) {
 
 // Dashboard state
 const DASHBOARD_PAGE_SIZE = 16;
-const DASHBOARD_MAX_CAMERAS = Number.POSITIVE_INFINITY; // legacy guard; dashboard is now paginated
+const DASHBOARD_MAX_CAMERAS = 1000000000; // legacy guard; dashboard is now paginated
 const DASHBOARD_STORAGE_KEY = 'vigil.dashboard.v1';
 const DASHBOARD_VIEWS_STORAGE_KEY = 'vigil.dashboard.views.v1';
 let savedDashboardViewsCache = [];
@@ -6936,7 +6936,7 @@ function requirePro3D() {
 
 function dashboardCameraCapacityRemaining() {
   const max = getPlanLimits().maxDashboardCameras;
-  if (max >= 999) return Number.POSITIVE_INFINITY;
+  if (max >= 999) return 1000000000;
   return Math.max(0, max - dashboardState.order.length);
 }
 
@@ -8319,7 +8319,7 @@ function cameraFloorGuardDistanceMeters(aLon, aLat, bLon, bLat) {
     );
     return Math.abs(Number(geodesic.surfaceDistance) || 0);
   } catch (_) {
-    return Number.POSITIVE_INFINITY;
+    return 1000000000;
   }
 }
 
@@ -8494,18 +8494,37 @@ function initCesium() {
       // Cesium's public flag is not always enough after the first fatal render
       // error. Override the panel hook so the app can recover quietly.
       try { viewer.cesiumWidget._showErrorPanel = function() {}; } catch (_) {}
+      try { viewer.cesiumWidget.showErrorPanel = function() {}; } catch (_) {}
     }
     if (viewer.scene) viewer.scene.rethrowRenderErrors = false;
     if (viewer.scene && viewer.scene.renderError) {
       viewer.scene.renderError.addEventListener((scene, error) => {
         console.warn('Cesium render error recovered:', error?.message || error);
+        try {
+          // If Cesium throws while building the visible command list, remove the
+          // non-essential dynamic scene decorations first. The app can reload
+          // cameras/clusters after the camera pose is restored, but a single bad
+          // label/polyline must not leave the render loop permanently stopped.
+          if (mapContextState) {
+            mapContextState.placeNames = false;
+            clearPlaceLabels();
+            updateMapContextButtonState();
+          }
+        } catch (_) {}
+        try {
+          if (dataSource && dataSource.entities && typeof dataSource.entities.removeAll === 'function') {
+            dataSource.entities.removeAll();
+          }
+        } catch (_) {}
+        try { removeFrustum(); } catch (_) {}
         restoreSafeCesiumCameraPose('renderError');
         try { viewer.useDefaultRenderLoop = true; } catch (_) {}
         setTimeout(() => {
           restoreSafeCesiumCameraPose('renderError-delayed');
           try { viewer.useDefaultRenderLoop = true; } catch (_) {}
           try { viewer.scene.requestRender(); } catch (_) {}
-        }, 80);
+          try { if (typeof runViewportRecoverySequence === 'function') runViewportRecoverySequence('render-error-recovery'); } catch (_) {}
+        }, 120);
       });
     }
   } catch (_) {}
@@ -9013,7 +9032,7 @@ function normaliseRemotePlaceLabel(raw, source = 'natural-earth-r2') {
   const name = String(raw.name || raw.NAME || '').trim();
   const lat = Number(raw.lat ?? raw.latitude ?? raw.LATITUDE);
   const lng = Number(raw.lng ?? raw.lon ?? raw.longitude ?? raw.LONGITUDE);
-  if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (!name || !Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
 
   const population = Math.max(0, Number(raw.population ?? raw.POP_MAX ?? raw.pop_max ?? 0) || 0);
   const cls = String(raw.class || raw.FEATURECLA || raw.featureClass || '').toLowerCase();
@@ -9481,13 +9500,21 @@ async function updatePlaceLabels() {
     const isCountry = place.level === 'country';
     const isMetro = place.level === 'metro';
     const isLocal = place.level === 'local';
+    const labelLat = Number(place.lat);
+    const labelLng = Number(place.lng);
+    if (!Number.isFinite(labelLat) || !Number.isFinite(labelLng) || labelLat < -90 || labelLat > 90 || labelLng < -180 || labelLng > 180) return;
     const labelHeight = isCountry ? 320000 : (google3DEnabled ? (isLocal ? 1400 : 1800) : (isLocal ? 9000 : 14000));
     const fontSize = isCountry ? 14 : isMetro ? 16 : 14;
-    const maxDistance = placeLabelMaxDistance(place);
-    ds.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(place.lng, place.lat, labelHeight),
+    const maxDistance = Number(placeLabelMaxDistance(place));
+    const minDistance = Number(placeLabelMinDistance(place));
+    if (!Number.isFinite(maxDistance) || !Number.isFinite(minDistance) || maxDistance <= minDistance) return;
+    let labelPosition = null;
+    try { labelPosition = Cesium.Cartesian3.fromDegrees(labelLng, labelLat, labelHeight); } catch (_) { labelPosition = null; }
+    if (!labelPosition || !Number.isFinite(labelPosition.x) || !Number.isFinite(labelPosition.y) || !Number.isFinite(labelPosition.z)) return;
+    try { ds.entities.add({
+      position: labelPosition,
       label: {
-        text: place.name,
+        text: String(place.name || '').slice(0, 80),
         font: `${isCountry ? 800 : isMetro ? 750 : 700} ${fontSize}px Inter, system-ui, sans-serif`,
         fillColor: Cesium.Color.WHITE.withAlpha(isCountry ? 0.88 : 0.98),
         outlineColor: Cesium.Color.BLACK.withAlpha(0.82),
@@ -9504,9 +9531,9 @@ async function updatePlaceLabels() {
         // far-side bleed-through while preventing labels on the visible limb from
         // being sliced by terrain/horizon depth precision.
         eyeOffset: new Cesium.Cartesian3(0, 0, -80),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 1000000000,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
-          placeLabelMinDistance(place),
+          minDistance,
           maxDistance
         ),
         scaleByDistance: new Cesium.NearFarScalar(
@@ -9517,7 +9544,7 @@ async function updatePlaceLabels() {
         ),
         translucencyByDistance: new Cesium.NearFarScalar(maxDistance * 0.72, 1.0, maxDistance, 0.22),
       }
-    });
+    }); } catch (err) { console.warn('Skipped unsafe place label:', place && place.name, err?.message || err); }
   });
   try { viewer.scene.requestRender && viewer.scene.requestRender(); } catch (_) {}
 }
@@ -9892,7 +9919,7 @@ async function createCameraEntities(cams) {
     ).withAlpha(0.9);
     cluster.point.outlineColor = Cesium.Color.WHITE.withAlpha(0.7);
     cluster.point.outlineWidth = 1.5;
-    cluster.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+    cluster.point.disableDepthTestDistance = 1000000000;
 
     cluster.label.show              = true;
     cluster.label.text              = n > 9999 ? '9K+' : n.toString();
@@ -9904,7 +9931,7 @@ async function createCameraEntities(cams) {
     cluster.label.verticalOrigin    = Cesium.VerticalOrigin.CENTER;
     cluster.label.horizontalOrigin  = Cesium.HorizontalOrigin.CENTER;
     cluster.label.pixelOffset       = new Cesium.Cartesian2(0, 0);
-    cluster.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+    cluster.label.disableDepthTestDistance = 1000000000;
   });
 
   const CHUNK = 2000;
@@ -9926,15 +9953,14 @@ async function createCameraEntities(cams) {
           outlineColor: Cesium.Color.WHITE.withAlpha(0.8),
           outlineWidth: 1,
           scaleByDistance: new Cesium.NearFarScalar(300, 1.8, 400000, 0.6),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          disableDepthTestDistance: 1000000000,
           eyeOffset: new Cesium.Cartesian3(0, 0, -80),
           heightReference: google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND,
         },
         polyline: {
-          // Always visible for normal/unselected 3D camera symbols. This is an
-          // approximate locator beam down to the zero-height base, not a sampled
-          // 3D tile mast.
-          show: !!google3DEnabled,
+          // Optional normal-camera locator beam. Disabled by default because dense
+          // close-zoom polyline batches can destabilise Cesium's render command list.
+          show: !!google3DEnabled && CAMERA_3D_LOCATOR_BEAMS_ENABLED,
           positions: [
             Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), normalCameraBeamBaseHeight(cam)),
             Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), normalCameraMarkerHeight(cam)),
@@ -9958,7 +9984,7 @@ async function createCameraEntities(cams) {
           alignedAxis: Cesium.Cartesian3.ZERO,
           pixelOffset: new Cesium.Cartesian2(0, -14),
           scaleByDistance: new Cesium.NearFarScalar(300, 1.25, 400000, 0.5),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          disableDepthTestDistance: 1000000000,
           eyeOffset: new Cesium.Cartesian3(0, 0, -80),
           heightReference: google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND,
         };
@@ -9976,7 +10002,7 @@ async function createCameraEntities(cams) {
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
           pixelOffset: new Cesium.Cartesian2(0, -10),
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          disableDepthTestDistance: 1000000000,
           eyeOffset: new Cesium.Cartesian3(0, 0, -80),
           heightReference: google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND,
           show: false,
@@ -10727,7 +10753,7 @@ async function runLocationSearch(query) {
       color: Cesium.Color.fromCssColorString('#f59e0b'),
       outlineColor: Cesium.Color.WHITE,
       outlineWidth: 2,
-      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      disableDepthTestDistance: 1000000000,
     },
     label: {
       text: name,
@@ -10738,7 +10764,7 @@ async function runLocationSearch(query) {
       style: Cesium.LabelStyle.FILL_AND_OUTLINE,
       verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
       pixelOffset: new Cesium.Cartesian2(0, -18),
-      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      disableDepthTestDistance: 1000000000,
     }
   });
 
@@ -14551,7 +14577,7 @@ function redrawAreaSelectionGraphics() {
         color: Cesium.Color.fromCssColorString('#2563eb'),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 2,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY
+        disableDepthTestDistance: 1000000000
       }
     }));
 
@@ -14631,7 +14657,7 @@ function highlightAreaMatches() {
         color: Cesium.Color.fromCssColorString('#f59e0b'),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 2,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY
+        disableDepthTestDistance: 1000000000
       },
       label: {
         text: '',
@@ -17671,7 +17697,7 @@ function visibleViewportSpanDegrees() {
     const count = Number(cluster.camera_count || cluster.count || 0);
     const lat = Number(cluster.latitude);
     const lng = Number(cluster.longitude);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || count <= 0) return;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180 || count <= 0) return;
     const id = `cluster:${cluster.cluster_id || `${lng.toFixed(3)},${lat.toFixed(3)}`}`;
     const visibility = Number.isFinite(Number(cluster._visibilityFactor)) ? Number(cluster._visibilityFactor) : 1;
     const size = Math.max(12, Math.min(36, 11 + Math.log10(count + 1) * 7));
@@ -17684,7 +17710,7 @@ function visibleViewportSpanDegrees() {
         color,
         outlineColor: Cesium.Color.WHITE.withAlpha(0.72),
         outlineWidth: 1.5,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 1000000000,
       },
       label: {
         text: clusterLabel(count),
@@ -17696,7 +17722,7 @@ function visibleViewportSpanDegrees() {
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
         pixelOffset: new Cesium.Cartesian2(0, 0),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 1000000000,
         translucencyByDistance: new Cesium.NearFarScalar(0, 1, 18000000, 0.88),
       },
     });
@@ -17729,7 +17755,7 @@ function visibleViewportSpanDegrees() {
         outlineColor: Cesium.Color.WHITE.withAlpha(0.8),
         outlineWidth: 1,
         scaleByDistance: new Cesium.NearFarScalar(300, 1.8, 400000, 0.6),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 1000000000,
         eyeOffset: new Cesium.Cartesian3(0, 0, -80),
         heightReference: Cesium.HeightReference.NONE,
       },
@@ -17743,7 +17769,7 @@ function visibleViewportSpanDegrees() {
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
         pixelOffset: new Cesium.Cartesian2(0, -10),
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 1000000000,
         eyeOffset: new Cesium.Cartesian3(0, 0, -80),
         heightReference: Cesium.HeightReference.NONE,
         show: false,
@@ -17772,12 +17798,13 @@ function visibleViewportSpanDegrees() {
         alignedAxis: Cesium.Cartesian3.ZERO,
         pixelOffset: new Cesium.Cartesian2(0, -14),
         scaleByDistance: new Cesium.NearFarScalar(300, 1.25, 400000, 0.5),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        disableDepthTestDistance: 1000000000,
         eyeOffset: new Cesium.Cartesian3(0, 0, -80),
         heightReference: Cesium.HeightReference.NONE,
       };
     }
-    const entity = dataSource.entities.add(graphics);
+    let entity = null;
+    try { entity = dataSource.entities.add(graphics); } catch (err) { console.warn('Skipped unsafe camera entity:', cam && cam.id, err?.message || err); return; }
     entity._cameraData = cam;
     entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
     entity._searchOff = false;
