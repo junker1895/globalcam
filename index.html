@@ -9284,7 +9284,7 @@ function schedulePlaceLabelUpdate(delay = 180) {
     // Rebuilding label collections during Cesium's render/visibility pass is the likely
     // source of the intermittent "Invalid array length" crash at the cluster→camera
     // zoom threshold. Wait for moveEnd, then update on the next animation frame.
-    if (apiState && apiState.isMoving) {
+    if (typeof apiState !== 'undefined' && apiState && apiState.isMoving) {
       schedulePlaceLabelUpdate(260);
       return;
     }
