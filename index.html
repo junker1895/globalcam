@@ -9229,6 +9229,10 @@ async function updatePlaceLabels() {
     .slice(0, maxLabels);
 
   places.forEach(place => {
+    const lat = Number(place.lat);
+    const lng = Number(place.lng);
+    if (!place || !String(place.name || '').trim() || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
     const isCountry = place.level === 'country';
     const isMetro = place.level === 'metro';
     const isLocal = place.level === 'local';
@@ -9236,7 +9240,7 @@ async function updatePlaceLabels() {
     const fontSize = isCountry ? 14 : isMetro ? 16 : 14;
     const maxDistance = placeLabelMaxDistance(place);
     ds.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(place.lng, place.lat, labelHeight),
+      position: Cesium.Cartesian3.fromDegrees(lng, lat, Number.isFinite(Number(labelHeight)) ? Number(labelHeight) : 0),
       label: {
         text: place.name,
         font: `${isCountry ? 800 : isMetro ? 750 : 700} ${fontSize}px Inter, system-ui, sans-serif`,
@@ -9275,16 +9279,33 @@ async function updatePlaceLabels() {
 
 function schedulePlaceLabelUpdate(delay = 180) {
   clearTimeout(mapContextState.placeLabelUpdateTimer);
-  mapContextState.placeLabelUpdateTimer = setTimeout(() => updatePlaceLabels(), delay);
+  mapContextState.placeLabelUpdateTimer = setTimeout(() => {
+    // Do not rebuild Cesium label entities while the camera is actively zooming/panning.
+    // Rebuilding label collections during Cesium's render/visibility pass is the likely
+    // source of the intermittent "Invalid array length" crash at the cluster→camera
+    // zoom threshold. Wait for moveEnd, then update on the next animation frame.
+    if (apiState && apiState.isMoving) {
+      schedulePlaceLabelUpdate(260);
+      return;
+    }
+    try {
+      requestAnimationFrame(() => updatePlaceLabels());
+    } catch (_) {
+      setTimeout(() => updatePlaceLabels(), 30);
+    }
+  }, Math.max(80, Number(delay) || 180));
 }
 
 
 function installPlaceLabelCameraListener() {
   if (mapContextState.placeLabelCameraListenerInstalled) return;
-  if (!viewer || !viewer.camera || !viewer.camera.changed) return;
+  if (!viewer || !viewer.camera) return;
   mapContextState.placeLabelCameraListenerInstalled = true;
-  viewer.camera.changed.addEventListener(() => schedulePlaceLabelUpdate(260));
-  try { viewer.camera.moveEnd.addEventListener(() => schedulePlaceLabelUpdate(60)); } catch (_) {}
+  // Important: do not rebuild Cesium label entities from camera.changed. That event
+  // fires repeatedly during zoom and can overlap Cesium's internal command-list build.
+  // Updating on moveEnd is sufficient for place labels and avoids the zoom-threshold
+  // render crash seen in both 2D and 3D.
+  try { viewer.camera.moveEnd.addEventListener(() => schedulePlaceLabelUpdate(80)); } catch (_) {}
 }
 
 function updateMapContextButtonState() {
