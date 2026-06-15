@@ -17394,11 +17394,28 @@ function visibleViewportSpanDegrees() {
   }
 
   function clearCurrentDataSource() {
-    if (viewer && dataSource) {
-      try { viewer.dataSources.remove(dataSource, true); } catch (_) {}
+    // Keep one long-lived CustomDataSource and clear its entities instead of
+    // destroying/re-adding the datasource during Cesium's render loop. Removing a
+    // datasource while primitives are being updated can trigger Cesium internal
+    // "reading length" errors and stop rendering.
+    try {
+      if (!dataSource) {
+        dataSource = new Cesium.CustomDataSource('api-cameras');
+      } else if (dataSource.entities && typeof dataSource.entities.removeAll === 'function') {
+        dataSource.entities.removeAll();
+      }
+    } catch (_) {
+      dataSource = new Cesium.CustomDataSource('api-cameras');
     }
-    dataSource = new Cesium.CustomDataSource('api-cameras');
-    if (viewer) viewer.dataSources.add(dataSource);
+
+    try {
+      if (viewer && dataSource && viewer.dataSources) {
+        const alreadyAdded = typeof viewer.dataSources.contains === 'function'
+          ? viewer.dataSources.contains(dataSource)
+          : false;
+        if (!alreadyAdded) viewer.dataSources.add(dataSource);
+      }
+    } catch (_) {}
   }
 
   function addServerClusterEntity(cluster) {
@@ -17606,10 +17623,7 @@ function visibleViewportSpanDegrees() {
     const startedAt = Date.now();
     let renderedOnce = false;
 
-    const finishLoaderAfterFirstPaint = () => {
-      // Hide the visible-camera loader after the browser has had a paint
-      // opportunity. This avoids the bad state where entities have been added
-      // but the badge stays up until a tab/focus event forces a repaint.
+    const hideLoaderAfterPaint = () => {
       const hide = () => {
         if (seq !== apiState.requestSeq) return;
         setClusterLoadingStatus(false, '', { token: loadingToken, mode: 'cameras', minVisible: 250 });
@@ -17623,12 +17637,17 @@ function visibleViewportSpanDegrees() {
 
     const forceCameraLayerPaint = () => {
       try { if (dataSource) dataSource.show = true; } catch (_) {}
-      try { if (viewer && viewer.dataSources && dataSource && !viewer.dataSources.contains?.(dataSource)) viewer.dataSources.add(dataSource); } catch (_) {}
+      try {
+        if (viewer && viewer.dataSources && dataSource) {
+          const alreadyAdded = typeof viewer.dataSources.contains === 'function'
+            ? viewer.dataSources.contains(dataSource)
+            : false;
+          if (!alreadyAdded) viewer.dataSources.add(dataSource);
+        }
+      } catch (_) {}
       try { if (viewer && typeof viewer.resize === 'function') viewer.resize(); } catch (_) {}
       try { if (viewer && viewer.scene && typeof viewer.scene.requestRender === 'function') viewer.scene.requestRender(); } catch (_) {}
-      // A short burst of render requests fixes the Chromium/Cesium case where
-      // switching tabs makes the markers appear, but staying on the tab does not.
-      [0, 16, 50, 120, 260, 520].forEach(delay => {
+      [0, 16, 50, 120, 260, 520, 900].forEach(delay => {
         setTimeout(() => {
           if (seq !== apiState.requestSeq) return;
           try { if (viewer && typeof viewer.resize === 'function') viewer.resize(); } catch (_) {}
@@ -17637,67 +17656,67 @@ function visibleViewportSpanDegrees() {
       });
     };
 
+    const renderVisibleCamerasSafely = (rows) => {
+      if (seq !== apiState.requestSeq) return;
+      const safeRows = Array.isArray(rows) ? rows : [];
+      const doRender = () => {
+        if (seq !== apiState.requestSeq) return;
+        renderApiEntities(safeRows, 'cameras');
+        renderedOnce = true;
+        forceCameraLayerPaint();
+        hideLoaderAfterPaint();
+      };
+      // Run entity replacement outside the current JS turn so it cannot collide
+      // with Cesium's own primitive update pass.
+      try {
+        requestAnimationFrame(doRender);
+      } catch (_) {
+        setTimeout(doRender, 0);
+      }
+    };
+
     try {
       const boxes = getCameraFetchBboxes();
       const seen = new Set();
       const rows = [];
 
-      const acceptPart = (part) => {
-        if (seq !== apiState.requestSeq) return;
-        (Array.isArray(part) ? part : []).forEach(r => {
-          const cam = toCamelCamera(r);
-          if (!cam || seen.has(cam.id)) return;
-          seen.add(cam.id); rows.push(cam);
-        });
-        if (rows.length && !renderedOnce) {
-          renderedOnce = true;
-          renderApiEntities(rows, 'cameras');
-          forceCameraLayerPaint();
-          finishLoaderAfterFirstPaint();
-        }
-      };
-
-      // Do not let one slow bbox tile block every visible camera from rendering.
-      // Render the first successful tile immediately, then refresh once all
-      // tiles have either completed or timed out.
       const requests = boxes.map(b => rpc('get_cameras_bbox', {
         west: b.west, south: b.south, east: b.east, north: b.north,
-        // The RPC has a server-side safety cap; tiling above removes the practical
-        // client-side cap at normal individual-camera zoom levels.
         max_results: 5000,
-      }, Math.min(API_RPC_TIMEOUT_MS, 9000)).then(part => {
-        acceptPart(part);
-        return part;
-      }).catch(err => {
+      }, Math.min(API_RPC_TIMEOUT_MS, 9000)).catch(err => {
         console.warn('Visible camera bbox tile failed:', err);
         return [];
       }));
 
       const parts = await Promise.all(requests);
       if (seq !== apiState.requestSeq) return;
-      parts.forEach(acceptPart);
 
-      // Final render with the complete de-duplicated row set. If no rows were
-      // returned, still render an empty layer so stale clusters/cameras are cleared.
-      renderApiEntities(rows, 'cameras');
-      forceCameraLayerPaint();
-      if (!renderedOnce) finishLoaderAfterFirstPaint();
+      parts.flat().forEach(r => {
+        const cam = toCamelCamera(r);
+        if (!cam || seen.has(cam.id)) return;
+        seen.add(cam.id);
+        rows.push(cam);
+      });
 
-      // Hydrate altitudes in the background and refresh positions only if this
-      // camera request is still the current request.
+      // Single render pass. The previous progressive implementation rendered,
+      // cleared, and re-rendered the same datasource while Cesium could still be
+      // updating primitives, which caused the internal "reading length" crash.
+      renderVisibleCamerasSafely(rows);
+
+      // Keep altitude hydration non-blocking, but do not clear/rebuild the whole
+      // datasource again. The hydrated values are merged into camera objects for
+      // later detail/selection use; the next normal viewport refresh will use them.
       hydrateVisibleCameraAltitudes(rows)
         .then(() => {
           if (seq !== apiState.requestSeq) return;
-          if (apiState.lastRenderedMode !== 'cameras') return;
-          renderApiEntities(rows, 'cameras');
           forceCameraLayerPaint();
         })
         .catch(err => console.warn('Background altitude hydration failed:', err));
     } finally {
       const elapsed = Date.now() - startedAt;
       setTimeout(() => {
-        if (seq === apiState.requestSeq) {
-          setClusterLoadingStatus(false, '', { token: loadingToken, mode: 'cameras', minVisible: renderedOnce ? 250 : 650 });
+        if (seq === apiState.requestSeq && !renderedOnce) {
+          setClusterLoadingStatus(false, '', { token: loadingToken, mode: 'cameras', minVisible: 650 });
         }
       }, elapsed < 180 ? 180 - elapsed : 0);
     }
