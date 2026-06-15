@@ -5250,6 +5250,9 @@ body.community-thumbnail-capture #dashboardFeedWall::-webkit-scrollbar {
     <img id="pip-img" src="" alt="Camera feed" style="display:none">
     <video id="pip-video" autoplay muted playsinline controls
       style="display:none;width:100%;height:100%;object-fit:fill;background:#000"></video>
+    <iframe id="pip-iframe" title="Camera feed" allow="autoplay; fullscreen; picture-in-picture"
+      referrerpolicy="no-referrer-when-downgrade"
+      style="display:none;width:100%;height:100%;border:0;background:#000"></iframe>
     <div id="pip-no-feed" style="display:none">
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <rect x="2" y="6" width="20" height="12" rx="2"/>
@@ -10116,19 +10119,82 @@ let currentImageUrl = null;
 let currentVideoUrl  = null;
 let currentFeedType  = null; // 'image' | 'video' | null
 let pipRefreshTimer  = null;
+let pipLiveWatchTimer = null;
 let hlsInstance      = null;
 
 // ─── PiP WINDOW ───
+function normaliseFeedUrl(url) {
+  return String(url || '').trim();
+}
+
+function pipFeedKind(url) {
+  const u = normaliseFeedUrl(url).toLowerCase();
+  if (!u) return 'none';
+  if (u.includes('youtube.com/embed/') || u.includes('youtube-nocookie.com/embed/') || u.includes('youtube.com/watch') || u.includes('youtu.be/')) return 'youtube';
+  if (u.includes('.m3u8') || u.includes('playlist.m3u8') || u.includes('/hls/')) return 'hls';
+  if (u.includes('mjpg') || u.includes('mjpeg') || u.includes('multipart') || u.includes('axis-cgi/mjpg') || u.includes('video.cgi')) return 'mjpeg';
+  if (/\.(mp4|m4v|mov|webm)(?:[?#]|$)/i.test(u)) return 'video';
+  if (/\.(jpg|jpeg|png|webp|gif|bmp|avif)(?:[?#]|$)/i.test(u)) return 'image';
+  return 'image';
+}
+
+function youtubeEmbedFromUrl(url) {
+  const raw = normaliseFeedUrl(url);
+  if (!raw) return '';
+  if (/youtube(?:-nocookie)?\.com\/embed\//i.test(raw)) return raw;
+  try {
+    const u = new URL(raw, window.location.href);
+    const host = u.hostname.replace(/^www\./, '').toLowerCase();
+    let id = '';
+    if (host === 'youtu.be') id = u.pathname.split('/').filter(Boolean)[0] || '';
+    else if (host.endsWith('youtube.com')) {
+      id = u.searchParams.get('v') || '';
+      const parts = u.pathname.split('/').filter(Boolean);
+      if (!id && ['shorts', 'live', 'embed'].includes(parts[0])) id = parts[1] || '';
+    }
+    return id ? `https://www.youtube.com/embed/${encodeURIComponent(id)}?autoplay=1&mute=1&playsinline=1` : raw;
+  } catch (_) {
+    return raw;
+  }
+}
+
+function resetPipMedia() {
+  clearInterval(pipRefreshTimer);
+  pipRefreshTimer = null;
+  clearInterval(pipLiveWatchTimer);
+  pipLiveWatchTimer = null;
+  if (hlsInstance) { try { hlsInstance.destroy(); } catch (_) {} hlsInstance = null; }
+  const video = document.getElementById('pip-video');
+  if (video) {
+    try { video.pause(); } catch (_) {}
+    video.removeAttribute('src');
+    try { video.load(); } catch (_) {}
+    video.onloadedmetadata = null;
+    video.onstalled = null;
+    video.onerror = null;
+  }
+  const frame = document.getElementById('pip-iframe');
+  if (frame) frame.src = 'about:blank';
+}
+
 function setImage(url) {
   // Compatibility shim — callers that only pass imageUrl
   setFeed(url || null, null);
 }
 
 function setFeed(imageUrl, videoUrl) {
-  currentImageUrl = imageUrl || null;
-  currentVideoUrl = videoUrl || null;
-  // Prefer video when available
-  currentFeedType = videoUrl ? 'video' : (imageUrl ? 'image' : null);
+  currentImageUrl = normaliseFeedUrl(imageUrl) || null;
+  currentVideoUrl = normaliseFeedUrl(videoUrl) || null;
+
+  // Some providers store MJPEG/still-image URLs in video_url. Route those to the
+  // image renderer because MJPEG is <img>, not <video>.
+  if (!currentImageUrl && currentVideoUrl && ['image', 'mjpeg'].includes(pipFeedKind(currentVideoUrl))) {
+    currentImageUrl = currentVideoUrl;
+    currentVideoUrl = null;
+  }
+
+  // Prefer actual playable video/HLS/YouTube when available, otherwise image/MJPEG.
+  currentFeedType = currentVideoUrl ? 'video' : (currentImageUrl ? 'image' : null);
   updatePipFeed();
   // Show toggle button only when both feeds exist
   const toggleBtn = document.getElementById('pip-toggle-feed');
@@ -10154,45 +10220,118 @@ function updateToggleLabel() {
 function updatePipFeed() {
   const img    = document.getElementById('pip-img');
   const video  = document.getElementById('pip-video');
+  const frame  = document.getElementById('pip-iframe');
   const noFeed = document.getElementById('pip-no-feed');
+  const refreshBtn = document.getElementById('pip-refresh-btn');
+  const status = document.getElementById('pip-refresh-status');
+
+  resetPipMedia();
 
   img.style.display    = 'none';
   video.style.display  = 'none';
+  if (frame) frame.style.display = 'none';
   noFeed.style.display = 'none';
 
-  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-
   if (currentFeedType === 'video' && currentVideoUrl) {
-    video.style.display = 'block';
-    document.getElementById('pip-refresh-btn').style.display = 'none';
-    const url = currentVideoUrl;
+    const url = normaliseFeedUrl(currentVideoUrl);
+    const kind = pipFeedKind(url);
+    if (refreshBtn) refreshBtn.style.display = 'none';
 
-    if (url.includes('.m3u8')) {
+    if (kind === 'youtube') {
+      if (frame) {
+        frame.style.display = 'block';
+        frame.src = youtubeEmbedFromUrl(url);
+        if (status) status.textContent = '● YouTube live/video';
+        return;
+      }
+    }
+
+    if (kind === 'mjpeg' || kind === 'image') {
+      // Defensive route for image/MJPEG feeds accidentally stored as video_url.
+      currentImageUrl = url;
+      currentVideoUrl = null;
+      currentFeedType = 'image';
+      updatePipFeed();
+      return;
+    }
+
+    video.style.display = 'block';
+
+    if (kind === 'hls') {
+      const startNativeHls = () => {
+        video.src = url;
+        video.play().catch(() => {});
+      };
+
       if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-        hlsInstance = new Hls({ enableWorker: true, lowLatencyMode: true });
+        hlsInstance = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          liveSyncDuration: 3,
+          liveMaxLatencyDuration: 12,
+          maxLiveSyncPlaybackRate: 1.5,
+          backBufferLength: 30,
+          manifestLoadingTimeOut: 12000,
+          fragLoadingTimeOut: 15000,
+        });
         hlsInstance.loadSource(url);
         hlsInstance.attachMedia(video);
         hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
         hlsInstance.on(Hls.Events.ERROR, (_, data) => {
-          if (data.fatal) {
-            if (currentImageUrl) { currentFeedType = 'image'; updatePipFeed(); }
-            else showNoFeed();
-          }
+          if (!data || !data.fatal) return;
+          try {
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              hlsInstance.startLoad();
+              return;
+            }
+            if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              hlsInstance.recoverMediaError();
+              return;
+            }
+          } catch (_) {}
+          // Last resort: rebuild the HLS player at the live edge.
+          setTimeout(() => {
+            if (currentVideoUrl === url && currentFeedType === 'video') updatePipFeed();
+          }, 1200);
         });
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = url;
-        video.play().catch(() => {});
+        startNativeHls();
       } else {
-        // HLS not supported — fall back to image
+        // HLS not supported — fall back to image if present.
         if (currentImageUrl) { currentFeedType = 'image'; updatePipFeed(); return; }
         showNoFeed(); return;
       }
-      document.getElementById('pip-refresh-status').textContent = '● Live stream';
+
+      video.onstalled = () => {
+        if (status) status.textContent = '● Live stream stalled — recovering…';
+        setTimeout(() => {
+          if (currentVideoUrl === url && currentFeedType === 'video') updatePipFeed();
+        }, 900);
+      };
+
+      // Live watchdog: if playback falls behind the newest buffered segment, jump
+      // near the live edge; if buffering stops, rebuild the player.
+      pipLiveWatchTimer = setInterval(() => {
+        try {
+          if (!video || video.style.display === 'none') return;
+          const b = video.buffered;
+          if (!b || !b.length) return;
+          const liveEdge = b.end(b.length - 1);
+          const lag = liveEdge - video.currentTime;
+          if (Number.isFinite(lag) && lag > 18) video.currentTime = Math.max(0, liveEdge - 3);
+          if (!video.paused && video.readyState < 2) {
+            if (hlsInstance) hlsInstance.startLoad();
+          }
+        } catch (_) {}
+      }, 5000);
+
+      if (status) status.textContent = '● Live HLS stream';
     } else {
       video.src = url;
       video.play().catch(() => {});
-      document.getElementById('pip-refresh-status').textContent = '● Video';
+      if (status) status.textContent = '● Video';
     }
+
     video.onloadedmetadata = () => {
       if (video.videoWidth && video.videoHeight) {
         window.onPipImageLoad && window.onPipImageLoad({ naturalWidth: video.videoWidth, naturalHeight: video.videoHeight });
@@ -10200,12 +10339,27 @@ function updatePipFeed() {
     };
 
   } else if (currentFeedType === 'image' && currentImageUrl) {
+    const url = normaliseFeedUrl(currentImageUrl);
+    const kind = pipFeedKind(url);
     img.style.display = 'block';
-    document.getElementById('pip-refresh-btn').style.display = '';
-    const ts = currentImageUrl.includes('?') ? '&' : '?';
+    if (refreshBtn) refreshBtn.style.display = '';
     img.onload = () => window.onPipImageLoad && window.onPipImageLoad(img);
-    img.src = currentImageUrl + ts + '_t=' + Date.now();
-    document.getElementById('pip-refresh-status').textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+    if (kind === 'mjpeg') {
+      // MJPEG is a multipart image stream. Do not cache-bust repeatedly or the
+      // browser will constantly reopen the stream.
+      img.src = url;
+      if (status) status.textContent = '● Live MJPEG stream';
+    } else {
+      const setStill = () => {
+        const sep = url.includes('?') ? '&' : '?';
+        img.src = url + sep + '_t=' + Date.now();
+        if (status) status.textContent = 'Updated ' + new Date().toLocaleTimeString();
+      };
+      setStill();
+      // Keep still-image cameras fresh without touching MJPEG streams.
+      pipRefreshTimer = setInterval(setStill, 30000);
+    }
   } else {
     showNoFeed();
   }
@@ -10219,7 +10373,7 @@ function showNoFeed() {
 function updatePipImage() { updatePipFeed(); }
 
 function refreshPipImage() {
-  if (currentFeedType === 'image') updatePipFeed();
+  if (currentFeedType === 'image' || currentFeedType === 'video') updatePipFeed();
 }
 
 function openPip(title) {
@@ -10231,10 +10385,7 @@ function openPip(title) {
 
 function closePip() {
   document.getElementById('pip').classList.remove('pip-visible');
-  clearInterval(pipRefreshTimer);
-  if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-  const video = document.getElementById('pip-video');
-  video.pause(); video.src = '';
+  resetPipMedia();
 }
 
 function openImageFullscreen() {
@@ -11072,9 +11223,11 @@ function getCameraFeed(cam) {
   const views = Array.isArray(cam?.views) ? cam.views.filter(Boolean) : [];
   const imageView = views.find(v => v && v.imageUrl);
   const videoView = views.find(v => v && v.videoUrl);
+  const ytId = cam?.youtubeVideoId || cam?.youtube_video_id || cam?.metadata?.youtube_video_id || cam?.metadata?.youtubeVideoId || null;
+  const youtubeUrl = ytId ? `https://www.youtube.com/embed/${encodeURIComponent(String(ytId))}` : null;
   return {
     imageUrl: cam?.imageUrl || imageView?.imageUrl || null,
-    videoUrl: cam?.videoUrl || videoView?.videoUrl || null,
+    videoUrl: cam?.videoUrl || videoView?.videoUrl || youtubeUrl || null,
   };
 }
 
