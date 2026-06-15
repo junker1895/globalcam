@@ -1482,6 +1482,67 @@ body.community-active #clusterLoadingStatus {
     padding: 32px; text-align: center;
   }
 
+
+  /* PiP feed loading overlay */
+  #pip-loading {
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 10px;
+    background: rgba(0,0,0,0.82);
+    color: rgba(255,255,255,0.92);
+    text-align: center;
+    pointer-events: none;
+  }
+  #pip-loading.loading { display: flex; }
+  #pip-loading.preview-loading {
+    inset: auto 10px 10px 10px;
+    min-height: 44px;
+    padding: 8px 10px;
+    border-radius: 9px;
+    flex-direction: row;
+    justify-content: flex-start;
+    background: rgba(0,0,0,0.62);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .pip-loading-spinner {
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    border: 3px solid rgba(255,255,255,0.20);
+    border-top-color: #60a5fa;
+    animation: tilesSpin 700ms linear infinite;
+    flex: 0 0 auto;
+  }
+  #pip-loading.preview-loading .pip-loading-spinner {
+    width: 18px;
+    height: 18px;
+    border-width: 2px;
+  }
+  .pip-loading-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+  .pip-loading-detail {
+    margin-top: 2px;
+    font-size: 10px;
+    color: rgba(255,255,255,0.64);
+    font-family: var(--mono);
+  }
+  #pip-loading.preview-loading .pip-loading-detail { display: none; }
+  #pip-no-feed {
+    position: absolute;
+    inset: 0;
+    z-index: 9;
+    background: #111;
+  }
+
   /* Resize edge handles — sit on #pip which is overflow:visible */
   .pip-edge {
     position: absolute;
@@ -5259,6 +5320,13 @@ body.community-thumbnail-capture #dashboardFeedWall::-webkit-scrollbar {
         <circle cx="9" cy="12" r="3"/><path d="M21 12h-2"/>
       </svg>
       No feed available
+    </div>
+    <div id="pip-loading" aria-live="polite" aria-busy="true">
+      <div class="pip-loading-spinner"></div>
+      <div>
+        <div id="pip-loading-title" class="pip-loading-title">Loading camera feed…</div>
+        <div id="pip-loading-detail" class="pip-loading-detail">Contacting camera source</div>
+      </div>
     </div>
   </div>
   <div id="pip-refresh-bar">
@@ -10121,6 +10189,44 @@ let currentFeedType  = null; // 'image' | 'video' | null
 let pipRefreshTimer  = null;
 let pipLiveWatchTimer = null;
 let hlsInstance      = null;
+let pipLoadStartedAt = 0;
+
+function pipKindLabel(kind) {
+  if (kind === 'hls') return 'HLS live stream';
+  if (kind === 'mjpeg') return 'MJPEG live stream';
+  if (kind === 'youtube') return 'YouTube stream';
+  if (kind === 'video') return 'video feed';
+  if (kind === 'image') return 'image feed';
+  return 'camera feed';
+}
+
+function setPipLoading(message = 'Loading camera feed…', detail = 'Contacting camera source', previewMode = false) {
+  const el = document.getElementById('pip-loading');
+  if (!el) return;
+  pipLoadStartedAt = pipLoadStartedAt || Date.now();
+  const title = document.getElementById('pip-loading-title');
+  const detailEl = document.getElementById('pip-loading-detail');
+  if (title) title.textContent = message;
+  if (detailEl) detailEl.textContent = detail || '';
+  el.classList.add('loading');
+  el.classList.toggle('preview-loading', !!previewMode);
+  el.setAttribute('aria-busy', 'true');
+}
+
+function clearPipLoading() {
+  const el = document.getElementById('pip-loading');
+  if (!el) return;
+  el.classList.remove('loading', 'preview-loading');
+  el.setAttribute('aria-busy', 'false');
+  pipLoadStartedAt = 0;
+}
+
+function setPipFeedFailed(message = 'Feed unavailable') {
+  clearPipLoading();
+  const status = document.getElementById('pip-refresh-status');
+  if (status) status.textContent = message;
+}
+
 
 // ─── PiP WINDOW ───
 function normaliseFeedUrl(url) {
@@ -10159,6 +10265,7 @@ function youtubeEmbedFromUrl(url) {
 }
 
 function resetPipMedia() {
+  clearPipLoading();
   clearInterval(pipRefreshTimer);
   pipRefreshTimer = null;
   clearInterval(pipLiveWatchTimer);
@@ -10200,11 +10307,18 @@ function resetPipMedia() {
   }
 }
 
-function setPipImageSource(img, url, { refreshStill = false } = {}) {
+function setPipImageSource(img, url, { refreshStill = false, onLoad = null, onError = null } = {}) {
   const clean = normaliseFeedUrl(url);
   if (!img || !clean) return;
   const kind = pipFeedKind(clean);
-  img.onload = () => window.onPipImageLoad && window.onPipImageLoad(img);
+  img.onload = () => {
+    window.onPipImageLoad && window.onPipImageLoad(img);
+    if (typeof onLoad === 'function') onLoad();
+  };
+  img.onerror = () => {
+    if (typeof onError === 'function') onError();
+    else setPipFeedFailed('Feed unavailable');
+  };
   if (kind === 'mjpeg') {
     img.src = clean;
   } else if (refreshStill) {
@@ -10279,10 +10393,15 @@ function updatePipFeed() {
     img.style.inset = '0';
     img.style.zIndex = '1';
     img.style.opacity = '1';
-    setPipImageSource(img, previewUrl, { refreshStill: pipFeedKind(previewUrl) !== 'mjpeg' });
+    setPipImageSource(img, previewUrl, {
+      refreshStill: pipFeedKind(previewUrl) !== 'mjpeg',
+      onLoad: () => setPipLoading('Loading live stream…', `Preparing ${pipKindLabel(pipFeedKind(currentVideoUrl))}`, true),
+      onError: () => setPipLoading('Loading live stream…', `Preparing ${pipKindLabel(pipFeedKind(currentVideoUrl))}`, false)
+    });
     return true;
   };
   const revealVideo = () => {
+    clearPipLoading();
     if (img) img.style.display = 'none';
     video.style.opacity = '1';
     video.style.position = '';
@@ -10294,6 +10413,7 @@ function updatePipFeed() {
   if (currentFeedType === 'video' && currentVideoUrl) {
     const url = normaliseFeedUrl(currentVideoUrl);
     const kind = pipFeedKind(url);
+    setPipLoading(`Loading ${pipKindLabel(kind)}…`, 'Opening live source', false);
     if (refreshBtn) refreshBtn.style.display = hasPreview ? '' : 'none';
 
     if (kind === 'youtube') {
@@ -10305,6 +10425,7 @@ function updatePipFeed() {
         frame.style.zIndex = previewShown ? '2' : '';
         frame.style.opacity = previewShown ? '0' : '';
         frame.onload = () => {
+          clearPipLoading();
           if (img) img.style.display = 'none';
           frame.style.opacity = '1';
           frame.style.position = '';
@@ -10384,6 +10505,7 @@ function updatePipFeed() {
       video.oncanplay = revealVideo;
       video.onplaying = revealVideo;
       video.onstalled = () => {
+        setPipLoading('Recovering live stream…', 'The feed stalled; reconnecting', !!hasPreview);
         if (status) status.textContent = '● Live stream stalled — recovering…';
         setTimeout(() => {
           if (currentVideoUrl === url && currentFeedType === 'video') updatePipFeed();
@@ -10431,22 +10553,34 @@ function updatePipFeed() {
     const kind = pipFeedKind(url);
     img.style.display = 'block';
     if (refreshBtn) refreshBtn.style.display = '';
-    img.onload = () => window.onPipImageLoad && window.onPipImageLoad(img);
+    setPipLoading(`Loading ${pipKindLabel(kind)}…`, 'Opening camera source', false);
 
     if (kind === 'mjpeg') {
       // MJPEG is a multipart image stream. Do not cache-bust repeatedly or the
       // browser will constantly reopen the stream.
-      img.src = url;
-      if (status) status.textContent = '● Live MJPEG stream';
+      setPipImageSource(img, url, {
+        onLoad: () => {
+          clearPipLoading();
+          if (status) status.textContent = '● Live MJPEG stream';
+        },
+        onError: () => showNoFeed()
+      });
+      if (status) status.textContent = 'Loading MJPEG stream…';
     } else {
-      const setStill = () => {
+      const setStill = (initial = false) => {
+        if (initial) setPipLoading('Loading image feed…', 'Fetching latest snapshot', false);
         const sep = url.includes('?') ? '&' : '?';
+        img.onload = () => {
+          window.onPipImageLoad && window.onPipImageLoad(img);
+          clearPipLoading();
+          if (status) status.textContent = 'Updated ' + new Date().toLocaleTimeString();
+        };
+        img.onerror = () => showNoFeed();
         img.src = url + sep + '_t=' + Date.now();
-        if (status) status.textContent = 'Updated ' + new Date().toLocaleTimeString();
       };
-      setStill();
+      setStill(true);
       // Keep still-image cameras fresh without touching MJPEG streams.
-      pipRefreshTimer = setInterval(setStill, 30000);
+      pipRefreshTimer = setInterval(() => setStill(false), 30000);
     }
   } else {
     showNoFeed();
@@ -10454,8 +10588,11 @@ function updatePipFeed() {
 }
 
 function showNoFeed() {
-  document.getElementById('pip-no-feed').style.display = 'flex';
-  document.getElementById('pip-refresh-status').textContent = 'No feed';
+  clearPipLoading();
+  const noFeed = document.getElementById('pip-no-feed');
+  if (noFeed) noFeed.style.display = 'flex';
+  const status = document.getElementById('pip-refresh-status');
+  if (status) status.textContent = 'No feed';
 }
 
 function updatePipImage() { updatePipFeed(); }
