@@ -1139,7 +1139,7 @@ body.dashboard-active #mapContextWrap { display: none !important; }
 
 
 
-/* ─── CLUSTER LOADING STATUS ─── */
+/* ─── MAP LAYER LOADING STATUS — clusters and individual cameras ─── */
 #clusterLoadingStatus {
   position: fixed;
   left: 50%;
@@ -16668,8 +16668,12 @@ function setClusterLoadingStatus(isLoading, message = 'Loading clusters…', opt
   if (!el) return;
 
   const api = window.VIGIL_CAMERA_API_STATE;
-  const inClusterMode = !api || api.pendingMode === 'clusters' || api.lastDesiredMode === 'clusters' || api.lastRenderedMode === 'clusters';
-  const canShow = !!isLoading && inClusterMode
+  const loadingMode = options.mode || (api && (api.pendingMode || api.lastDesiredMode || api.lastRenderedMode)) || 'clusters';
+  const canShowForMode =
+    loadingMode === 'clusters' ||
+    loadingMode === 'cameras' ||
+    options.allowAnyMode === true;
+  const canShow = !!isLoading && canShowForMode
     && !document.body.classList.contains('dashboard-active')
     && !document.body.classList.contains('community-active');
 
@@ -17593,25 +17597,40 @@ function visibleViewportSpanDegrees() {
   }
 
   async function fetchCamerasForView(seq) {
-    hideClusterLoadingStatusNow();
-    const boxes = getCameraFetchBboxes();
-    const parts = await Promise.all(boxes.map(b => rpc('get_cameras_bbox', {
-      west: b.west, south: b.south, east: b.east, north: b.north,
-      // The RPC has a server-side safety cap; tiling above removes the practical
-      // client-side cap at normal individual-camera zoom levels.
-      max_results: 5000,
-    })));
-    if (seq !== apiState.requestSeq) return;
-    const seen = new Set();
-    const rows = [];
-    parts.flat().forEach(r => {
-      const cam = toCamelCamera(r);
-      if (!cam || seen.has(cam.id)) return;
-      seen.add(cam.id); rows.push(cam);
-    });
-    await hydrateVisibleCameraAltitudes(rows);
-    renderApiEntities(rows, 'cameras');
-    hideClusterLoadingStatusNow();
+    const loadingToken = ++clusterLoadingToken;
+    setClusterLoadingStatus(
+      true,
+      'Loading visible cameras…',
+      { token: loadingToken, mode: 'cameras', showDelay: 180, minVisible: 650 }
+    );
+    const startedAt = Date.now();
+
+    try {
+      const boxes = getCameraFetchBboxes();
+      const parts = await Promise.all(boxes.map(b => rpc('get_cameras_bbox', {
+        west: b.west, south: b.south, east: b.east, north: b.north,
+        // The RPC has a server-side safety cap; tiling above removes the practical
+        // client-side cap at normal individual-camera zoom levels.
+        max_results: 5000,
+      })));
+      if (seq !== apiState.requestSeq) return;
+      const seen = new Set();
+      const rows = [];
+      parts.flat().forEach(r => {
+        const cam = toCamelCamera(r);
+        if (!cam || seen.has(cam.id)) return;
+        seen.add(cam.id); rows.push(cam);
+      });
+      await hydrateVisibleCameraAltitudes(rows);
+      renderApiEntities(rows, 'cameras');
+    } finally {
+      const elapsed = Date.now() - startedAt;
+      setTimeout(() => {
+        if (seq === apiState.requestSeq) {
+          setClusterLoadingStatus(false, '', { token: loadingToken, mode: 'cameras', minVisible: 650 });
+        }
+      }, elapsed < 180 ? 180 - elapsed : 0);
+    }
   }
 
   async function refreshApiViewport(force = false) {
