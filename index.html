@@ -5444,12 +5444,7 @@ function saneSurfaceHeight(h) {
 }
 
 function updateCameraPoleForEntity(entity, lng, lat, topHeight, options = {}) {
-  if (!CAMERA_3D_LOCATOR_BEAMS_ENABLED) {
-    try { if (entity && entity.polyline) entity.polyline.show = false; } catch (_) {}
-    return;
-  }
   if (!entity || !entity.polyline) return;
-  if (!validLngLat(lng, lat)) { try { entity.polyline.show = false; } catch (_) {} return; }
   try {
     const cam = options.cam || findCameraById(entity.id) || null;
     const state = getCameraEntityRenderState(entity, cam);
@@ -5464,10 +5459,10 @@ function updateCameraPoleForEntity(entity, lng, lat, topHeight, options = {}) {
     entity.polyline.show = is3D;
     if (!is3D) return;
 
-    const poleBottom = safeCartesianFromDegrees(Number(lng), Number(lat), bottomHeight);
-    const poleTop = safeCartesianFromDegrees(Number(lng), Number(lat), top);
-    if (!poleBottom || !poleTop) { entity.polyline.show = false; return; }
-    entity.polyline.positions = [poleBottom, poleTop];
+    entity.polyline.positions = [
+      Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), bottomHeight),
+      Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), top),
+    ];
     entity.polyline.width = CAMERA_3D_POLE_WIDTH_PX;
     entity.polyline.material = Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.46);
     entity.polyline.depthFailMaterial = Cesium.Color.fromCssColorString('#60a5fa').withAlpha(0.72);
@@ -5678,7 +5673,7 @@ function renderUnselectedCameraEntity(entity, cam) {
       entity.point.outlineWidth = 1;
       entity.point.scaleByDistance = new Cesium.NearFarScalar(300, 1.8, 400000, 0.6);
       entity.point.heightReference = google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND;
-      entity.point.disableDepthTestDistance = 1000000000;
+      entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
     if (entity.billboard) {
       entity.billboard.show = heading !== null;
@@ -5688,22 +5683,22 @@ function renderUnselectedCameraEntity(entity, cam) {
       entity.billboard.scaleByDistance = new Cesium.NearFarScalar(300, 1.25, 400000, 0.5);
       entity.billboard.heightReference = google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND;
       applyCameraArrowOrientation(entity.billboard, cam, heading);
-      entity.billboard.disableDepthTestDistance = 1000000000;
+      entity.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
     if (entity.label) {
       entity.label.show = false;
       entity.label.pixelOffset = new Cesium.Cartesian2(0, -10);
       entity.label.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, 3000);
       entity.label.heightReference = google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND;
-      entity.label.disableDepthTestDistance = 1000000000;
+      entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
 
     // The locator beam is a base-marker feature. It is visible for both normal
     // unselected cameras and selected_pending cameras. It is never visible for
     // selected_resolved cameras.
     if (entity.polyline) {
-      entity.polyline.show = !!(google3DEnabled && CAMERA_3D_LOCATOR_BEAMS_ENABLED);
-      if (google3DEnabled && CAMERA_3D_LOCATOR_BEAMS_ENABLED) updateCameraPoleForEntity(entity, cam.lng, cam.lat, h, { forceBaseMarker: true, bottomHeight: normalCameraBeamBaseHeight(cam), cam });
+      entity.polyline.show = !!google3DEnabled;
+      if (google3DEnabled) updateCameraPoleForEntity(entity, cam.lng, cam.lat, h, { forceBaseMarker: true, bottomHeight: normalCameraBeamBaseHeight(cam), cam });
     }
   } catch (_) {}
 }
@@ -5731,7 +5726,7 @@ function renderResolvedSelectedCameraEntity(entity, cam, groundH) {
       entity.point.outlineWidth = 3;
       entity.point.scaleByDistance = new Cesium.NearFarScalar(50, 1.35, 5000, 0.85);
       entity.point.heightReference = Cesium.HeightReference.NONE;
-      entity.point.disableDepthTestDistance = 1000000000;
+      entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
     if (entity.billboard) entity.billboard.show = false;
     if (entity.label) {
@@ -5740,7 +5735,7 @@ function renderResolvedSelectedCameraEntity(entity, cam, groundH) {
       entity.label.pixelOffset = new Cesium.Cartesian2(0, -18);
       entity.label.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, 8000);
       entity.label.heightReference = Cesium.HeightReference.NONE;
-      entity.label.disableDepthTestDistance = 1000000000;
+      entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
   } catch (_) {}
 }
@@ -6138,12 +6133,12 @@ async function applySelectedCameraEntityStyle(cam) {
       entity.point.outlineWidth = 3;
       entity.point.scaleByDistance = new Cesium.NearFarScalar(50, 1.35, 5000, 0.85);
       entity.point.heightReference = Cesium.HeightReference.NONE;
-      entity.point.disableDepthTestDistance = 1000000000;
+      entity.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
     if (entity.billboard) {
       entity.billboard.show = false;
       entity.billboard.heightReference = Cesium.HeightReference.NONE;
-      entity.billboard.disableDepthTestDistance = 1000000000;
+      entity.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
     if (entity.label) {
       entity.label.show = true;
@@ -6151,7 +6146,7 @@ async function applySelectedCameraEntityStyle(cam) {
       entity.label.pixelOffset = new Cesium.Cartesian2(0, -18);
       entity.label.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, 250000);
       entity.label.heightReference = Cesium.HeightReference.NONE;
-      entity.label.disableDepthTestDistance = 1000000000;
+      entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
     }
   } catch (_) {}
 
@@ -6161,7 +6156,7 @@ async function applySelectedCameraEntityStyle(cam) {
 
 // Dashboard state
 const DASHBOARD_PAGE_SIZE = 16;
-const DASHBOARD_MAX_CAMERAS = 1000000000; // legacy guard; dashboard is now paginated
+const DASHBOARD_MAX_CAMERAS = Number.POSITIVE_INFINITY; // legacy guard; dashboard is now paginated
 const DASHBOARD_STORAGE_KEY = 'vigil.dashboard.v1';
 const DASHBOARD_VIEWS_STORAGE_KEY = 'vigil.dashboard.views.v1';
 let savedDashboardViewsCache = [];
@@ -6936,7 +6931,7 @@ function requirePro3D() {
 
 function dashboardCameraCapacityRemaining() {
   const max = getPlanLimits().maxDashboardCameras;
-  if (max >= 999) return 1000000000;
+  if (max >= 999) return Number.POSITIVE_INFINITY;
   return Math.max(0, max - dashboardState.order.length);
 }
 
@@ -7685,170 +7680,79 @@ function sampleGroundHeight(lng, lat) {
   return 0;
 }
 
-function finiteNumberOrNull(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function validLngLat(lng, lat) {
-  const x = finiteNumberOrNull(lng);
-  const y = finiteNumberOrNull(lat);
-  return x !== null && y !== null && x >= -180 && x <= 180 && y >= -90 && y <= 90;
-}
-
-function safeCartesian3(value) {
-  return !!(
-    value instanceof Cesium.Cartesian3 &&
-    Number.isFinite(value.x) &&
-    Number.isFinite(value.y) &&
-    Number.isFinite(value.z)
-  );
-}
-
-function safeCartesianFromDegrees(lng, lat, height = 0) {
-  if (!validLngLat(lng, lat)) return null;
-  const h = finiteNumberOrNull(height);
-  if (h === null || h < -1000 || h > 10000) return null;
-  try {
-    const p = Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), h);
-    return safeCartesian3(p) ? p : null;
-  } catch (_) {
-    return null;
-  }
-}
-
-function safeVector3(value) {
-  if (!safeCartesian3(value)) return null;
-  const mag = Cesium.Cartesian3.magnitude(value);
-  return Number.isFinite(mag) && mag > 0 ? value : null;
-}
-
-function safePolylinePositions(a, b) {
-  return safeCartesian3(a) && safeCartesian3(b) ? [a, b] : null;
-}
-
 function buildFrustumPolylines(lng, lat, groundHeight, heading, originOverride = null, style = {}) {
-  const lon = finiteNumberOrNull(lng);
-  const la = finiteNumberOrNull(lat);
-  if (lon === null || la === null || !validLngLat(lon, la)) return null;
-
-  const safeHeading = normaliseBearingDegrees(heading);
-  if (safeHeading === null) return null;
-
+  const POLE   = google3DEnabled ? 3.5 : 5.5;
   const approximate = !!style.approximate;
-  const rangeInput = finiteNumberOrNull(style.range);
-  const fovInput = finiteNumberOrNull(style.fovH);
-  const gh = google3DEnabled ? saneSurfaceHeight(groundHeight) : finiteNumberOrNull(groundHeight);
-  const safeGroundHeight = gh === null ? 0 : gh;
-
-  // Clamp the geometry inputs. Bad records or UI state should never be allowed
-  // to create NaN/Infinity Cartesian values, because Cesium polyline internals
-  // can then throw RangeError/invalid-array-length during the render loop.
-  const POLE = google3DEnabled ? 3.5 : 5.5;
-  const FAR = Math.max(10, Math.min(750, rangeInput !== null ? rangeInput : (approximate ? Math.max(frustumRange * 0.82, 55) : frustumRange)));
-  const NEAR = 2;
-  const TILT = -Math.max(-85, Math.min(85, finiteNumberOrNull(frustumTilt) ?? 15));
-  const rawFov = fovInput !== null ? fovInput : (approximate ? Math.max(120, frustumFovH) : frustumFovH);
-  const fovH = Math.max(8, Math.min(170, rawFov));
+  const FAR    = Number.isFinite(Number(style.range)) ? Number(style.range) : (approximate ? Math.max(frustumRange * 0.82, 55) : frustumRange);
+  const NEAR   = 2;
+  const TILT   = -frustumTilt;
+  const fovH   = Number.isFinite(Number(style.fovH)) ? Number(style.fovH) : (approximate ? Math.max(120, frustumFovH) : frustumFovH);
   const HFOV_H = fovH / 2;
-  const HFOV_V = Math.max(4, Math.min(85, (fovH / 2) * (9 / 16)));
+  const HFOV_V = (fovH / 2) * (9 / 16);
 
   const originHeight = google3DEnabled
-    ? selectedCameraHeight(safeGroundHeight, CAMERA_3D_FRUSTUM_LIFT_M)
-    : visualCameraHeight(safeGroundHeight + POLE, 0);
+    ? selectedCameraHeight(groundHeight, CAMERA_3D_FRUSTUM_LIFT_M)
+    : visualCameraHeight(groundHeight + POLE, 0);
+  const origin     = originOverride || Cesium.Cartesian3.fromDegrees(lng, lat, originHeight);
+  const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
 
-  const origin = safeCartesian3(originOverride) ? originOverride : safeCartesianFromDegrees(lon, la, originHeight);
-  if (!safeCartesian3(origin)) return null;
-
-  let enuToWorld;
-  try {
-    enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
-  } catch (_) {
-    return null;
-  }
-
-  const h = Cesium.Math.toRadians(safeHeading);
+  const h = Cesium.Math.toRadians(heading);
   const p = Cesium.Math.toRadians(TILT);
 
   const fE = Math.sin(h) * Math.cos(p);
   const fN = Math.cos(h) * Math.cos(p);
   const fU = Math.sin(p);
 
-  const rE = Math.cos(h);
+  const rE =  Math.cos(h);
   const rN = -Math.sin(h);
 
   const uE = rN * fU;
   const uN = -rE * fU;
   const uU = rE * fN - rN * fE;
-  const uLen = Math.sqrt(uE * uE + uN * uN + uU * uU);
-  if (!Number.isFinite(uLen) || uLen <= 0) return null;
+  const uLen = Math.sqrt(uE*uE + uN*uN + uU*uU);
 
   const toWorld = (e, n, u) => {
-    if (![e, n, u].every(Number.isFinite)) return null;
-    try {
-      const v = new Cesium.Cartesian3();
-      Cesium.Matrix4.multiplyByPointAsVector(enuToWorld, new Cesium.Cartesian3(e, n, u), v);
-      const mag = Cesium.Cartesian3.magnitude(v);
-      if (!Number.isFinite(mag) || mag <= 0) return null;
-      Cesium.Cartesian3.normalize(v, v);
-      return safeCartesian3(v) ? v : null;
-    } catch (_) {
-      return null;
-    }
+    const v = new Cesium.Cartesian3();
+    Cesium.Matrix4.multiplyByPointAsVector(enuToWorld, new Cesium.Cartesian3(e, n, u), v);
+    return Cesium.Cartesian3.normalize(v, v);
   };
 
-  const fwdW = toWorld(fE, fN, fU);
+  const fwdW   = toWorld(fE, fN, fU);
   const rightW = toWorld(rE, rN, 0);
-  const upW = toWorld(uE / uLen, uN / uLen, uU / uLen);
-  if (!safeVector3(fwdW) || !safeVector3(rightW) || !safeVector3(upW)) return null;
+  const upW    = toWorld(uE/uLen, uN/uLen, uU/uLen);
 
-  const add = (a, b) => {
-    if (!safeCartesian3(a) || !safeCartesian3(b)) return null;
-    const v = Cesium.Cartesian3.add(a, b, new Cesium.Cartesian3());
-    return safeCartesian3(v) ? v : null;
-  };
-  const scale = (v, s) => {
-    if (!safeVector3(v) || !Number.isFinite(s)) return null;
-    const out = Cesium.Cartesian3.multiplyByScalar(v, s, new Cesium.Cartesian3());
-    return safeCartesian3(out) ? out : null;
-  };
-  const add2 = (a, b, c) => add(add(a, b), c);
+  const add   = (a, b) => Cesium.Cartesian3.add(a, b, new Cesium.Cartesian3());
+  const scale = (v, s) => Cesium.Cartesian3.multiplyByScalar(v, s, new Cesium.Cartesian3());
 
-  const farHW = FAR * Math.tan(Cesium.Math.toRadians(HFOV_H));
-  const farVH = FAR * Math.tan(Cesium.Math.toRadians(HFOV_V));
+  const farHW  = FAR  * Math.tan(Cesium.Math.toRadians(HFOV_H));
+  const farVH  = FAR  * Math.tan(Cesium.Math.toRadians(HFOV_V));
   const nearHW = NEAR * Math.tan(Cesium.Math.toRadians(HFOV_H));
   const nearVH = NEAR * Math.tan(Cesium.Math.toRadians(HFOV_V));
-  if (![farHW, farVH, nearHW, nearVH].every(Number.isFinite)) return null;
 
-  const farC = add(origin, scale(fwdW, FAR));
+  const farC  = add(origin, scale(fwdW, FAR));
   const nearC = add(origin, scale(fwdW, NEAR));
-  if (!safeCartesian3(farC) || !safeCartesian3(nearC)) return null;
 
   const fc = [
-    add2(farC, scale(rightW, -farHW), scale(upW, farVH)),
-    add2(farC, scale(rightW, farHW), scale(upW, farVH)),
-    add2(farC, scale(rightW, farHW), scale(upW, -farVH)),
-    add2(farC, scale(rightW, -farHW), scale(upW, -farVH)),
+    add(add(farC, scale(rightW, -farHW)), scale(upW,  farVH)),
+    add(add(farC, scale(rightW,  farHW)), scale(upW,  farVH)),
+    add(add(farC, scale(rightW,  farHW)), scale(upW, -farVH)),
+    add(add(farC, scale(rightW, -farHW)), scale(upW, -farVH)),
   ];
 
   const nc = [
-    add2(nearC, scale(rightW, -nearHW), scale(upW, nearVH)),
-    add2(nearC, scale(rightW, nearHW), scale(upW, nearVH)),
-    add2(nearC, scale(rightW, nearHW), scale(upW, -nearVH)),
-    add2(nearC, scale(rightW, -nearHW), scale(upW, -nearVH)),
+    add(add(nearC, scale(rightW, -nearHW)), scale(upW,  nearVH)),
+    add(add(nearC, scale(rightW,  nearHW)), scale(upW,  nearVH)),
+    add(add(nearC, scale(rightW,  nearHW)), scale(upW, -nearVH)),
+    add(add(nearC, scale(rightW, -nearHW)), scale(upW, -nearVH)),
   ];
 
-  if (!fc.every(safeCartesian3) || !nc.every(safeCartesian3)) return null;
-
-  const rawSegs = [
+  const segs = [
     [origin, fc[0]], [origin, fc[1]], [origin, fc[2]], [origin, fc[3]],
     [fc[0], fc[1]], [fc[1], fc[2]], [fc[2], fc[3]], [fc[3], fc[0]],
     [nc[0], nc[1]], [nc[1], nc[2]], [nc[2], nc[3]], [nc[3], nc[0]],
   ];
-  const segs = rawSegs.map(([s, e]) => safePolylinePositions(s, e)).filter(Boolean);
-  if (!segs.length) return null;
 
-  const col = Cesium.Color.fromCssColorString(approximate ? '#0284c7' : '#2563eb').withAlpha(approximate ? 0.86 : 0.92);
+  const col      = Cesium.Color.fromCssColorString(approximate ? '#0284c7' : '#2563eb').withAlpha(approximate ? 0.86 : 0.92);
   const fadedCol = Cesium.Color.fromCssColorString(approximate ? '#0284c7' : '#2563eb').withAlpha(approximate ? 0.48 : (google3DEnabled ? 0.52 : 0.12));
   const materialType = approximate ? 'PolylineDash' : 'Color';
   const materialOpts = approximate
@@ -7857,24 +7761,15 @@ function buildFrustumPolylines(lng, lat, groundHeight, heading, originOverride =
   const depthMaterialOpts = approximate
     ? { color: fadedCol, dashLength: 10.0, dashPattern: 3855 }
     : { color: fadedCol };
-
-  const coll = new Cesium.PolylineCollection();
-  for (const positions of segs) {
-    try {
-      coll.add({
-        positions,
-        width: approximate ? (google3DEnabled ? 3.2 : 2.2) : (google3DEnabled ? 2.4 : 1.5),
-        material: Cesium.Material.fromType(materialType, materialOpts),
-        depthFailMaterial: Cesium.Material.fromType(materialType, depthMaterialOpts),
-      });
-    } catch (err) {
-      console.warn('Skipped invalid frustum segment:', err?.message || err);
-    }
-  }
-
-  try {
-    if (!coll.length && coll._polylines && !coll._polylines.length) return null;
-  } catch (_) {}
+  const coll     = new Cesium.PolylineCollection();
+  segs.forEach(([s, e]) => {
+    coll.add({
+      positions: [s, e],
+      width: approximate ? (google3DEnabled ? 3.2 : 2.2) : (google3DEnabled ? 2.4 : 1.5),
+      material: Cesium.Material.fromType(materialType, materialOpts),
+      depthFailMaterial: Cesium.Material.fromType(materialType, depthMaterialOpts),
+    });
+  });
   return coll;
 }
 
@@ -7967,116 +7862,63 @@ function refitCameraToResolvedFrustum(cam, groundHeight, bearing) {
 
 async function showFrustum(cam, options = {}) {
   removeFrustum();
-  if (!frustumsEnabled || !viewer || !viewer.scene || !cam) return;
-  if (!validLngLat(cam.lng, cam.lat)) {
-    setFovErrorState('Field of view unavailable — invalid camera coordinates.');
-    return;
-  }
+  if (!frustumsEnabled) return;
 
   const bearingDetails = cameraBearingDetails(cam);
-  const bearing = isBearingUsableForFrustum(bearingDetails) ? normaliseBearingDegrees(bearingDetails.bearing) : null;
-  const heading = bearing === null ? null : normaliseBearingDegrees(bearingDetails.heading);
+  const bearing = isBearingUsableForFrustum(bearingDetails) ? bearingDetails.bearing : null;
+  const heading = bearing === null ? null : bearingDetails.heading;
   if (heading === null) return;
   const approximate = isApproximateBearing(bearingDetails);
 
   let groundHeight;
   if (google3DEnabled) {
-    if (!options.resolved || saneSurfaceHeight(options.groundHeight) === null) {
+    if (!options.resolved || !Number.isFinite(Number(options.groundHeight))) {
       setFovLoadingState('Positioning field of view…');
       return;
     }
-    groundHeight = saneSurfaceHeight(options.groundHeight);
+    groundHeight = Number(options.groundHeight);
   } else {
     groundHeight = await sampleGroundHeight(cam.lng, cam.lat);
-    if (!Number.isFinite(Number(groundHeight))) groundHeight = 0;
   }
 
   // In 3D mode the frustum must be built from the explicit resolved anchor
   // supplied by the selected-camera surface resolver. This avoids relying on
   // the selected entity's transient show/position state during async sampling.
   let originOverride = null;
-  if (google3DEnabled && safeCartesian3(options.originCartesian)) {
+  if (google3DEnabled && options.originCartesian instanceof Cesium.Cartesian3) {
     originOverride = options.originCartesian;
   }
 
-  let coll = null;
-  try {
-    coll = buildFrustumPolylines(cam.lng, cam.lat, groundHeight, heading, originOverride, {
-      approximate,
-      fovH: approximate ? Math.max(120, frustumFovH) : frustumFovH,
-      range: approximate ? Math.max(frustumRange, 75) : frustumRange,
-    });
-  } catch (err) {
-    console.warn('Frustum build failed:', err?.message || err);
-    coll = null;
-  }
-
-  if (!coll) {
-    setFovErrorState('Field of view unavailable — invalid camera geometry.');
-    return;
-  }
-
-  try {
-    viewer.scene.primitives.add(coll);
-    currentFrustumPrimitive = coll;
-  } catch (err) {
-    console.warn('Frustum add failed:', err?.message || err);
-    try { coll.destroy && coll.destroy(); } catch (_) {}
-    setFovErrorState('Field of view unavailable — Cesium rejected invalid geometry.');
-    return;
-  }
+  const coll = buildFrustumPolylines(cam.lng, cam.lat, groundHeight, heading, originOverride, {
+    approximate,
+    fovH: approximate ? Math.max(120, frustumFovH) : frustumFovH,
+    range: approximate ? Math.max(frustumRange, 75) : frustumRange,
+  });
+  viewer.scene.primitives.add(coll);
+  currentFrustumPrimitive = coll;
 
   clearFovLoadingState();
   const fi = document.getElementById('frustumInfo');
   const ft = document.getElementById('frustumInfoText');
-  if (fi) fi.style.display = 'block';
-  const shownFovH = Math.max(8, Math.min(170, approximate ? Math.max(120, frustumFovH) : frustumFovH));
-  const shownRange = Math.max(10, Math.min(750, approximate ? Math.max(frustumRange, 75) : frustumRange));
+  fi.style.display = 'block';
+  const shownFovH = approximate ? Math.max(120, frustumFovH) : frustumFovH;
+  const shownRange = approximate ? Math.max(frustumRange, 75) : frustumRange;
   const confidenceLabel = approximate ? 'approx. text-derived direction' : (bearingDetails.confidence === 'parsed' ? 'parsed numeric bearing' : 'numeric bearing');
-  if (ft) ft.textContent = `${approximate ? 'Approx. ' : ''}${DIR_NAMES[heading] || heading} (${Math.round(bearing)}°)  ·  ${Math.round(shownFovH)}° H × ${Math.round(shownFovH * 9 / 16)}° V  ·  ${Math.round(shownRange)} m range  ·  ${confidenceLabel}`;
+  ft.textContent   = `${approximate ? 'Approx. ' : ''}${DIR_NAMES[heading]} (${Math.round(bearing)}°)  ·  ${Math.round(shownFovH)}° H × ${Math.round(shownFovH * 9 / 16)}° V  ·  ${Math.round(shownRange)} m range  ·  ${confidenceLabel}`;
 
-  const status = document.getElementById('statusFrustum');
-  const statusText = document.getElementById('statusFrustumText');
-  if (status) status.style.display = 'flex';
-  if (statusText) statusText.textContent = approximate ? `FOV: approx ${DIR_NAMES[heading] || heading}` : `FOV: ${DIR_NAMES[heading] || heading} ${Math.round(bearing)}°`;
+  document.getElementById('statusFrustum').style.display = 'flex';
+  document.getElementById('statusFrustumText').textContent =
+    approximate ? `FOV: approx ${DIR_NAMES[heading]}` : `FOV: ${DIR_NAMES[heading]} ${Math.round(bearing)}°`;
 }
 
 function removeFrustum() {
-  const primitive = currentFrustumPrimitive;
-  currentFrustumPrimitive = null;
-
-  if (primitive && viewer && viewer.scene && viewer.scene.primitives) {
-    try { primitive.show = false; } catch (_) {}
-    const removeNow = () => {
-      try {
-        if (viewer && viewer.scene && viewer.scene.primitives && !primitive.isDestroyed?.()) {
-          viewer.scene.primitives.remove(primitive);
-        }
-      } catch (_) {}
-    };
-    // Removing primitives while Cesium is in the middle of a pick/render cycle can
-    // leave internal polyline arrays in a bad state. Defer removal to the next
-    // postRender frame when possible; otherwise fall back to a timer.
-    try {
-      if (viewer.scene.postRender && typeof viewer.scene.postRender.addEventListener === 'function') {
-        const off = viewer.scene.postRender.addEventListener(() => {
-          try { off(); } catch (_) {}
-          removeNow();
-        });
-        try { viewer.scene.requestRender(); } catch (_) {}
-      } else {
-        setTimeout(removeNow, 0);
-      }
-    } catch (_) {
-      setTimeout(removeNow, 0);
-    }
+  if (currentFrustumPrimitive) {
+    viewer.scene.primitives.remove(currentFrustumPrimitive);
+    currentFrustumPrimitive = null;
   }
-
   clearFovLoadingState();
-  const fi = document.getElementById('frustumInfo');
-  const status = document.getElementById('statusFrustum');
-  if (fi) fi.style.display = 'none';
-  if (status) status.style.display = 'none';
+  document.getElementById('frustumInfo').style.display = 'none';
+  document.getElementById('statusFrustum').style.display = 'none';
 }
 
 function showSelectedCameraMarker(cam, height = 0) {
@@ -8128,7 +7970,6 @@ function setGlobeCameraHeight(height) {
       roll: 0
     }
   });
-  try { sanitizeCesiumRenderFrustum('setGlobeCameraHeight'); } catch (_) {}
 }
 
 function syncGlobeZoomSlider() {
@@ -8178,19 +8019,13 @@ function setupGlobeZoomControls() {
 // lon/lat. If the user pushes into the floor, the camera is held a few metres
 // above that same spot and the view heading is preserved. This should feel like
 // a collision plane, not a bounce to another view.
-const CAMERA_NATIVE_MIN_ZOOM_DISTANCE_M = 75;
+const CAMERA_NATIVE_MIN_ZOOM_DISTANCE_M = 18;
 const CAMERA_NATIVE_MAX_TILT_DEG = 84;
-const CAMERA_3D_EYE_CLEARANCE_M = 22;
-const CAMERA_3D_EYE_FALLBACK_FLOOR_M = 18;
-// Stability-first: unselected individual-camera locator beams are optional UI
-// decoration. In dense close zooms Cesium can intermittently corrupt/update
-// huge internal polyline command arrays from hundreds of vertical entity beams,
-// producing "Invalid array length" in createPotentiallyVisibleSet. Keep
-// camera dots/arrows, but do not render those beams in the main map.
-const CAMERA_3D_LOCATOR_BEAMS_ENABLED = false;
+const CAMERA_3D_EYE_CLEARANCE_M = 7.5;
+const CAMERA_3D_EYE_FALLBACK_FLOOR_M = 2;
 const CAMERA_3D_FLOOR_SAMPLE_WIDTH_PX = 0.45;
-const CAMERA_3D_NEAR_SURFACE_LIMIT_M = 420;
-const CAMERA_3D_MAX_UPWARD_PITCH_DEG = -8;
+const CAMERA_3D_NEAR_SURFACE_LIMIT_M = 260;
+const CAMERA_3D_MAX_UPWARD_PITCH_DEG = -2;
 
 let cameraFloorGuardApplying = false;
 let cameraFloorGuardSuspended = false;
@@ -8199,167 +8034,6 @@ let cameraFloorGuardSuppressApiUntil = 0;
 let lastCameraFloorSampleKey = '';
 let lastCameraFloorSampleHeight = null;
 let lastCameraFloorSampleMs = 0;
-let lastCesiumSafeCameraPose = null;
-let lastCesiumSafeCameraPoseMs = 0;
-let cesiumRenderRecoveryInProgress = false;
-let lastCesiumRenderErrorRecoveryAt = 0;
-let cesiumDynamicLabelsDisabled = true; // stability: avoid Cesium LabelCollection crash during zoom
-
-let cesiumLastFrustumSanitizeAt = 0;
-
-function sanitizeCesiumRenderFrustum(reason = 'render') {
-  // Cesium's createPotentiallyVisibleSet can throw "Invalid array length" when
-  // camera/frustum near/far values become non-finite or inverted during tight
-  // zooms, especially after switching between 2D/3D-style views. This guard is
-  // independent of camera data: it protects the render frustum itself before
-  // Cesium builds its internal command/frustum arrays.
-  try {
-    if (!viewer || !viewer.camera || !viewer.scene) return false;
-    const cam = viewer.camera;
-    const fr = cam.frustum;
-    if (!fr) return false;
-
-    let changed = false;
-    const h = (() => {
-      try {
-        const carto = Cesium.Cartographic.fromCartesian(cam.positionWC || cam.position);
-        return Number(carto && carto.height);
-      } catch (_) { return NaN; }
-    })();
-    const height = Number.isFinite(h) ? Math.max(10, Math.min(50000000, h)) : 1000000;
-
-    const minNear = 0.5;
-    const maxNear = Math.max(1000, height * 0.25);
-    const desiredNear = Math.max(minNear, Math.min(maxNear, height * 0.002));
-    const minFar = Math.max(100000, height * 20);
-    const maxFar = 80000000;
-    const desiredFar = Math.max(minFar, Math.min(maxFar, height * 80 + 1000000));
-
-    const near = Number(fr.near);
-    const far = Number(fr.far);
-    if (!Number.isFinite(near) || near <= 0 || near < minNear || near > maxNear || near >= desiredFar) {
-      try { fr.near = desiredNear; changed = true; } catch (_) {}
-    }
-    const fixedNear = Number(fr.near);
-    if (!Number.isFinite(far) || far <= 0 || far <= fixedNear || far > maxFar) {
-      try { fr.far = Math.max(desiredFar, (Number.isFinite(fixedNear) ? fixedNear * 1000 : minFar)); changed = true; } catch (_) {}
-    }
-
-    // Perspective frustums also fail if fov/aspectRatio become invalid.
-    const fovy = Number(fr.fovy ?? fr.fov);
-    if ('fovy' in fr && (!Number.isFinite(fovy) || fovy <= 0 || fovy >= Math.PI)) {
-      try { fr.fovy = Cesium.Math.toRadians(60); changed = true; } catch (_) {}
-    } else if ('fov' in fr && (!Number.isFinite(fovy) || fovy <= 0 || fovy >= Math.PI)) {
-      try { fr.fov = Cesium.Math.toRadians(60); changed = true; } catch (_) {}
-    }
-    if ('aspectRatio' in fr) {
-      const ar = Number(fr.aspectRatio);
-      if (!Number.isFinite(ar) || ar <= 0 || ar > 20) {
-        try {
-          const canvas = viewer.scene.canvas;
-          fr.aspectRatio = canvas && canvas.clientHeight ? Math.max(0.1, Math.min(20, canvas.clientWidth / canvas.clientHeight)) : 1.6;
-          changed = true;
-        } catch (_) {}
-      }
-    }
-
-    // Keep Cesium's multi-frustum split ratios sane. Bad values here also produce
-    // invalid command-array lengths in createPotentiallyVisibleSet.
-    try {
-      if (!Number.isFinite(Number(viewer.scene.farToNearRatio)) || Number(viewer.scene.farToNearRatio) <= 1) {
-        viewer.scene.farToNearRatio = 1000;
-        changed = true;
-      }
-    } catch (_) {}
-    try {
-      if (!Number.isFinite(Number(viewer.scene.logarithmicDepthFarToNearRatio)) || Number(viewer.scene.logarithmicDepthFarToNearRatio) <= 1) {
-        viewer.scene.logarithmicDepthFarToNearRatio = 1000000000;
-        changed = true;
-      }
-    } catch (_) {}
-
-    if (changed) {
-      const now = Date.now();
-      if (now - cesiumLastFrustumSanitizeAt > 1000) {
-        cesiumLastFrustumSanitizeAt = now;
-        console.warn('Sanitized Cesium render frustum:', reason);
-      }
-      try { viewer.scene.requestRender(); } catch (_) {}
-    }
-    return changed;
-  } catch (_) {
-    return false;
-  }
-}
-
-function hardResetCesiumViewAfterRenderError(reason = 'render-error') {
-  // Last-resort reset for repeated createPotentiallyVisibleSet failures. It does
-  // not reload data or destroy datasources; it just puts the camera/frustum back
-  // into a known-good birdseye state and asks Cesium to draw again.
-  try {
-    if (!viewer || !viewer.camera) return;
-    sanitizeCesiumRenderFrustum(reason + ':before');
-    viewer.camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(-73.5, 6.5, 3500000),
-      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 }
-    });
-    sanitizeCesiumRenderFrustum(reason + ':after');
-    try { viewer.useDefaultRenderLoop = true; } catch (_) {}
-    try { viewer.scene.requestRender(); } catch (_) {}
-  } catch (_) {}
-}
-
-function rememberSafeCesiumCameraPose(reason = 'render') {
-  try {
-    if (!viewer || !viewer.camera) return;
-    const c = viewer.camera;
-    const carto = Cesium.Cartographic.fromCartesian(c.positionWC || c.position);
-    if (!carto) return;
-    const vals = [carto.longitude, carto.latitude, carto.height, c.heading, c.pitch, c.roll];
-    if (!vals.every(Number.isFinite)) return;
-    // Avoid storing dangerous almost-inside-surface zooms as recovery targets.
-    if (Number(carto.height) < 30) return;
-    lastCesiumSafeCameraPose = {
-      destination: Cesium.Cartesian3.clone(c.positionWC || c.position),
-      heading: Number(c.heading),
-      pitch: Number(c.pitch),
-      roll: Number(c.roll),
-      reason,
-    };
-    lastCesiumSafeCameraPoseMs = performance.now();
-  } catch (_) {}
-}
-
-function restoreSafeCesiumCameraPose(reason = 'render-error') {
-  if (!viewer || !viewer.camera || cesiumRenderRecoveryInProgress) return;
-  cesiumRenderRecoveryInProgress = true;
-  try {
-    removeFrustum();
-    // Entity polylines are the most disposable geometry. Hide any remaining
-    // stale beam polylines before asking Cesium to render again.
-    try {
-      if (dataSource && dataSource.entities && Array.isArray(dataSource.entities.values)) {
-        dataSource.entities.values.forEach(e => { try { if (e && e.polyline) e.polyline.show = false; } catch (_) {} });
-      }
-    } catch (_) {}
-    const pose = lastCesiumSafeCameraPose;
-    if (pose && pose.destination) {
-      viewer.camera.setView({
-        destination: pose.destination,
-        orientation: { heading: pose.heading, pitch: pose.pitch, roll: pose.roll }
-      });
-    } else {
-      viewer.camera.setView({
-        destination: Cesium.Cartesian3.fromDegrees(0, 15, 9000000),
-        orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 }
-      });
-    }
-    try { viewer.scene.requestRender(); } catch (_) {}
-  } catch (_) {
-  } finally {
-    setTimeout(() => { cesiumRenderRecoveryInProgress = false; }, 250);
-  }
-}
 
 function isCameraFloorGuardActive() {
   return !!(
@@ -8426,7 +8100,7 @@ function cameraFloorGuardDistanceMeters(aLon, aLat, bLon, bLat) {
     );
     return Math.abs(Number(geodesic.surfaceDistance) || 0);
   } catch (_) {
-    return 1000000000;
+    return Number.POSITIVE_INFINITY;
   }
 }
 
@@ -8555,12 +8229,6 @@ function setupCesiumCameraGroundGuard() {
   }
 
   try {
-    viewer.scene.preRender.addEventListener(() => {
-      try { sanitizeCesiumRenderFrustum('preRender'); } catch (_) {}
-      try {
-        if (!cameraFloorGuardApplying && !cesiumRenderRecoveryInProgress) rememberSafeCesiumCameraPose('preRender');
-      } catch (_) {}
-    });
     viewer.scene.preRender.addEventListener(enforceCesiumCameraFloorLimit);
   } catch (_) {}
 }
@@ -8592,76 +8260,6 @@ function initCesium() {
     selectionIndicator: false,
     skyAtmosphere: new Cesium.SkyAtmosphere(),
   });
-
-  try {
-    viewer.scene.farToNearRatio = 1000;
-    viewer.scene.logarithmicDepthFarToNearRatio = 1000000000;
-    sanitizeCesiumRenderFrustum('init');
-  } catch (_) {}
-
-  try {
-    // Keep Cesium render-loop errors from permanently freezing the app. The
-    // underlying issue fixed here is invalid/stale frustum geometry, but this
-    // guard lets the map recover instead of displaying Cesium's fatal dialog.
-    if (viewer.cesiumWidget) {
-      viewer.cesiumWidget.showRenderLoopErrors = false;
-      // Cesium's public flag is not always enough after the first fatal render
-      // error. Override the panel hook so the app can recover quietly.
-      try { viewer.cesiumWidget._showErrorPanel = function() {}; } catch (_) {}
-      try { viewer.cesiumWidget.showErrorPanel = function() {}; } catch (_) {}
-    }
-    if (viewer.scene) viewer.scene.rethrowRenderErrors = false;
-    if (viewer.scene && viewer.scene.renderError) {
-      viewer.scene.renderError.addEventListener((scene, error) => {
-        const msg = String(error?.message || error || '');
-        console.warn('Cesium render error recovered:', msg);
-        const now = Date.now();
-        cesiumDynamicLabelsDisabled = true;
-
-        try { hideClusterLoadingStatusNow && hideClusterLoadingStatusNow(); } catch (_) {}
-
-        try {
-          // Cesium 1.111 can get into a bad LabelCollection command-list state
-          // during close zooms. Text labels are useful but non-essential; turn
-          // off our dynamic text layers and keep only simple points/billboards.
-          if (mapContextState) {
-            mapContextState.placeNames = false;
-            clearPlaceLabels();
-            updateMapContextButtonState();
-          }
-        } catch (_) {}
-
-        try {
-          if (dataSource && dataSource.entities && Array.isArray(dataSource.entities.values)) {
-            dataSource.entities.values.forEach(e => {
-              try { if (e.label) e.label.show = false; } catch (_) {}
-              try { if (e.polyline) e.polyline.show = false; } catch (_) {}
-            });
-          }
-        } catch (_) {}
-
-        try { removeFrustum(); } catch (_) {}
-        try { sanitizeCesiumRenderFrustum('renderError'); } catch (_) {}
-        restoreSafeCesiumCameraPose('renderError');
-        try { sanitizeCesiumRenderFrustum('renderError-restored'); } catch (_) {}
-        try { viewer.useDefaultRenderLoop = true; } catch (_) {}
-        try { viewer.scene.requestRender(); } catch (_) {}
-
-        // Do not start a fresh RPC/rebuild on every renderError frame. That was
-        // what left the app stuck on "Loading clusters…". At most, schedule one
-        // quiet viewport refresh after Cesium has had time to recover.
-        if (now - lastCesiumRenderErrorRecoveryAt > 2500) {
-          lastCesiumRenderErrorRecoveryAt = now;
-          setTimeout(() => {
-            try { sanitizeCesiumRenderFrustum('renderError-delayed'); } catch (_) {}
-            hardResetCesiumViewAfterRenderError('renderError-delayed');
-            try { viewer.useDefaultRenderLoop = true; } catch (_) {}
-            try { viewer.scene.requestRender(); } catch (_) {}
-          }, 500);
-        }
-      });
-    }
-  } catch (_) {}
 
   viewer.scene.globe.depthTestAgainstTerrain = false;
   try { default2DImageryLayer = viewer.imageryLayers.get(0) || null; } catch (_) {}
@@ -8700,7 +8298,7 @@ function initCesium() {
     const c = viewer.camera.positionWC;
     const cx = c.x, cy = c.y, cz = c.z;
 
-    const entities = dataSource && dataSource.entities && Array.isArray(dataSource.entities.values) ? dataSource.entities.values : [];
+    const entities = dataSource.entities.values;
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
       if (e._searchOff) { e.show = false; continue; }
@@ -9166,7 +8764,7 @@ function normaliseRemotePlaceLabel(raw, source = 'natural-earth-r2') {
   const name = String(raw.name || raw.NAME || '').trim();
   const lat = Number(raw.lat ?? raw.latitude ?? raw.LATITUDE);
   const lng = Number(raw.lng ?? raw.lon ?? raw.longitude ?? raw.LONGITUDE);
-  if (!name || !Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
   const population = Math.max(0, Number(raw.population ?? raw.POP_MAX ?? raw.pop_max ?? 0) || 0);
   const cls = String(raw.class || raw.FEATURECLA || raw.featureClass || '').toLowerCase();
@@ -9634,21 +9232,13 @@ async function updatePlaceLabels() {
     const isCountry = place.level === 'country';
     const isMetro = place.level === 'metro';
     const isLocal = place.level === 'local';
-    const labelLat = Number(place.lat);
-    const labelLng = Number(place.lng);
-    if (!Number.isFinite(labelLat) || !Number.isFinite(labelLng) || labelLat < -90 || labelLat > 90 || labelLng < -180 || labelLng > 180) return;
     const labelHeight = isCountry ? 320000 : (google3DEnabled ? (isLocal ? 1400 : 1800) : (isLocal ? 9000 : 14000));
     const fontSize = isCountry ? 14 : isMetro ? 16 : 14;
-    const maxDistance = Number(placeLabelMaxDistance(place));
-    const minDistance = Number(placeLabelMinDistance(place));
-    if (!Number.isFinite(maxDistance) || !Number.isFinite(minDistance) || maxDistance <= minDistance) return;
-    let labelPosition = null;
-    try { labelPosition = Cesium.Cartesian3.fromDegrees(labelLng, labelLat, labelHeight); } catch (_) { labelPosition = null; }
-    if (!labelPosition || !Number.isFinite(labelPosition.x) || !Number.isFinite(labelPosition.y) || !Number.isFinite(labelPosition.z)) return;
-    try { ds.entities.add({
-      position: labelPosition,
+    const maxDistance = placeLabelMaxDistance(place);
+    ds.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(place.lng, place.lat, labelHeight),
       label: {
-        text: String(place.name || '').slice(0, 80),
+        text: place.name,
         font: `${isCountry ? 800 : isMetro ? 750 : 700} ${fontSize}px Inter, system-ui, sans-serif`,
         fillColor: Cesium.Color.WHITE.withAlpha(isCountry ? 0.88 : 0.98),
         outlineColor: Cesium.Color.BLACK.withAlpha(0.82),
@@ -9665,9 +9255,9 @@ async function updatePlaceLabels() {
         // far-side bleed-through while preventing labels on the visible limb from
         // being sliced by terrain/horizon depth precision.
         eyeOffset: new Cesium.Cartesian3(0, 0, -80),
-        disableDepthTestDistance: 1000000000,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
-          minDistance,
+          placeLabelMinDistance(place),
           maxDistance
         ),
         scaleByDistance: new Cesium.NearFarScalar(
@@ -9678,7 +9268,7 @@ async function updatePlaceLabels() {
         ),
         translucencyByDistance: new Cesium.NearFarScalar(maxDistance * 0.72, 1.0, maxDistance, 0.22),
       }
-    }); } catch (err) { console.warn('Skipped unsafe place label:', place && place.name, err?.message || err); }
+    });
   });
   try { viewer.scene.requestRender && viewer.scene.requestRender(); } catch (_) {}
 }
@@ -10053,9 +9643,19 @@ async function createCameraEntities(cams) {
     ).withAlpha(0.9);
     cluster.point.outlineColor = Cesium.Color.WHITE.withAlpha(0.7);
     cluster.point.outlineWidth = 1.5;
-    cluster.point.disableDepthTestDistance = 1000000000;
+    cluster.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
 
-    cluster.label.show = false;
+    cluster.label.show              = true;
+    cluster.label.text              = n > 9999 ? '9K+' : n.toString();
+    cluster.label.font              = '600 11px Inter, system-ui, sans-serif';
+    cluster.label.fillColor         = Cesium.Color.WHITE;
+    cluster.label.outlineColor      = Cesium.Color.BLACK;
+    cluster.label.outlineWidth      = 2;
+    cluster.label.style             = Cesium.LabelStyle.FILL_AND_OUTLINE;
+    cluster.label.verticalOrigin    = Cesium.VerticalOrigin.CENTER;
+    cluster.label.horizontalOrigin  = Cesium.HorizontalOrigin.CENTER;
+    cluster.label.pixelOffset       = new Cesium.Cartesian2(0, 0);
+    cluster.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
   });
 
   const CHUNK = 2000;
@@ -10077,14 +9677,15 @@ async function createCameraEntities(cams) {
           outlineColor: Cesium.Color.WHITE.withAlpha(0.8),
           outlineWidth: 1,
           scaleByDistance: new Cesium.NearFarScalar(300, 1.8, 400000, 0.6),
-          disableDepthTestDistance: 1000000000,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
           eyeOffset: new Cesium.Cartesian3(0, 0, -80),
           heightReference: google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND,
         },
         polyline: {
-          // Optional normal-camera locator beam. Disabled by default because dense
-          // close-zoom polyline batches can destabilise Cesium's render command list.
-          show: !!google3DEnabled && CAMERA_3D_LOCATOR_BEAMS_ENABLED,
+          // Always visible for normal/unselected 3D camera symbols. This is an
+          // approximate locator beam down to the zero-height base, not a sampled
+          // 3D tile mast.
+          show: !!google3DEnabled,
           positions: [
             Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), normalCameraBeamBaseHeight(cam)),
             Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), normalCameraMarkerHeight(cam)),
@@ -10108,7 +9709,7 @@ async function createCameraEntities(cams) {
           alignedAxis: Cesium.Cartesian3.ZERO,
           pixelOffset: new Cesium.Cartesian2(0, -14),
           scaleByDistance: new Cesium.NearFarScalar(300, 1.25, 400000, 0.5),
-          disableDepthTestDistance: 1000000000,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
           eyeOffset: new Cesium.Cartesian3(0, 0, -80),
           heightReference: google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND,
         };
@@ -10116,7 +9717,21 @@ async function createCameraEntities(cams) {
 
       const entity = dataSource.entities.add({
         ...entityGraphics,
-        // Camera name label intentionally omitted for render stability.
+        label: {
+          text: cam.location || cam.id,
+          font: '12px Inter, system-ui, sans-serif',
+          fillColor: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.fromCssColorString('#0f172a'),
+          outlineWidth: 3,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          pixelOffset: new Cesium.Cartesian2(0, -10),
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          eyeOffset: new Cesium.Cartesian3(0, 0, -80),
+          heightReference: google3DEnabled ? Cesium.HeightReference.NONE : Cesium.HeightReference.CLAMP_TO_GROUND,
+          show: false,
+        },
       });
       entity._bfp       = entity.position.getValue(Cesium.JulianDate.now());
       entity._searchOff = false;
@@ -10863,7 +10478,7 @@ async function runLocationSearch(query) {
       color: Cesium.Color.fromCssColorString('#f59e0b'),
       outlineColor: Cesium.Color.WHITE,
       outlineWidth: 2,
-      disableDepthTestDistance: 1000000000,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
     label: {
       text: name,
@@ -10874,7 +10489,7 @@ async function runLocationSearch(query) {
       style: Cesium.LabelStyle.FILL_AND_OUTLINE,
       verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
       pixelOffset: new Cesium.Cartesian2(0, -18),
-      disableDepthTestDistance: 1000000000,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
     }
   });
 
@@ -14687,7 +14302,7 @@ function redrawAreaSelectionGraphics() {
         color: Cesium.Color.fromCssColorString('#2563eb'),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 2,
-        disableDepthTestDistance: 1000000000
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       }
     }));
 
@@ -14767,7 +14382,7 @@ function highlightAreaMatches() {
         color: Cesium.Color.fromCssColorString('#f59e0b'),
         outlineColor: Cesium.Color.WHITE,
         outlineWidth: 2,
-        disableDepthTestDistance: 1000000000
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
       },
       label: {
         text: '',
@@ -17807,10 +17422,10 @@ function visibleViewportSpanDegrees() {
     const count = Number(cluster.camera_count || cluster.count || 0);
     const lat = Number(cluster.latitude);
     const lng = Number(cluster.longitude);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180 || count <= 0) return;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || count <= 0) return;
     const id = `cluster:${cluster.cluster_id || `${lng.toFixed(3)},${lat.toFixed(3)}`}`;
     const visibility = Number.isFinite(Number(cluster._visibilityFactor)) ? Number(cluster._visibilityFactor) : 1;
-    const size = Math.max(14, Math.min(42, 13 + Math.log10(count + 1) * 8));
+    const size = Math.max(12, Math.min(36, 11 + Math.log10(count + 1) * 7));
     const color = Cesium.Color.fromCssColorString(clusterColor(count)).withAlpha(0.58 + visibility * 0.30);
     const entity = dataSource.entities.add({
       id,
@@ -17820,10 +17435,21 @@ function visibleViewportSpanDegrees() {
         color,
         outlineColor: Cesium.Color.WHITE.withAlpha(0.72),
         outlineWidth: 1.5,
-        disableDepthTestDistance: 1000000000,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
-      // No Cesium label here. Dynamic LabelCollection text was the source
-      // of the zoom-only Invalid array length render crash on some views.
+      label: {
+        text: clusterLabel(count),
+        font: '700 11px Inter, system-ui, sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.CENTER,
+        horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+        pixelOffset: new Cesium.Cartesian2(0, 0),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        translucencyByDistance: new Cesium.NearFarScalar(0, 1, 18000000, 0.88),
+      },
     });
     entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
     entity._searchOff = false;
@@ -17854,27 +17480,40 @@ function visibleViewportSpanDegrees() {
         outlineColor: Cesium.Color.WHITE.withAlpha(0.8),
         outlineWidth: 1,
         scaleByDistance: new Cesium.NearFarScalar(300, 1.8, 400000, 0.6),
-        disableDepthTestDistance: 1000000000,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
         eyeOffset: new Cesium.Cartesian3(0, 0, -80),
         heightReference: Cesium.HeightReference.NONE,
       },
-      // No default Cesium label for visible camera dots. The side panel/PiP
-      // provides names; labels are enabled only for selected/focused entities.
+      polyline: {
+        // Always visible for normal/unselected 3D camera symbols. This is an
+        // approximate locator beam down to the zero-height base, not a sampled
+        // 3D tile mast.
+        show: !!google3DEnabled,
+        positions: [
+          Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), normalCameraBeamBaseHeight(cam)),
+          Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), normalCameraMarkerHeight(cam)),
+        ],
+        width: CAMERA_3D_POLE_WIDTH_PX,
+        material: Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.46),
+        depthFailMaterial: Cesium.Color.fromCssColorString('#60a5fa').withAlpha(0.72),
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1200000),
+      },
+      label: {
+        text: cam.location || cam.name || cam.id,
+        font: '12px Inter, system-ui, sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.fromCssColorString('#0f172a'),
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -10),
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 3000),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        eyeOffset: new Cesium.Cartesian3(0, 0, -80),
+        heightReference: Cesium.HeightReference.NONE,
+        show: false,
+      },
     };
-    if (google3DEnabled && CAMERA_3D_LOCATOR_BEAMS_ENABLED && validLngLat(cam.lng, cam.lat)) {
-      const beamBottom = safeCartesianFromDegrees(Number(cam.lng), Number(cam.lat), normalCameraBeamBaseHeight(cam));
-      const beamTop = safeCartesianFromDegrees(Number(cam.lng), Number(cam.lat), normalCameraMarkerHeight(cam));
-      if (beamBottom && beamTop) {
-        graphics.polyline = {
-          show: true,
-          positions: [beamBottom, beamTop],
-          width: CAMERA_3D_POLE_WIDTH_PX,
-          material: Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.46),
-          depthFailMaterial: Cesium.Color.fromCssColorString('#60a5fa').withAlpha(0.72),
-          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1200000),
-        };
-      }
-    }
     if (heading !== null) {
       graphics.billboard = {
         image: cameraArrowCanvasDataUrl(cesiumColorToCss(color, getHeadingColorCss(heading))),
@@ -17884,13 +17523,12 @@ function visibleViewportSpanDegrees() {
         alignedAxis: Cesium.Cartesian3.ZERO,
         pixelOffset: new Cesium.Cartesian2(0, -14),
         scaleByDistance: new Cesium.NearFarScalar(300, 1.25, 400000, 0.5),
-        disableDepthTestDistance: 1000000000,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
         eyeOffset: new Cesium.Cartesian3(0, 0, -80),
         heightReference: Cesium.HeightReference.NONE,
       };
     }
-    let entity = null;
-    try { entity = dataSource.entities.add(graphics); } catch (err) { console.warn('Skipped unsafe camera entity:', cam && cam.id, err?.message || err); return; }
+    const entity = dataSource.entities.add(graphics);
     entity._cameraData = cam;
     entity._bfp = entity.position.getValue(Cesium.JulianDate.now());
     entity._searchOff = false;
@@ -18476,7 +18114,7 @@ function visibleViewportSpanDegrees() {
           entity.point.color = base.withAlpha(entity.show ? (0.50 + Math.min(1, v) * 0.35) : 0);
         }
         if (entity.label) {
-          entity.label.show = false;
+          entity.label.show = entity.show && v > 0.22;
         }
       }
       if (viewer) viewer.scene.requestRender();
