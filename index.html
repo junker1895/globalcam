@@ -7680,79 +7680,170 @@ function sampleGroundHeight(lng, lat) {
   return 0;
 }
 
+function finiteNumberOrNull(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function validLngLat(lng, lat) {
+  const x = finiteNumberOrNull(lng);
+  const y = finiteNumberOrNull(lat);
+  return x !== null && y !== null && x >= -180 && x <= 180 && y >= -90 && y <= 90;
+}
+
+function safeCartesian3(value) {
+  return !!(
+    value instanceof Cesium.Cartesian3 &&
+    Number.isFinite(value.x) &&
+    Number.isFinite(value.y) &&
+    Number.isFinite(value.z)
+  );
+}
+
+function safeCartesianFromDegrees(lng, lat, height = 0) {
+  if (!validLngLat(lng, lat)) return null;
+  const h = finiteNumberOrNull(height);
+  if (h === null || h < -1000 || h > 10000) return null;
+  try {
+    const p = Cesium.Cartesian3.fromDegrees(Number(lng), Number(lat), h);
+    return safeCartesian3(p) ? p : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function safeVector3(value) {
+  if (!safeCartesian3(value)) return null;
+  const mag = Cesium.Cartesian3.magnitude(value);
+  return Number.isFinite(mag) && mag > 0 ? value : null;
+}
+
+function safePolylinePositions(a, b) {
+  return safeCartesian3(a) && safeCartesian3(b) ? [a, b] : null;
+}
+
 function buildFrustumPolylines(lng, lat, groundHeight, heading, originOverride = null, style = {}) {
-  const POLE   = google3DEnabled ? 3.5 : 5.5;
+  const lon = finiteNumberOrNull(lng);
+  const la = finiteNumberOrNull(lat);
+  if (lon === null || la === null || !validLngLat(lon, la)) return null;
+
+  const safeHeading = normaliseBearingDegrees(heading);
+  if (safeHeading === null) return null;
+
   const approximate = !!style.approximate;
-  const FAR    = Number.isFinite(Number(style.range)) ? Number(style.range) : (approximate ? Math.max(frustumRange * 0.82, 55) : frustumRange);
-  const NEAR   = 2;
-  const TILT   = -frustumTilt;
-  const fovH   = Number.isFinite(Number(style.fovH)) ? Number(style.fovH) : (approximate ? Math.max(120, frustumFovH) : frustumFovH);
+  const rangeInput = finiteNumberOrNull(style.range);
+  const fovInput = finiteNumberOrNull(style.fovH);
+  const gh = google3DEnabled ? saneSurfaceHeight(groundHeight) : finiteNumberOrNull(groundHeight);
+  const safeGroundHeight = gh === null ? 0 : gh;
+
+  // Clamp the geometry inputs. Bad records or UI state should never be allowed
+  // to create NaN/Infinity Cartesian values, because Cesium polyline internals
+  // can then throw RangeError/invalid-array-length during the render loop.
+  const POLE = google3DEnabled ? 3.5 : 5.5;
+  const FAR = Math.max(10, Math.min(750, rangeInput !== null ? rangeInput : (approximate ? Math.max(frustumRange * 0.82, 55) : frustumRange)));
+  const NEAR = 2;
+  const TILT = -Math.max(-85, Math.min(85, finiteNumberOrNull(frustumTilt) ?? 15));
+  const rawFov = fovInput !== null ? fovInput : (approximate ? Math.max(120, frustumFovH) : frustumFovH);
+  const fovH = Math.max(8, Math.min(170, rawFov));
   const HFOV_H = fovH / 2;
-  const HFOV_V = (fovH / 2) * (9 / 16);
+  const HFOV_V = Math.max(4, Math.min(85, (fovH / 2) * (9 / 16)));
 
   const originHeight = google3DEnabled
-    ? selectedCameraHeight(groundHeight, CAMERA_3D_FRUSTUM_LIFT_M)
-    : visualCameraHeight(groundHeight + POLE, 0);
-  const origin     = originOverride || Cesium.Cartesian3.fromDegrees(lng, lat, originHeight);
-  const enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
+    ? selectedCameraHeight(safeGroundHeight, CAMERA_3D_FRUSTUM_LIFT_M)
+    : visualCameraHeight(safeGroundHeight + POLE, 0);
 
-  const h = Cesium.Math.toRadians(heading);
+  const origin = safeCartesian3(originOverride) ? originOverride : safeCartesianFromDegrees(lon, la, originHeight);
+  if (!safeCartesian3(origin)) return null;
+
+  let enuToWorld;
+  try {
+    enuToWorld = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
+  } catch (_) {
+    return null;
+  }
+
+  const h = Cesium.Math.toRadians(safeHeading);
   const p = Cesium.Math.toRadians(TILT);
 
   const fE = Math.sin(h) * Math.cos(p);
   const fN = Math.cos(h) * Math.cos(p);
   const fU = Math.sin(p);
 
-  const rE =  Math.cos(h);
+  const rE = Math.cos(h);
   const rN = -Math.sin(h);
 
   const uE = rN * fU;
   const uN = -rE * fU;
   const uU = rE * fN - rN * fE;
-  const uLen = Math.sqrt(uE*uE + uN*uN + uU*uU);
+  const uLen = Math.sqrt(uE * uE + uN * uN + uU * uU);
+  if (!Number.isFinite(uLen) || uLen <= 0) return null;
 
   const toWorld = (e, n, u) => {
-    const v = new Cesium.Cartesian3();
-    Cesium.Matrix4.multiplyByPointAsVector(enuToWorld, new Cesium.Cartesian3(e, n, u), v);
-    return Cesium.Cartesian3.normalize(v, v);
+    if (![e, n, u].every(Number.isFinite)) return null;
+    try {
+      const v = new Cesium.Cartesian3();
+      Cesium.Matrix4.multiplyByPointAsVector(enuToWorld, new Cesium.Cartesian3(e, n, u), v);
+      const mag = Cesium.Cartesian3.magnitude(v);
+      if (!Number.isFinite(mag) || mag <= 0) return null;
+      Cesium.Cartesian3.normalize(v, v);
+      return safeCartesian3(v) ? v : null;
+    } catch (_) {
+      return null;
+    }
   };
 
-  const fwdW   = toWorld(fE, fN, fU);
+  const fwdW = toWorld(fE, fN, fU);
   const rightW = toWorld(rE, rN, 0);
-  const upW    = toWorld(uE/uLen, uN/uLen, uU/uLen);
+  const upW = toWorld(uE / uLen, uN / uLen, uU / uLen);
+  if (!safeVector3(fwdW) || !safeVector3(rightW) || !safeVector3(upW)) return null;
 
-  const add   = (a, b) => Cesium.Cartesian3.add(a, b, new Cesium.Cartesian3());
-  const scale = (v, s) => Cesium.Cartesian3.multiplyByScalar(v, s, new Cesium.Cartesian3());
+  const add = (a, b) => {
+    if (!safeCartesian3(a) || !safeCartesian3(b)) return null;
+    const v = Cesium.Cartesian3.add(a, b, new Cesium.Cartesian3());
+    return safeCartesian3(v) ? v : null;
+  };
+  const scale = (v, s) => {
+    if (!safeVector3(v) || !Number.isFinite(s)) return null;
+    const out = Cesium.Cartesian3.multiplyByScalar(v, s, new Cesium.Cartesian3());
+    return safeCartesian3(out) ? out : null;
+  };
+  const add2 = (a, b, c) => add(add(a, b), c);
 
-  const farHW  = FAR  * Math.tan(Cesium.Math.toRadians(HFOV_H));
-  const farVH  = FAR  * Math.tan(Cesium.Math.toRadians(HFOV_V));
+  const farHW = FAR * Math.tan(Cesium.Math.toRadians(HFOV_H));
+  const farVH = FAR * Math.tan(Cesium.Math.toRadians(HFOV_V));
   const nearHW = NEAR * Math.tan(Cesium.Math.toRadians(HFOV_H));
   const nearVH = NEAR * Math.tan(Cesium.Math.toRadians(HFOV_V));
+  if (![farHW, farVH, nearHW, nearVH].every(Number.isFinite)) return null;
 
-  const farC  = add(origin, scale(fwdW, FAR));
+  const farC = add(origin, scale(fwdW, FAR));
   const nearC = add(origin, scale(fwdW, NEAR));
+  if (!safeCartesian3(farC) || !safeCartesian3(nearC)) return null;
 
   const fc = [
-    add(add(farC, scale(rightW, -farHW)), scale(upW,  farVH)),
-    add(add(farC, scale(rightW,  farHW)), scale(upW,  farVH)),
-    add(add(farC, scale(rightW,  farHW)), scale(upW, -farVH)),
-    add(add(farC, scale(rightW, -farHW)), scale(upW, -farVH)),
+    add2(farC, scale(rightW, -farHW), scale(upW, farVH)),
+    add2(farC, scale(rightW, farHW), scale(upW, farVH)),
+    add2(farC, scale(rightW, farHW), scale(upW, -farVH)),
+    add2(farC, scale(rightW, -farHW), scale(upW, -farVH)),
   ];
 
   const nc = [
-    add(add(nearC, scale(rightW, -nearHW)), scale(upW,  nearVH)),
-    add(add(nearC, scale(rightW,  nearHW)), scale(upW,  nearVH)),
-    add(add(nearC, scale(rightW,  nearHW)), scale(upW, -nearVH)),
-    add(add(nearC, scale(rightW, -nearHW)), scale(upW, -nearVH)),
+    add2(nearC, scale(rightW, -nearHW), scale(upW, nearVH)),
+    add2(nearC, scale(rightW, nearHW), scale(upW, nearVH)),
+    add2(nearC, scale(rightW, nearHW), scale(upW, -nearVH)),
+    add2(nearC, scale(rightW, -nearHW), scale(upW, -nearVH)),
   ];
 
-  const segs = [
+  if (!fc.every(safeCartesian3) || !nc.every(safeCartesian3)) return null;
+
+  const rawSegs = [
     [origin, fc[0]], [origin, fc[1]], [origin, fc[2]], [origin, fc[3]],
     [fc[0], fc[1]], [fc[1], fc[2]], [fc[2], fc[3]], [fc[3], fc[0]],
     [nc[0], nc[1]], [nc[1], nc[2]], [nc[2], nc[3]], [nc[3], nc[0]],
   ];
+  const segs = rawSegs.map(([s, e]) => safePolylinePositions(s, e)).filter(Boolean);
+  if (!segs.length) return null;
 
-  const col      = Cesium.Color.fromCssColorString(approximate ? '#0284c7' : '#2563eb').withAlpha(approximate ? 0.86 : 0.92);
+  const col = Cesium.Color.fromCssColorString(approximate ? '#0284c7' : '#2563eb').withAlpha(approximate ? 0.86 : 0.92);
   const fadedCol = Cesium.Color.fromCssColorString(approximate ? '#0284c7' : '#2563eb').withAlpha(approximate ? 0.48 : (google3DEnabled ? 0.52 : 0.12));
   const materialType = approximate ? 'PolylineDash' : 'Color';
   const materialOpts = approximate
@@ -7761,15 +7852,24 @@ function buildFrustumPolylines(lng, lat, groundHeight, heading, originOverride =
   const depthMaterialOpts = approximate
     ? { color: fadedCol, dashLength: 10.0, dashPattern: 3855 }
     : { color: fadedCol };
-  const coll     = new Cesium.PolylineCollection();
-  segs.forEach(([s, e]) => {
-    coll.add({
-      positions: [s, e],
-      width: approximate ? (google3DEnabled ? 3.2 : 2.2) : (google3DEnabled ? 2.4 : 1.5),
-      material: Cesium.Material.fromType(materialType, materialOpts),
-      depthFailMaterial: Cesium.Material.fromType(materialType, depthMaterialOpts),
-    });
-  });
+
+  const coll = new Cesium.PolylineCollection();
+  for (const positions of segs) {
+    try {
+      coll.add({
+        positions,
+        width: approximate ? (google3DEnabled ? 3.2 : 2.2) : (google3DEnabled ? 2.4 : 1.5),
+        material: Cesium.Material.fromType(materialType, materialOpts),
+        depthFailMaterial: Cesium.Material.fromType(materialType, depthMaterialOpts),
+      });
+    } catch (err) {
+      console.warn('Skipped invalid frustum segment:', err?.message || err);
+    }
+  }
+
+  try {
+    if (!coll.length && coll._polylines && !coll._polylines.length) return null;
+  } catch (_) {}
   return coll;
 }
 
@@ -7862,63 +7962,116 @@ function refitCameraToResolvedFrustum(cam, groundHeight, bearing) {
 
 async function showFrustum(cam, options = {}) {
   removeFrustum();
-  if (!frustumsEnabled) return;
+  if (!frustumsEnabled || !viewer || !viewer.scene || !cam) return;
+  if (!validLngLat(cam.lng, cam.lat)) {
+    setFovErrorState('Field of view unavailable — invalid camera coordinates.');
+    return;
+  }
 
   const bearingDetails = cameraBearingDetails(cam);
-  const bearing = isBearingUsableForFrustum(bearingDetails) ? bearingDetails.bearing : null;
-  const heading = bearing === null ? null : bearingDetails.heading;
+  const bearing = isBearingUsableForFrustum(bearingDetails) ? normaliseBearingDegrees(bearingDetails.bearing) : null;
+  const heading = bearing === null ? null : normaliseBearingDegrees(bearingDetails.heading);
   if (heading === null) return;
   const approximate = isApproximateBearing(bearingDetails);
 
   let groundHeight;
   if (google3DEnabled) {
-    if (!options.resolved || !Number.isFinite(Number(options.groundHeight))) {
+    if (!options.resolved || saneSurfaceHeight(options.groundHeight) === null) {
       setFovLoadingState('Positioning field of view…');
       return;
     }
-    groundHeight = Number(options.groundHeight);
+    groundHeight = saneSurfaceHeight(options.groundHeight);
   } else {
     groundHeight = await sampleGroundHeight(cam.lng, cam.lat);
+    if (!Number.isFinite(Number(groundHeight))) groundHeight = 0;
   }
 
   // In 3D mode the frustum must be built from the explicit resolved anchor
   // supplied by the selected-camera surface resolver. This avoids relying on
   // the selected entity's transient show/position state during async sampling.
   let originOverride = null;
-  if (google3DEnabled && options.originCartesian instanceof Cesium.Cartesian3) {
+  if (google3DEnabled && safeCartesian3(options.originCartesian)) {
     originOverride = options.originCartesian;
   }
 
-  const coll = buildFrustumPolylines(cam.lng, cam.lat, groundHeight, heading, originOverride, {
-    approximate,
-    fovH: approximate ? Math.max(120, frustumFovH) : frustumFovH,
-    range: approximate ? Math.max(frustumRange, 75) : frustumRange,
-  });
-  viewer.scene.primitives.add(coll);
-  currentFrustumPrimitive = coll;
+  let coll = null;
+  try {
+    coll = buildFrustumPolylines(cam.lng, cam.lat, groundHeight, heading, originOverride, {
+      approximate,
+      fovH: approximate ? Math.max(120, frustumFovH) : frustumFovH,
+      range: approximate ? Math.max(frustumRange, 75) : frustumRange,
+    });
+  } catch (err) {
+    console.warn('Frustum build failed:', err?.message || err);
+    coll = null;
+  }
+
+  if (!coll) {
+    setFovErrorState('Field of view unavailable — invalid camera geometry.');
+    return;
+  }
+
+  try {
+    viewer.scene.primitives.add(coll);
+    currentFrustumPrimitive = coll;
+  } catch (err) {
+    console.warn('Frustum add failed:', err?.message || err);
+    try { coll.destroy && coll.destroy(); } catch (_) {}
+    setFovErrorState('Field of view unavailable — Cesium rejected invalid geometry.');
+    return;
+  }
 
   clearFovLoadingState();
   const fi = document.getElementById('frustumInfo');
   const ft = document.getElementById('frustumInfoText');
-  fi.style.display = 'block';
-  const shownFovH = approximate ? Math.max(120, frustumFovH) : frustumFovH;
-  const shownRange = approximate ? Math.max(frustumRange, 75) : frustumRange;
+  if (fi) fi.style.display = 'block';
+  const shownFovH = Math.max(8, Math.min(170, approximate ? Math.max(120, frustumFovH) : frustumFovH));
+  const shownRange = Math.max(10, Math.min(750, approximate ? Math.max(frustumRange, 75) : frustumRange));
   const confidenceLabel = approximate ? 'approx. text-derived direction' : (bearingDetails.confidence === 'parsed' ? 'parsed numeric bearing' : 'numeric bearing');
-  ft.textContent   = `${approximate ? 'Approx. ' : ''}${DIR_NAMES[heading]} (${Math.round(bearing)}°)  ·  ${Math.round(shownFovH)}° H × ${Math.round(shownFovH * 9 / 16)}° V  ·  ${Math.round(shownRange)} m range  ·  ${confidenceLabel}`;
+  if (ft) ft.textContent = `${approximate ? 'Approx. ' : ''}${DIR_NAMES[heading] || heading} (${Math.round(bearing)}°)  ·  ${Math.round(shownFovH)}° H × ${Math.round(shownFovH * 9 / 16)}° V  ·  ${Math.round(shownRange)} m range  ·  ${confidenceLabel}`;
 
-  document.getElementById('statusFrustum').style.display = 'flex';
-  document.getElementById('statusFrustumText').textContent =
-    approximate ? `FOV: approx ${DIR_NAMES[heading]}` : `FOV: ${DIR_NAMES[heading]} ${Math.round(bearing)}°`;
+  const status = document.getElementById('statusFrustum');
+  const statusText = document.getElementById('statusFrustumText');
+  if (status) status.style.display = 'flex';
+  if (statusText) statusText.textContent = approximate ? `FOV: approx ${DIR_NAMES[heading] || heading}` : `FOV: ${DIR_NAMES[heading] || heading} ${Math.round(bearing)}°`;
 }
 
 function removeFrustum() {
-  if (currentFrustumPrimitive) {
-    viewer.scene.primitives.remove(currentFrustumPrimitive);
-    currentFrustumPrimitive = null;
+  const primitive = currentFrustumPrimitive;
+  currentFrustumPrimitive = null;
+
+  if (primitive && viewer && viewer.scene && viewer.scene.primitives) {
+    try { primitive.show = false; } catch (_) {}
+    const removeNow = () => {
+      try {
+        if (viewer && viewer.scene && viewer.scene.primitives && !primitive.isDestroyed?.()) {
+          viewer.scene.primitives.remove(primitive);
+        }
+      } catch (_) {}
+    };
+    // Removing primitives while Cesium is in the middle of a pick/render cycle can
+    // leave internal polyline arrays in a bad state. Defer removal to the next
+    // postRender frame when possible; otherwise fall back to a timer.
+    try {
+      if (viewer.scene.postRender && typeof viewer.scene.postRender.addEventListener === 'function') {
+        const off = viewer.scene.postRender.addEventListener(() => {
+          try { off(); } catch (_) {}
+          removeNow();
+        });
+        try { viewer.scene.requestRender(); } catch (_) {}
+      } else {
+        setTimeout(removeNow, 0);
+      }
+    } catch (_) {
+      setTimeout(removeNow, 0);
+    }
   }
+
   clearFovLoadingState();
-  document.getElementById('frustumInfo').style.display = 'none';
-  document.getElementById('statusFrustum').style.display = 'none';
+  const fi = document.getElementById('frustumInfo');
+  const status = document.getElementById('statusFrustum');
+  if (fi) fi.style.display = 'none';
+  if (status) status.style.display = 'none';
 }
 
 function showSelectedCameraMarker(cam, height = 0) {
@@ -8261,6 +8414,25 @@ function initCesium() {
     skyAtmosphere: new Cesium.SkyAtmosphere(),
   });
 
+  try {
+    // Keep Cesium render-loop errors from permanently freezing the app. The
+    // underlying issue fixed here is invalid/stale frustum geometry, but this
+    // guard lets the map recover instead of displaying Cesium's fatal dialog.
+    if (viewer.cesiumWidget) viewer.cesiumWidget.showRenderLoopErrors = false;
+    if (viewer.scene) viewer.scene.rethrowRenderErrors = false;
+    if (viewer.scene && viewer.scene.renderError) {
+      viewer.scene.renderError.addEventListener((scene, error) => {
+        console.warn('Cesium render error recovered:', error?.message || error);
+        try { removeFrustum(); } catch (_) {}
+        try { viewer.useDefaultRenderLoop = true; } catch (_) {}
+        setTimeout(() => {
+          try { viewer.useDefaultRenderLoop = true; } catch (_) {}
+          try { viewer.scene.requestRender(); } catch (_) {}
+        }, 80);
+      });
+    }
+  } catch (_) {}
+
   viewer.scene.globe.depthTestAgainstTerrain = false;
   try { default2DImageryLayer = viewer.imageryLayers.get(0) || null; } catch (_) {}
 
@@ -8298,7 +8470,7 @@ function initCesium() {
     const c = viewer.camera.positionWC;
     const cx = c.x, cy = c.y, cz = c.z;
 
-    const entities = dataSource.entities.values;
+    const entities = dataSource && dataSource.entities && Array.isArray(dataSource.entities.values) ? dataSource.entities.values : [];
     for (let i = 0; i < entities.length; i++) {
       const e = entities[i];
       if (e._searchOff) { e.show = false; continue; }
