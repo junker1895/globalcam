@@ -13596,6 +13596,108 @@ function viewportCameraIsAvailableForApp(row) {
   return !viewportFalseishAvailability(value);
 }
 
+
+function viewportCameraHasRenderableFeedForApp(row) {
+  if (!row) return false;
+  let meta = row.metadata || {};
+  if (typeof meta === 'string') {
+    try { meta = JSON.parse(meta); } catch (_) { meta = {}; }
+  }
+  if (row.image_url || row.imageUrl || row.video_url || row.videoUrl || row.youtube_video_id || row.youtubeVideoId) return true;
+  if (meta && (meta.image_url || meta.imageUrl || meta.video_url || meta.videoUrl || meta.youtube_video_id || meta.youtubeVideoId)) return true;
+  const rawViews = row.views ?? row.angles ?? (meta && (meta.views ?? meta.angles));
+  const views = typeof rawViews === 'string'
+    ? (() => { try { return JSON.parse(rawViews); } catch (_) { return []; } })()
+    : rawViews;
+  return Array.isArray(views) && views.some(v => v && (v.image_url || v.imageUrl || v.video_url || v.videoUrl || v.url || v.snapshotUrl || v.snapshot_url || v.streamUrl || v.stream_url || v.hlsUrl || v.hls_url));
+}
+
+function viewportPostgrestTextInFilter(ids) {
+  const clean = Array.from(new Set((ids || []).map(id => String(id || '').trim()).filter(Boolean)));
+  return `in.(${clean.map(id => `"${id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`).join(',')})`;
+}
+
+const viewportPublicCameraRowCache = window.__viewportPublicCameraRowCache || new Map();
+window.__viewportPublicCameraRowCache = viewportPublicCameraRowCache;
+
+async function viewportFetchVisiblePublicCameraRowsByIds(ids, { requireFeed = false } = {}) {
+  const unique = Array.from(new Set((ids || []).map(id => String(id || '').trim()).filter(Boolean)));
+  if (!unique.length) return new Map();
+
+  const out = new Map();
+  const missing = unique.filter(id => !viewportPublicCameraRowCache.has(id));
+  unique.forEach(id => {
+    if (viewportPublicCameraRowCache.has(id)) {
+      const cached = viewportPublicCameraRowCache.get(id);
+      if (cached) out.set(id, cached);
+    }
+  });
+
+  const batchSize = 90;
+  for (let i = 0; i < missing.length; i += batchSize) {
+    const batch = missing.slice(i, i + batchSize);
+    const filter = viewportPostgrestTextInFilter(batch);
+    const availabilityFilter = '(is_available.is.null,is_available.eq.true)';
+    const url = `${SUPABASE_URL}/rest/v1/cameras?select=*&id=${encodeURIComponent(filter)}&or=${encodeURIComponent(availabilityFilter)}`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        Accept: 'application/json',
+      },
+    });
+    if (!res.ok) {
+      const message = await res.text().catch(() => '');
+      throw new Error(`Direct camera visibility check failed ${res.status}: ${message.slice(0, 240)}`);
+    }
+    const rows = await res.json();
+    const returned = new Set();
+    (Array.isArray(rows) ? rows : []).forEach(row => {
+      const id = row && row.id != null ? String(row.id) : '';
+      if (!id) return;
+      returned.add(id);
+      const lat = Number(row.latitude ?? row.lat);
+      const lng = Number(row.longitude ?? row.lng ?? row.lon);
+      const usable = viewportCameraIsAvailableForApp(row) &&
+        Number.isFinite(lat) &&
+        Number.isFinite(lng) &&
+        (!requireFeed || viewportCameraHasRenderableFeedForApp(row));
+      const stored = usable ? row : null;
+      viewportPublicCameraRowCache.set(id, stored);
+      if (stored) out.set(id, stored);
+    });
+    batch.forEach(id => {
+      if (!returned.has(id)) viewportPublicCameraRowCache.set(id, null);
+    });
+  }
+
+  return out;
+}
+
+async function viewportHydrateVisibleCameraRowsFromPublicTable(rows, { requireFeed = false } = {}) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const ids = [];
+  sourceRows.forEach(row => {
+    const id = row && (row.id ?? row.camera_id ?? row.cameraId);
+    if (id != null) ids.push(String(id));
+  });
+  const directRows = await viewportFetchVisiblePublicCameraRowsByIds(ids, { requireFeed });
+  return Array.from(directRows.values())
+    .map(row => (typeof toCamelCamera === 'function') ? toCamelCamera(row) : row)
+    .filter(cam => {
+      if (!cam || cam.id == null) return false;
+      if (!viewportCameraIsAvailableForApp(cam)) return false;
+      const lat = Number(cam.lat ?? cam.latitude);
+      const lng = Number(cam.lng ?? cam.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+      if (requireFeed && !viewportCameraHasRenderableFeedForApp(cam)) return false;
+      cam.lat = lat;
+      cam.lng = lng;
+      return true;
+    });
+}
+
 function normaliseDashboardAvailableCamera(row) {
   const cam = (typeof toCamelCamera === 'function') ? toCamelCamera(row) : row;
   if (!cam || cam.id == null) return null;
@@ -13679,9 +13781,13 @@ async function fetchDashboardAvailableCamerasForBounds(seq) {
     const parts = await Promise.all(boxes.map(box => fetchDashboardAvailableCamerasRpcBox(box, maxResults)));
     if (seq !== dashboardAvailableRequestSeq) return;
 
+    const rpcRows = parts.flat();
+    const visibleRows = await viewportHydrateVisibleCameraRowsFromPublicTable(rpcRows, { requireFeed: true });
+    if (seq !== dashboardAvailableRequestSeq) return;
+
     const selectedIds = new Set(dashboardState.order.map(String));
     const seen = new Set();
-    dashboardAvailableCameras = parts.flat()
+    dashboardAvailableCameras = visibleRows
       .map(normaliseDashboardAvailableCamera)
       .filter(Boolean)
       .filter(cam => {
@@ -14563,13 +14669,20 @@ async function fetchCamerasForPolygonBboxes(polygons) {
 
   await Promise.all(Array.from({ length: Math.min(concurrency, boxes.length) }, worker));
 
+  const visibleRows = await viewportHydrateVisibleCameraRowsFromPublicTable(rows, { requireFeed: true });
+
   const seen = new Set();
   const cams = [];
-  rows.forEach(row => {
-    const cam = (typeof toCamelCamera === 'function') ? toCamelCamera(row) : row;
+  visibleRows.forEach(cam => {
     const id = cam && cam.id != null ? String(cam.id) : '';
     if (!id || seen.has(id)) return;
     if (!viewportCameraIsAvailableForApp(cam)) return;
+    const lat = Number(cam.lat ?? cam.latitude);
+    const lng = Number(cam.lng ?? cam.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    if (!viewportCameraHasRenderableFeedForApp(cam)) return;
+    cam.lat = lat;
+    cam.lng = lng;
     seen.add(id);
     cams.push(cam);
     if (typeof cameraMap !== 'undefined' && cameraMap) {
@@ -14869,7 +14982,17 @@ function highlightAreaMatches() {
   if (dashboardMap && areaSelection.leafletHighlightLayer) dashboardMap.removeLayer(areaSelection.leafletHighlightLayer);
   areaSelection.leafletHighlightLayer = null;
 
-  const matched = areaSelection.matchedIds.map(id => cameraMap.get(id)).filter(Boolean);
+  const matched = areaSelection.matchedIds
+    .map(id => cameraMap.get(id))
+    .filter(cam => {
+      if (!cam || !viewportCameraIsAvailableForApp(cam)) return false;
+      const lat = Number(cam.lat ?? cam.latitude);
+      const lng = Number(cam.lng ?? cam.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+      cam.lat = lat;
+      cam.lng = lng;
+      return true;
+    });
   if (viewer) {
     areaSelection.cesiumHighlightEntities = matched.slice(0, 5000).map(cam => viewer.entities.add({
       position: google3DEnabled ? Cesium.Cartesian3.fromDegrees(Number(cam.lng), Number(cam.lat), normalCameraMarkerHeight(cam)) : cameraEntityPosition(cam.lng, cam.lat, 0),
@@ -18612,7 +18735,20 @@ function visibleViewportSpanDegrees() {
   function hydrateSavedDashboardCameras() {
     const ids = Array.isArray(dashboardState?.cameras) ? dashboardState.order.map(String) : [];
     if (!ids.length) return Promise.resolve([]);
-    return Promise.allSettled(ids.map(id => hydrateCameraDetail(id))).then(() => {
+    return Promise.allSettled(ids.map(id => hydrateCameraDetail(id))).then(results => {
+      const unavailableIds = new Set();
+      results.forEach((result, idx) => {
+        if (result.status === 'fulfilled' && !result.value) unavailableIds.add(ids[idx]);
+      });
+      if (unavailableIds.size) {
+        dashboardState.order = dashboardState.order.map(String).filter(id => !unavailableIds.has(id));
+        if (dashboardState.selectedCameraId && unavailableIds.has(String(dashboardState.selectedCameraId))) {
+          dashboardState.selectedCameraId = dashboardState.order[0] || null;
+        }
+        clampDashboardPage();
+        saveDashboardState();
+        console.info(`Removed ${unavailableIds.size} unavailable camera(s) from saved dashboard`);
+      }
       updateDashboardBadge();
       renderDashboard();
       if (dashboardMap) renderDashboardMap();
