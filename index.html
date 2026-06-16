@@ -11510,7 +11510,8 @@ function dashboardMode() {
 }
 
 function dashboardSideMapAllowed() {
-  return dashboardMode() === 'grid';
+  const mode = dashboardMode();
+  return mode === 'grid' || mode === 'single';
 }
 
 function dashboardMapTileAllowed() {
@@ -11530,9 +11531,9 @@ function applyDashboardModeRules(previousMode = null) {
   // Mosaic is the only mode that supports the map as a draggable tile.
   if (mode !== 'mosaic') dashboardState.mapAsTile = false;
 
-  // The side map is a grid layout panel. Other modes use the full wall so their
-  // interaction model stays clean and intentional.
-  if (mode !== 'grid') document.body.classList.remove('dashboard-map-drawer');
+  // The side map is shared by Grid and Single. Other modes use the full wall
+  // or Mosaic's independent map-tile model, so keep the drawer state cleared.
+  if (mode !== 'grid' && mode !== 'single') document.body.classList.remove('dashboard-map-drawer');
 
   if (dashboardState.selectedCameraId && !dashboardState.order.includes(String(dashboardState.selectedCameraId))) {
     dashboardState.selectedCameraId = dashboardState.order[0] || null;
@@ -11893,6 +11894,16 @@ function setDashboardSelected(id) {
   const oldPage = dashboardState.currentPage || 0;
   goToDashboardCameraPage(id);
   saveDashboardState();
+
+  // In Single/Focus, changing selection changes the primary displayed camera,
+  // not just the marker/card highlight. Re-render so the feed view and map
+  // highlight stay locked together when clicking map markers or cycling cameras.
+  const mode = dashboardMode();
+  if (mode === 'single' || mode === 'focus') {
+    renderDashboard();
+    return;
+  }
+
   if ((dashboardState.currentPage || 0) !== oldPage) renderDashboard();
   else {
     renderDashboardMap();
@@ -13978,9 +13989,9 @@ function updateDashboardToolbarVisibility() {
   setHidden('.dash-control-single', mode !== 'single');
   updateDashboardSingleAutoScrollUI();
 
-  // Side-map controls are grid-only. Mosaic uses the optional draggable map tile;
-  // Focus and Single dedicate the whole dashboard to camera feeds.
-  setHidden('.dash-control-map', mode !== 'grid');
+  // Side-map controls are shared by Grid and Single. Mosaic uses the optional
+  // draggable map tile; Focus dedicates the dashboard to camera feeds.
+  setHidden('.dash-control-map', !(mode === 'grid' || mode === 'single'));
 
   const addMapTile = document.getElementById('dashAddMapTile');
   if (addMapTile) {
@@ -14033,11 +14044,13 @@ function updateDashboardMapPresentation() {
   document.querySelectorAll('#dashboardMapModeControl [data-map-display]').forEach(btn => {
     const value = btn.getAttribute('data-map-display');
     btn.classList.toggle('active', value === dashboardState.mapDisplayMode);
-    // Side map is the existing grid-only presentation. Full map works in any dashboard mode.
+    // Side map is the existing Grid-style presentation, now shared by Grid and Single.
     btn.disabled = value === 'side' && !sideAllowed;
-    btn.title = value === 'side' && !sideAllowed
-      ? 'Side map is available in Grid mode. Use Full map in this layout.'
-      : btn.title;
+    if (value === 'side') {
+      btn.title = sideAllowed
+        ? 'Show map beside dashboard camera tiles'
+        : 'Side map is available in Grid and Single modes. Use Full map in this layout.';
+    }
   });
 
   if (toggle) {
