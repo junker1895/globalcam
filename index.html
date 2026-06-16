@@ -13572,9 +13572,34 @@ function renderDashboardAvailableStatus() {
   note.textContent = text;
 }
 
+
+/* Visibility gate for validator-hidden cameras.
+   Supabase keeps unavailable camera rows for maintenance/history, but the public app
+   must not render rows where is_available is explicitly false.  Null/true remain visible
+   so existing global cameras that have not yet been validation-flagged are unaffected. */
+function viewportFalseishAvailability(value) {
+  if (value === false) return true;
+  if (value === null || value === undefined) return false;
+  const text = String(value).trim().toLowerCase();
+  return text === 'false' || text === '0' || text === 'no' || text === 'offline' || text === 'unavailable';
+}
+
+function viewportCameraIsAvailableForApp(row) {
+  if (!row) return false;
+  let meta = row.metadata || {};
+  if (typeof meta === 'string') {
+    try { meta = JSON.parse(meta); } catch (_) { meta = {}; }
+  }
+  const value =
+    row.is_available ?? row.isAvailable ??
+    (meta && (meta.is_available ?? meta.isAvailable));
+  return !viewportFalseishAvailability(value);
+}
+
 function normaliseDashboardAvailableCamera(row) {
   const cam = (typeof toCamelCamera === 'function') ? toCamelCamera(row) : row;
   if (!cam || cam.id == null) return null;
+  if (!viewportCameraIsAvailableForApp(cam)) return null;
   if (!Number.isFinite(Number(cam.lat)) || !Number.isFinite(Number(cam.lng))) return null;
   return cam;
 }
@@ -13621,6 +13646,7 @@ async function fetchDashboardAvailableCamerasRpcBox(box, maxResults) {
 function normaliseDashboardAvailableCamera(row) {
   const cam = (typeof toCamelCamera === 'function') ? toCamelCamera(row) : row;
   if (!cam || cam.id == null) return null;
+  if (!viewportCameraIsAvailableForApp(cam)) return null;
   const lat = Number(cam.lat ?? cam.latitude);
   const lng = Number(cam.lng ?? cam.longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
@@ -14543,6 +14569,7 @@ async function fetchCamerasForPolygonBboxes(polygons) {
     const cam = (typeof toCamelCamera === 'function') ? toCamelCamera(row) : row;
     const id = cam && cam.id != null ? String(cam.id) : '';
     if (!id || seen.has(id)) return;
+    if (!viewportCameraIsAvailableForApp(cam)) return;
     seen.add(id);
     cams.push(cam);
     if (typeof cameraMap !== 'undefined' && cameraMap) {
@@ -17293,6 +17320,12 @@ function hideClusterLoadingStatusNow() {
     return null;
   }
 
+  function isCameraAvailableForApiDisplay(camOrRow) {
+    return typeof viewportCameraIsAvailableForApp === 'function'
+      ? viewportCameraIsAvailableForApp(camOrRow)
+      : true;
+  }
+
   function toCamelCamera(row) {
     if (!row) return null;
     const meta = parseJsonMaybe(row.metadata, {}) || {};
@@ -17410,8 +17443,16 @@ function hideClusterLoadingStatusNow() {
   function mergeCamera(cam) {
     if (!cam || !cam.id) return null;
     const id = String(cam.id);
+    if (!isCameraAvailableForApiDisplay(cam)) {
+      cameraMap.delete(id);
+      return null;
+    }
     const existing = cameraMap.get(id);
     const merged = existing ? Object.assign(existing, cam) : cam;
+    if (!isCameraAvailableForApiDisplay(merged)) {
+      cameraMap.delete(id);
+      return null;
+    }
     cameraMap.set(id, merged);
     cameraMap.set(merged.id, merged);
     return merged;
@@ -17428,7 +17469,7 @@ function hideClusterLoadingStatusNow() {
     // was not updated to return every promoted camera column.  As a safety net,
     // fetch the authoritative row directly from public.cameras when a selected
     // camera has no usable feed or other detail fields.
-    const url = `${SUPABASE_URL}/rest/v1/cameras?id=eq.${encodeURIComponent(id)}&select=*`;
+    const url = `${SUPABASE_URL}/rest/v1/cameras?id=eq.${encodeURIComponent(id)}&select=*&or=(is_available.is.null,is_available.eq.true)`;
     const res = await fetch(url, {
       method: 'GET',
       headers: {
@@ -17533,23 +17574,30 @@ function hideClusterLoadingStatusNow() {
       try {
         const rows = await rpc('get_camera_detail', { camera_id: id });
         full = toCamelCamera(rows[0]);
+        if (full && !isCameraAvailableForApiDisplay(full)) full = null;
       } catch (err) {
         console.warn('RPC camera detail failed, falling back to direct row fetch:', err);
       }
 
-      // If the RPC returned only a map/search summary, pull the full table row.
-      // This specifically fixes cameras whose image_url/views exist in Supabase
-      // but are not included in get_camera_detail/get_cameras_bbox responses.
-      if (!full || !hasFeedDetails(full)) {
-        try {
-          const direct = await fetchCameraRowById(id);
-          if (direct) full = full ? { ...full, ...direct, metadata: { ...(full.metadata || {}), ...(direct.metadata || {}) } } : direct;
-        } catch (err) {
-          console.warn('Direct camera detail fetch failed:', err);
+      // Always confirm the selected camera against public.cameras.  Some RPC
+      // summaries can lag schema changes and may not expose is_available yet.
+      // The direct query filters out rows where is_available=false, so validator-
+      // hidden cameras cannot still open from stale clusters/search/dashboard IDs.
+      try {
+        const direct = await fetchCameraRowById(id);
+        if (direct) {
+          full = full ? { ...full, ...direct, metadata: { ...(full.metadata || {}), ...(direct.metadata || {}) } } : direct;
+        } else {
+          full = null;
         }
+      } catch (err) {
+        console.warn('Direct camera detail fetch failed:', err);
       }
 
-      if (!full) return existing || null;
+      if (!full || !isCameraAvailableForApiDisplay(full)) {
+        cameraMap.delete(id);
+        return null;
+      }
       full._apiDetailLoaded = true;
       return mergeCamera(existing ? { ...existing, ...full } : full);
     })().finally(() => apiState.detailPromises.delete(id));
@@ -18162,7 +18210,7 @@ function visibleViewportSpanDegrees() {
 
       parts.flat().forEach(r => {
         const cam = toCamelCamera(r);
-        if (!cam || seen.has(cam.id)) return;
+        if (!cam || !isCameraAvailableForApiDisplay(cam) || seen.has(cam.id)) return;
         seen.add(cam.id);
         rows.push(cam);
       });
@@ -18423,6 +18471,7 @@ function visibleViewportSpanDegrees() {
 
     const full = await hydrateCameraDetail(cam).catch(err => { console.warn('Camera detail failed:', err); return cam; });
     const selected = full || cam;
+    if (!selected || !isCameraAvailableForApiDisplay(selected)) return null;
     const result = await originalSelectCamera(selected);
     schedulePostSelectionViewportRefresh('select-camera');
     return result;
@@ -18430,7 +18479,7 @@ function visibleViewportSpanDegrees() {
 
   const originalAddCameraToDashboard = window.addCameraToDashboard || addCameraToDashboard;
   addCameraToDashboard = function apiAddCameraToDashboard(cam, options = {}) {
-    if (!cam || !cam.id) return false;
+    if (!cam || !cam.id || !isCameraAvailableForApiDisplay(cam)) return false;
     mergeCamera(cam);
     const result = originalAddCameraToDashboard(cam, options);
     hydrateCameraDetail(cam).then(full => {
@@ -18452,10 +18501,10 @@ function visibleViewportSpanDegrees() {
     const q = (query || '').trim();
     if (q.length < 2) return [];
     const rows = await rpc('search_cameras', { search_text: q, max_results: max });
-    return rows.map(toCamelCamera).filter(Boolean).map(cam => {
+    return rows.map(toCamelCamera).filter(cam => cam && isCameraAvailableForApiDisplay(cam)).map(cam => {
       cam._apiSearchResult = true;
       return mergeCamera(cam);
-    });
+    }).filter(Boolean);
   }
 
   async function runApiCameraSearch(query, { dashboard = false } = {}) {
