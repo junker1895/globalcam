@@ -14599,6 +14599,109 @@ function cameraInsideIndexedPolygons(cam, indexed) {
   });
 }
 
+
+function cameraStableSortLabel(cam) {
+  return String(
+    (cam && (cam.road || cam.roadway || cam.name || cam.displayName || cam.display_name || cam.provider || cam.id)) || ''
+  ).toLowerCase();
+}
+
+function areaGeographicSortModel(polygons, camerasForFallback) {
+  const pts = [];
+  (polygons || []).forEach(poly => cleanPolygonRing(poly).forEach(p => pts.push({ lat: Number(p.lat), lng: normaliseLng(p.lng) })));
+
+  // If the polygon was not available for any reason, fall back to the returned
+  // camera positions. The usual path is polygon-driven, but this keeps the sort
+  // deterministic for uploaded/layer edge cases.
+  if (pts.length < 2 && Array.isArray(camerasForFallback)) {
+    camerasForFallback.forEach(cam => {
+      const lat = Number(cam && (cam.lat ?? cam.latitude));
+      const lng = Number(cam && (cam.lng ?? cam.longitude));
+      if (Number.isFinite(lat) && Number.isFinite(lng)) pts.push({ lat, lng: normaliseLng(lng) });
+    });
+  }
+
+  if (pts.length < 2) {
+    return { lat0: 0, vx: 1, vy: 0, wx: 0, wy: 1 };
+  }
+
+  const lat0 = pts.reduce((sum, p) => sum + p.lat, 0) / pts.length;
+  const lonScale = Math.max(0.15, Math.cos(lat0 * Math.PI / 180));
+  const projected = pts.map(p => ({ x: p.lng * lonScale, y: p.lat }));
+  const cx = projected.reduce((sum, p) => sum + p.x, 0) / projected.length;
+  const cy = projected.reduce((sum, p) => sum + p.y, 0) / projected.length;
+
+  let sxx = 0, syy = 0, sxy = 0;
+  projected.forEach(p => {
+    const dx = p.x - cx;
+    const dy = p.y - cy;
+    sxx += dx * dx;
+    syy += dy * dy;
+    sxy += dx * dy;
+  });
+
+  let vx = 1;
+  let vy = 0;
+  if (Math.abs(sxy) > 1e-12 || Math.abs(sxx - syy) > 1e-12) {
+    const theta = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    vx = Math.cos(theta);
+    vy = Math.sin(theta);
+  } else if (syy > sxx) {
+    vx = 0;
+    vy = 1;
+  }
+
+  // Make the order geographically intuitive:
+  // - east/west corridors sort west -> east
+  // - north/south corridors sort north -> south
+  // - diagonal corridors follow their dominant axis with the same convention.
+  if (Math.abs(vx) >= Math.abs(vy)) {
+    if (vx < 0) { vx = -vx; vy = -vy; }
+  } else {
+    if (vy > 0) { vx = -vx; vy = -vy; }
+  }
+
+  return { lat0, vx, vy, wx: -vy, wy: vx };
+}
+
+function sortCamerasByAreaGeography(camerasToSort, polygons) {
+  const cams = Array.isArray(camerasToSort) ? camerasToSort.slice() : [];
+  const model = areaGeographicSortModel(polygons, cams);
+  const lonScale = Math.max(0.15, Math.cos(model.lat0 * Math.PI / 180));
+
+  return cams.sort((a, b) => {
+    const alat = Number(a && (a.lat ?? a.latitude));
+    const alng = Number(a && (a.lng ?? a.longitude));
+    const blat = Number(b && (b.lat ?? b.latitude));
+    const blng = Number(b && (b.lng ?? b.longitude));
+
+    const aOk = Number.isFinite(alat) && Number.isFinite(alng);
+    const bOk = Number.isFinite(blat) && Number.isFinite(blng);
+    if (aOk && !bOk) return -1;
+    if (!aOk && bOk) return 1;
+    if (!aOk && !bOk) return String(a?.id || '').localeCompare(String(b?.id || ''));
+
+    const ax = normaliseLng(alng) * lonScale;
+    const ay = alat;
+    const bx = normaliseLng(blng) * lonScale;
+    const by = blat;
+
+    const aPrimary = ax * model.vx + ay * model.vy;
+    const bPrimary = bx * model.vx + by * model.vy;
+    const primaryDelta = aPrimary - bPrimary;
+    if (Math.abs(primaryDelta) > 1e-8) return primaryDelta;
+
+    const aSecondary = ax * model.wx + ay * model.wy;
+    const bSecondary = bx * model.wx + by * model.wy;
+    const secondaryDelta = aSecondary - bSecondary;
+    if (Math.abs(secondaryDelta) > 1e-8) return secondaryDelta;
+
+    const labelCmp = cameraStableSortLabel(a).localeCompare(cameraStableSortLabel(b));
+    if (labelCmp) return labelCmp;
+    return String(a?.id || '').localeCompare(String(b?.id || ''));
+  });
+}
+
 function findCamerasInsidePolygonsLocal(polygons) {
   const indexed = indexPolygonsForContainment(polygons);
   if (!indexed.length) return [];
@@ -14727,8 +14830,9 @@ async function resolveAreaSelectionMatches(polygons, statusText = 'Finding camer
   updateAreaPanel(statusText);
   try {
     const matched = await findCamerasInsidePolygons(polygons);
-    areaSelection.matchedIds = matched.map(cam => String(cam.id));
-    return matched;
+    const sortedMatched = sortCamerasByAreaGeography(matched, polygons);
+    areaSelection.matchedIds = sortedMatched.map(cam => String(cam.id));
+    return sortedMatched;
   } finally {
     areaSelection.matching = false;
     updateAreaPanel();
