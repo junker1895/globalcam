@@ -3249,6 +3249,46 @@ body.dashboard-map-full #dashboardMap {
 .dash-feed-age.failed::before { background: var(--c-danger); }
 
 
+.dash-feed-row {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.dash-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 48%;
+  color: var(--c-text3);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1;
+  text-decoration: none;
+  opacity: 0.78;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-source-link:hover {
+  color: var(--c-accent);
+  opacity: 1;
+  text-decoration: underline;
+}
+.dash-source-link.empty {
+  display: none;
+}
+.dash-source-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
 
 #dashboardAddPanel {
   position: fixed;
@@ -11456,6 +11496,61 @@ function getCameraFeed(cam) {
   };
 }
 
+
+function dashboardDirectFeedUrlFromFeed(imageUrl, videoUrl) {
+  const cleanImage = normaliseFeedUrl(imageUrl) || null;
+  const cleanVideo = normaliseFeedUrl(videoUrl) || null;
+
+  // Match the dashboard renderer: true video/HLS/YouTube wins; still/MJPEG URLs
+  // stored in video_url are opened as direct image feeds instead.
+  if (cleanVideo && !['image', 'mjpeg'].includes(pipFeedKind(cleanVideo))) return cleanVideo;
+  return cleanImage || cleanVideo || null;
+}
+
+function dashboardDirectFeedUrl(cam) {
+  const feed = getCameraFeed(cam || {});
+  return dashboardDirectFeedUrlFromFeed(feed.imageUrl, feed.videoUrl);
+}
+
+function dashboardSourceLabel(cam) {
+  return String(
+    cam?.provider ||
+    cam?.streamProvider ||
+    cam?.sourceName ||
+    cam?.source_file ||
+    cam?._source ||
+    'Source'
+  ).trim() || 'Source';
+}
+
+function dashboardSourceLinkHtml(cam) {
+  const feedUrl = dashboardDirectFeedUrl(cam);
+  if (!feedUrl) return '';
+  const label = dashboardSourceLabel(cam);
+  return `<a class="dash-source-link" href="${escapeHtml(feedUrl)}" target="_blank" rel="noopener noreferrer" title="Open direct camera feed: ${escapeHtml(feedUrl)}" onclick="event.stopPropagation();">
+    <span aria-hidden="true">↗</span><span class="dash-source-label">${escapeHtml(label)}</span>
+  </a>`;
+}
+
+function updateDashboardSourceLink(id, cam, imageUrl = null, videoUrl = null) {
+  const idKey = String(id ?? cam?.id ?? '');
+  if (!idKey) return;
+  const row = document.getElementById(`dash-feed-row-${dashDomId(idKey)}`);
+  if (!row) return;
+  const existing = row.querySelector('.dash-source-link');
+  const directUrl = dashboardDirectFeedUrlFromFeed(imageUrl, videoUrl) || dashboardDirectFeedUrl(cam);
+  if (!directUrl) {
+    if (existing) existing.remove();
+    return;
+  }
+  const label = dashboardSourceLabel(cam);
+  const html = `<a class="dash-source-link" href="${escapeHtml(directUrl)}" target="_blank" rel="noopener noreferrer" title="Open direct camera feed: ${escapeHtml(directUrl)}" onclick="event.stopPropagation();">
+    <span aria-hidden="true">↗</span><span class="dash-source-label">${escapeHtml(label)}</span>
+  </a>`;
+  if (existing) existing.outerHTML = html;
+  else row.insertAdjacentHTML('beforeend', html);
+}
+
 function dashboardCameraById(id) {
   const idKey = String(id);
   return cameraMap.get(idKey) || cameraMap.get(id) || cameras.find(c => String(c.id) === idKey) || null;
@@ -12377,7 +12472,11 @@ function dashboardCardHtml(cam, idx) {
     <div class="dash-meta">
       <div class="dash-title" title="${title}">${title}</div>
       ${dashboardDirectionBadge(cam)}
-      <div class="dash-sub">${escapeHtml(dir)}</div><div class="dash-feed-age" id="dash-updated-${dashDomId(cam.id)}">${escapeHtml(refreshText)}</div>
+      <div class="dash-sub">${escapeHtml(dir)}</div>
+      <div class="dash-feed-row" id="dash-feed-row-${dashDomId(cam.id)}">
+        <span class="dash-feed-age" id="dash-updated-${dashDomId(cam.id)}">${escapeHtml(refreshText)}</span>
+        ${dashboardSourceLinkHtml(cam)}
+      </div>
     </div>
     <div class="dash-resize" data-action="resize"></div>
   </article>`;
@@ -12771,6 +12870,8 @@ async function mountDashboardFeed(cam, idx, options = {}) {
   let { imageUrl, videoUrl } = resolved;
   imageUrl = normaliseFeedUrl(imageUrl) || null;
   videoUrl = normaliseFeedUrl(videoUrl) || null;
+
+  updateDashboardSourceLink(idKey, currentCam, imageUrl, videoUrl);
 
   // MJPEG/still-image URLs sometimes land in video_url. Render them as <img>.
   if (videoUrl && ['image', 'mjpeg'].includes(pipFeedKind(videoUrl))) {
