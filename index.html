@@ -10119,7 +10119,8 @@ function populateSidePanel(cam) {
       btn.onclick     = () => {
         viewList.querySelectorAll('.viewBtn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        setFeed(v.imageUrl || null, v.videoUrl || null);
+        const viewFeed = getCameraFeed(v);
+        setFeed(viewFeed.imageUrl || null, viewFeed.videoUrl || null, { candidates: viewFeed.candidates || [] });
         removeFrustum();
         const viewBearing = parseNullableNumber(v.bearing);
         if (frustumsEnabled && viewBearing !== null) {
@@ -10134,7 +10135,7 @@ function populateSidePanel(cam) {
   rows.innerHTML = '';
 
   const primaryFeed = getCameraFeed(cam);
-  const feedUrl = primaryFeed.imageUrl || primaryFeed.videoUrl || null;
+  const feedUrl = primaryFeed.imageDirectUrl || primaryFeed.videoDirectUrl || primaryFeed.imageUrl || primaryFeed.videoUrl || null;
 
   const fields = [
     ['Coords',   `${cam.lat.toFixed(5)}, ${cam.lng.toFixed(5)}`, 'accent'],
@@ -10179,7 +10180,7 @@ function populateSidePanel(cam) {
   }
 
   // Prefer video feed when available, fall back to image, including feeds stored only in views[].
-  setFeed(primaryFeed.imageUrl || null, primaryFeed.videoUrl || null);
+  setFeed(primaryFeed.imageUrl || null, primaryFeed.videoUrl || null, { candidates: primaryFeed.candidates || [] });
 
   // If the clicked marker came from a bbox/search summary that did not contain
   // image_url/views yet, do a one-shot authoritative detail lookup and refresh
@@ -10357,7 +10358,7 @@ function setPipImageSource(img, url, { refreshStill = false, onLoad = null, onEr
   };
   img.onerror = () => {
     if (typeof onError === 'function') onError();
-    else setPipFeedFailed('Feed unavailable');
+    else if (!tryNextPipCandidate(clean)) setPipFeedFailed('Feed unavailable');
   };
   if (kind === 'mjpeg') {
     img.src = clean;
@@ -10374,27 +10375,56 @@ function setImage(url) {
   setFeed(url || null, null);
 }
 
-function setFeed(imageUrl, videoUrl) {
-  currentImageUrl = normaliseFeedUrl(imageUrl) || null;
-  currentVideoUrl = normaliseFeedUrl(videoUrl) || null;
+function setFeed(imageUrl, videoUrl, options = {}) {
+  const candidates = Array.isArray(options?.candidates) && options.candidates.length
+    ? options.candidates
+    : dedupeFeedCandidates(sortFeedCandidates([
+        createFeedCandidate(videoUrl || null, null, options?.videoDelivery || options?.delivery || {}, { priority: 10, source: 'setFeed-video' }),
+        createFeedCandidate(imageUrl || null, 'image', options?.imageDelivery || options?.delivery || {}, { priority: 20, source: 'setFeed-image' })
+      ].filter(Boolean)));
+  currentFeedCandidates = candidates;
+  currentFeedCandidateIndex = 0;
 
-  // Some providers store MJPEG/still-image URLs in video_url. Route those to the
-  // image renderer because MJPEG is <img>, not <video>.
+  const firstVideo = candidates.find(candidatePrefersVideo) || null;
+  const firstImage = candidates.find(c => ['image', 'mjpeg'].includes(c.kind)) || null;
+  currentImageUrl = firstImage?.displayUrl || null;
+  currentVideoUrl = firstVideo?.displayUrl || null;
+
   if (!currentImageUrl && currentVideoUrl && ['image', 'mjpeg'].includes(pipFeedKind(currentVideoUrl))) {
     currentImageUrl = currentVideoUrl;
     currentVideoUrl = null;
   }
 
-  // Prefer actual playable video/HLS/YouTube when available, otherwise image/MJPEG.
   currentFeedType = currentVideoUrl ? 'video' : (currentImageUrl ? 'image' : null);
   updatePipFeed();
-  // Show toggle button only when both feeds exist
   const toggleBtn = document.getElementById('pip-toggle-feed');
   if (toggleBtn) {
     const hasBoth = !!(currentImageUrl && currentVideoUrl);
     toggleBtn.style.display = hasBoth ? 'flex' : 'none';
     if (hasBoth) updateToggleLabel();
   }
+}
+
+function tryNextPipCandidate(failedUrl = null) {
+  if (!Array.isArray(currentFeedCandidates) || !currentFeedCandidates.length) return false;
+  const failedClean = normaliseFeedUrl(failedUrl || currentVideoUrl || currentImageUrl || null);
+  let idx = currentFeedCandidates.findIndex(c => c && (c.displayUrl === failedClean || c.canonicalUrl === failedClean));
+  if (idx < 0) idx = currentFeedCandidateIndex;
+  for (let next = idx + 1; next < currentFeedCandidates.length; next++) {
+    const candidate = currentFeedCandidates[next];
+    if (!candidate?.displayUrl) continue;
+    currentFeedCandidateIndex = next;
+    currentImageUrl = ['image', 'mjpeg'].includes(candidate.kind) ? candidate.displayUrl : null;
+    currentVideoUrl = candidatePrefersVideo(candidate) ? candidate.displayUrl : null;
+    if (!currentImageUrl && currentVideoUrl && ['image', 'mjpeg'].includes(pipFeedKind(currentVideoUrl))) {
+      currentImageUrl = currentVideoUrl;
+      currentVideoUrl = null;
+    }
+    currentFeedType = currentVideoUrl ? 'video' : (currentImageUrl ? 'image' : null);
+    updatePipFeed();
+    return true;
+  }
+  return false;
 }
 
 function toggleFeedType() {
@@ -11482,17 +11512,122 @@ function cameraTitle(cam) {
   return title;
 }
 
-function getCameraFeed(cam) {
-  // Dashboard cards can be built from lightweight bbox/search summaries.
-  // Prefer promoted camera-level URLs, but scan every view before giving up.
-  const views = Array.isArray(cam?.views) ? cam.views.filter(Boolean) : [];
-  const imageView = views.find(v => v && v.imageUrl);
-  const videoView = views.find(v => v && v.videoUrl);
-  const ytId = cam?.youtubeVideoId || cam?.youtube_video_id || cam?.metadata?.youtube_video_id || cam?.metadata?.youtubeVideoId || null;
-  const youtubeUrl = ytId ? `https://www.youtube.com/embed/${encodeURIComponent(String(ytId))}` : null;
+const VIEWPORT_RELAY_BASES = window.VIEWPORT_RELAY_BASES || {};
+
+function normaliseDeliveryPolicy(raw = {}, kind = null) {
+  const mode = String(raw?.mode || raw?.display_mode || raw?.delivery_mode || 'direct').toLowerCase();
+  const region = raw?.region || raw?.relay_region || raw?.proxy_region || null;
+  const profile = raw?.profile || raw?.relay_profile || raw?.proxy_profile || null;
+  const reason = raw?.reason || raw?.relay_reason || raw?.proxy_reason || null;
+  return { mode: mode === 'relay' ? 'relay' : 'direct', region, profile, reason, kind: raw?.kind || raw?.relay_kind || kind || null };
+}
+
+function relayDisplayUrl(url, delivery = {}, kind = null) {
+  const clean = normaliseFeedUrl(url);
+  if (!clean) return null;
+  const policy = normaliseDeliveryPolicy(delivery, kind);
+  if (policy.mode !== 'relay' || !policy.region) return clean;
+  const base = VIEWPORT_RELAY_BASES[policy.region] || VIEWPORT_RELAY_BASES[String(policy.region).toLowerCase()] || null;
+  if (!base) return clean;
+  const endpoint = kind === 'hls' ? 'hls' : ((kind === 'image' || kind === 'mjpeg') ? 'image' : 'stream');
+  const params = new URLSearchParams({ u: clean });
+  if (policy.profile) params.set('profile', policy.profile);
+  if (policy.reason) params.set('reason', policy.reason);
+  return `${String(base).replace(/\/$/, '')}/${endpoint}?${params.toString()}`;
+}
+
+function createFeedCandidate(url, kindHint = null, delivery = {}, meta = {}) {
+  const canonicalUrl = normaliseFeedUrl(url);
+  if (!canonicalUrl) return null;
+  const inferredKind = kindHint || pipFeedKind(canonicalUrl) || 'image';
+  const policy = normaliseDeliveryPolicy(delivery, inferredKind);
   return {
-    imageUrl: cam?.imageUrl || imageView?.imageUrl || null,
-    videoUrl: cam?.videoUrl || videoView?.videoUrl || youtubeUrl || null,
+    kind: inferredKind,
+    canonicalUrl,
+    displayUrl: relayDisplayUrl(canonicalUrl, policy, inferredKind),
+    delivery: policy,
+    priority: Number(meta?.priority ?? 999),
+    label: meta?.label || null,
+    source: meta?.source || null,
+    meta: meta || {}
+  };
+}
+
+function candidatePrefersVideo(candidate) {
+  return ['hls', 'video', 'youtube'].includes(candidate?.kind);
+}
+
+function sortFeedCandidates(candidates = []) {
+  return [...candidates].sort((a, b) => {
+    const pa = Number.isFinite(Number(a?.priority)) ? Number(a.priority) : 999;
+    const pb = Number.isFinite(Number(b?.priority)) ? Number(b.priority) : 999;
+    if (pa !== pb) return pa - pb;
+    const av = candidatePrefersVideo(a) ? 0 : 1;
+    const bv = candidatePrefersVideo(b) ? 0 : 1;
+    return av - bv;
+  });
+}
+
+function dedupeFeedCandidates(candidates = []) {
+  const out = [];
+  const seen = new Set();
+  candidates.forEach(candidate => {
+    if (!candidate?.canonicalUrl) return;
+    const key = `${candidate.kind}|${candidate.canonicalUrl}|${candidate.delivery?.mode || 'direct'}|${candidate.delivery?.region || ''}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(candidate);
+  });
+  return out;
+}
+
+function buildFeedCandidates(entity) {
+  const candidates = [];
+  if (!entity) return candidates;
+  const feeds = Array.isArray(entity.feeds) ? entity.feeds : [];
+  feeds.forEach((feed, idx) => {
+    if (!feed) return;
+    const rawUrl = feed.url || feed.displayUrl || feed.imageUrl || feed.videoUrl || null;
+    const candidate = createFeedCandidate(rawUrl, feed.kind || null, feed.delivery || feed, { priority: feed.priority ?? idx + 1, label: feed.label, source: 'feeds' });
+    if (candidate) candidates.push(candidate);
+  });
+
+  const imageDelivery = entity.imageDelivery || entity.image_delivery || entity.metadata?.image_delivery || entity.metadata?.delivery?.image || entity.metadata?.delivery || {};
+  const videoDelivery = entity.videoDelivery || entity.video_delivery || entity.metadata?.video_delivery || entity.metadata?.delivery?.video || entity.metadata?.delivery || {};
+  const imageCandidate = createFeedCandidate(entity.imageUrl || entity.image_url || null, 'image', imageDelivery, { priority: 20, source: 'imageUrl' });
+  const videoCandidate = createFeedCandidate(entity.videoUrl || entity.video_url || null, null, videoDelivery, { priority: 10, source: 'videoUrl' });
+  if (videoCandidate) candidates.push(videoCandidate);
+  if (imageCandidate) candidates.push(imageCandidate);
+
+  const ytId = entity.youtubeVideoId || entity.youtube_video_id || entity.metadata?.youtube_video_id || entity.metadata?.youtubeVideoId || null;
+  if (ytId) {
+    const yt = createFeedCandidate(`https://www.youtube.com/embed/${encodeURIComponent(String(ytId))}`, 'youtube', {}, { priority: 15, source: 'youtube' });
+    if (yt) candidates.push(yt);
+  }
+
+  const views = Array.isArray(entity.views) ? entity.views.filter(Boolean) : [];
+  views.forEach((view, idx) => {
+    const vd = view.delivery || view.videoDelivery || view.video_delivery || {};
+    const idel = view.delivery || view.imageDelivery || view.image_delivery || {};
+    const vc = createFeedCandidate(view.videoUrl || view.video_url || null, null, vd, { priority: 30 + idx * 2, label: view.angleName || view.label || null, source: 'view-video' });
+    const ic = createFeedCandidate(view.imageUrl || view.image_url || null, 'image', idel, { priority: 31 + idx * 2, label: view.angleName || view.label || null, source: 'view-image' });
+    if (vc) candidates.push(vc);
+    if (ic) candidates.push(ic);
+  });
+
+  return dedupeFeedCandidates(sortFeedCandidates(candidates));
+}
+
+function getCameraFeed(cam) {
+  const candidates = buildFeedCandidates(cam);
+  const preferredVideo = candidates.find(candidatePrefersVideo) || null;
+  const preferredImage = candidates.find(c => ['image', 'mjpeg'].includes(c.kind)) || null;
+  return {
+    imageUrl: preferredImage?.displayUrl || null,
+    videoUrl: preferredVideo?.displayUrl || null,
+    imageDirectUrl: preferredImage?.canonicalUrl || null,
+    videoDirectUrl: preferredVideo?.canonicalUrl || null,
+    candidates
   };
 }
 
@@ -11532,13 +11667,13 @@ function dashboardSourceLinkHtml(cam) {
   </a>`;
 }
 
-function updateDashboardSourceLink(id, cam, imageUrl = null, videoUrl = null) {
+function updateDashboardSourceLink(id, cam, imageUrl = null, videoUrl = null, candidates = null) {
   const idKey = String(id ?? cam?.id ?? '');
   if (!idKey) return;
   const row = document.getElementById(`dash-feed-row-${dashDomId(idKey)}`);
   if (!row) return;
   const existing = row.querySelector('.dash-source-link');
-  const directUrl = dashboardDirectFeedUrlFromFeed(imageUrl, videoUrl) || dashboardDirectFeedUrl(cam);
+  const directUrl = (Array.isArray(candidates) ? (candidates.find(candidatePrefersVideo)?.canonicalUrl || candidates.find(c => ['image','mjpeg'].includes(c.kind))?.canonicalUrl || null) : null) || dashboardDirectFeedUrlFromFeed(imageUrl, videoUrl) || dashboardDirectFeedUrl(cam);
   if (!directUrl) {
     if (existing) existing.remove();
     return;
@@ -11557,12 +11692,12 @@ function dashboardCameraById(id) {
 }
 
 async function resolveDashboardCameraFeed(cam, { forceHydrate = false } = {}) {
-  if (!cam || !cam.id) return { cam, imageUrl: null, videoUrl: null, hydrated: false };
+  if (!cam || !cam.id) return { cam, imageUrl: null, videoUrl: null, candidates: [], hydrated: false };
 
   const idKey = String(cam.id);
   let current = dashboardCameraById(idKey) || cam;
   let feed = getCameraFeed(current);
-  if ((feed.imageUrl || feed.videoUrl) && !forceHydrate) {
+  if ((feed.imageUrl || feed.videoUrl || (feed.candidates && feed.candidates.length)) && !forceHydrate) {
     return { cam: current, ...feed, hydrated: false };
   }
 
@@ -12848,6 +12983,91 @@ function renderDashboardFeedState(id) {
 }
 
 
+
+function dashboardDisplayFeedFromCandidate(candidate) {
+  if (!candidate) return { imageUrl: null, videoUrl: null };
+  if (candidatePrefersVideo(candidate)) return { imageUrl: null, videoUrl: candidate.displayUrl || null };
+  return { imageUrl: candidate.displayUrl || null, videoUrl: null };
+}
+
+function dashboardCanonicalFeedFromCandidate(candidate) {
+  if (!candidate) return { imageUrl: null, videoUrl: null };
+  if (candidatePrefersVideo(candidate)) return { imageUrl: null, videoUrl: candidate.canonicalUrl || null };
+  return { imageUrl: candidate.canonicalUrl || null, videoUrl: null };
+}
+
+async function mountDashboardFeedCandidate(cam, candidate, idx, requestToken) {
+  const idKey = String(cam?.id ?? '');
+  const media = document.getElementById(`dash-media-${dashDomId(idKey)}`);
+  if (!media || !idKey || !candidate) return false;
+  const { imageUrl, videoUrl } = dashboardDisplayFeedFromCandidate(candidate);
+  const canonical = dashboardCanonicalFeedFromCandidate(candidate);
+  updateDashboardSourceLink(idKey, cam, canonical.imageUrl, canonical.videoUrl, [candidate]);
+
+  if (videoUrl && ['image', 'mjpeg'].includes(pipFeedKind(videoUrl))) {
+    return mountDashboardFeedCandidate(cam, { ...candidate, kind: 'image', displayUrl: videoUrl, canonicalUrl: candidate.canonicalUrl || videoUrl }, idx, requestToken);
+  }
+
+  if (videoUrl) {
+    if (dashboardHls.has(idKey)) { try { dashboardHls.get(idKey).destroy(); } catch (_) {} dashboardHls.delete(idKey); }
+    media.innerHTML = '';
+    media.style.position = media.style.position || 'relative';
+    let previewImg = null;
+    const previewCandidate = cam.__dashboardImageFallback || null;
+    if (previewCandidate?.displayUrl) {
+      previewImg = document.createElement('img');
+      previewImg.alt = cameraTitle(cam);
+      previewImg.loading = 'eager';
+      previewImg.draggable = false;
+      previewImg.style.position = 'absolute';
+      previewImg.style.inset = '0';
+      previewImg.style.width = '100%';
+      previewImg.style.height = '100%';
+      previewImg.style.objectFit = 'cover';
+      previewImg.style.zIndex = '1';
+      const imgKind = pipFeedKind(previewCandidate.displayUrl);
+      const sep = previewCandidate.displayUrl.includes('?') ? '&' : '?';
+      previewImg.src = imgKind === 'mjpeg' ? previewCandidate.displayUrl : previewCandidate.displayUrl + sep + '_dash_preview=' + Date.now();
+      previewImg.onload = () => { if (media.dataset.feedRequest === requestToken) { applyDashboardMediaAspect(idKey, previewImg); markDashboardRefresh(idKey, true); } };
+      media.appendChild(previewImg);
+    }
+    const video = document.createElement('video');
+    video.autoplay = true; video.muted = true; video.playsInline = true; video.controls = false;
+    video.style.position = previewImg ? 'absolute' : '';
+    video.style.inset = previewImg ? '0' : '';
+    video.style.width = '100%'; video.style.height = '100%'; video.style.objectFit = 'cover';
+    video.style.zIndex = previewImg ? '2' : ''; video.style.opacity = previewImg ? '0' : '1';
+    media.appendChild(video); ensureDashboardFeedChrome(media, idKey);
+    const reveal = () => {
+      if (media.dataset.feedRequest !== requestToken) return;
+      if (previewImg && previewImg.parentNode) previewImg.remove();
+      video.style.opacity = '1'; video.style.position=''; video.style.inset=''; video.style.zIndex='';
+      setTimeout(() => applyDashboardMediaAspect(idKey, video), 120); markDashboardRefresh(idKey, true);
+    };
+    const fail = () => mountDashboardFeed(cam, idx, { candidateStartIndex: (cam.__dashboardCandidateIndex || 0) + 1, preserveRequestToken: requestToken, resolved: cam.__dashboardResolved });
+    if (pipFeedKind(videoUrl) === 'hls' && typeof Hls !== 'undefined' && Hls.isSupported()) {
+      const hls = new Hls({ enableWorker:true, lowLatencyMode:true, liveSyncDuration:3, liveMaxLatencyDuration:12, backBufferLength:30 });
+      hls.loadSource(videoUrl); hls.attachMedia(video); dashboardHls.set(idKey, hls);
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (!data || !data.fatal) return;
+        try { if (data.type === Hls.ErrorTypes.NETWORK_ERROR) { hls.startLoad(); return; } if (data.type === Hls.ErrorTypes.MEDIA_ERROR) { hls.recoverMediaError(); return; } } catch (_) {}
+        fail();
+      });
+      hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+      video.onloadeddata = reveal; video.oncanplay = reveal; video.onplaying = reveal;
+    } else {
+      video.src = videoUrl; video.onloadeddata = reveal; video.oncanplay = reveal; video.onplaying = reveal;
+      video.onerror = fail; video.play().catch(() => {});
+    }
+    return true;
+  }
+  if (imageUrl) {
+    renderDashboardImageFeed(cam, imageUrl, idx, false, candidate, requestToken);
+    return true;
+  }
+  return false;
+}
+
 async function mountDashboardFeed(cam, idx, options = {}) {
   const idKey = String(cam?.id ?? '');
   const media = document.getElementById(`dash-media-${dashDomId(idKey)}`);
@@ -12863,17 +13083,30 @@ async function mountDashboardFeed(cam, idx, options = {}) {
     message: ''
   });
 
-  let resolved = await resolveDashboardCameraFeed(cam, { forceHydrate: !!options.forceHydrate });
+  let resolved = options.resolved || await resolveDashboardCameraFeed(cam, { forceHydrate: !!options.forceHydrate });
   if (!resolved || media.dataset.feedRequest !== requestToken) return;
 
   const currentCam = resolved.cam || cam;
-  let { imageUrl, videoUrl } = resolved;
-  imageUrl = normaliseFeedUrl(imageUrl) || null;
-  videoUrl = normaliseFeedUrl(videoUrl) || null;
+  const candidates = Array.isArray(resolved.candidates) && resolved.candidates.length
+    ? resolved.candidates
+    : dedupeFeedCandidates(sortFeedCandidates([
+        createFeedCandidate(resolved.videoUrl || null, null, {}, { priority: 10 }),
+        createFeedCandidate(resolved.imageUrl || null, 'image', {}, { priority: 20 })
+      ].filter(Boolean)));
+  const candidateStartIndex = Math.max(0, Number(options.candidateStartIndex || 0));
+  currentCam.__dashboardResolved = resolved;
+  currentCam.__dashboardCandidateIndex = candidateStartIndex;
+  currentCam.__dashboardImageFallback = candidates.find(c => ['image','mjpeg'].includes(c.kind)) || null;
 
-  updateDashboardSourceLink(idKey, currentCam, imageUrl, videoUrl);
+  if (candidates[candidateStartIndex]) {
+    const mounted = await mountDashboardFeedCandidate(currentCam, candidates[candidateStartIndex], idx, requestToken);
+    if (mounted) return;
+  }
 
-  // MJPEG/still-image URLs sometimes land in video_url. Render them as <img>.
+  let imageUrl = normaliseFeedUrl(resolved.imageUrl) || null;
+  let videoUrl = normaliseFeedUrl(resolved.videoUrl) || null;
+  updateDashboardSourceLink(idKey, currentCam, imageUrl, videoUrl, candidates);
+
   if (videoUrl && ['image', 'mjpeg'].includes(pipFeedKind(videoUrl))) {
     if (!imageUrl) imageUrl = videoUrl;
     videoUrl = null;
@@ -12982,7 +13215,7 @@ async function mountDashboardFeed(cam, idx, options = {}) {
   }
 }
 
-function renderDashboardImageFeed(cam, imageUrl, idx, manual=false) {
+function renderDashboardImageFeed(cam, imageUrl, idx, manual=false, candidate=null, requestTokenOverride=null) {
   const idKey = String(cam?.id ?? '');
   const media = document.getElementById(`dash-media-${dashDomId(idKey)}`);
   if (!media || !idKey) return;
@@ -13005,6 +13238,7 @@ function renderDashboardImageFeed(cam, imageUrl, idx, manual=false) {
   img.style.position = hasVisibleSuccess ? 'absolute' : '';
   img.style.inset = hasVisibleSuccess ? '0' : '';
   const isMjpegFeed = pipFeedKind(imageUrl) === 'mjpeg';
+  if (requestTokenOverride) media.dataset.feedRequest = requestTokenOverride;
   img.onload = () => {
     if (media.dataset.feedImageRequest !== img.dataset.feedImageRequest) return;
     media.querySelectorAll('img, video').forEach(el => { if (el !== img) el.remove(); });
@@ -13019,6 +13253,11 @@ function renderDashboardImageFeed(cam, imageUrl, idx, manual=false) {
   img.onerror = () => {
     if (media.dataset.feedImageRequest !== img.dataset.feedImageRequest) return;
     if (img.parentNode) img.remove();
+    const nextIndex = Number(cam?.__dashboardCandidateIndex || 0) + 1;
+    if (Array.isArray(cam?.__dashboardResolved?.candidates) && cam.__dashboardResolved.candidates[nextIndex]) {
+      mountDashboardFeed(cam, idx, { candidateStartIndex: nextIndex, preserveRequestToken: media.dataset.feedRequest, resolved: cam.__dashboardResolved });
+      return;
+    }
     markDashboardRefresh(idKey, false);
     scheduleDashboardImageRefresh(cam, idx, true);
   };
@@ -13055,7 +13294,8 @@ function scheduleDashboardImageRefresh(cam, idx, errored=false) {
   dashboardRefreshTimers.set(idKey, setTimeout(async () => {
     const current = dashboardCameraById(idKey) || cam;
     const resolved = await resolveDashboardCameraFeed(current);
-    if (resolved.imageUrl) renderDashboardImageFeed(resolved.cam || current, resolved.imageUrl, visibleIdx);
+    if (resolved.candidates && resolved.candidates.length) mountDashboardFeed(resolved.cam || current, visibleIdx, { resolved });
+    else if (resolved.imageUrl) renderDashboardImageFeed(resolved.cam || current, resolved.imageUrl, visibleIdx);
     else if (resolved.videoUrl) mountDashboardFeed(resolved.cam || current, visibleIdx);
     else markDashboardRefresh(idKey, false, true);
   }, delay));
@@ -13120,8 +13360,8 @@ function refreshDashboardAll() {
 }
 
 async function openDashboardFeed(cam) {
-  const { imageUrl, videoUrl } = await resolveDashboardCameraFeed(cam, { forceHydrate: true });
-  const url = videoUrl || imageUrl;
+  const { imageUrl, videoUrl, candidates = [] } = await resolveDashboardCameraFeed(cam, { forceHydrate: true });
+  const url = candidates.find(candidatePrefersVideo)?.canonicalUrl || candidates.find(c => ['image','mjpeg'].includes(c.kind))?.canonicalUrl || videoUrl || imageUrl;
   if (!url) return;
   window.open(url, '_blank', 'noopener');
 }
